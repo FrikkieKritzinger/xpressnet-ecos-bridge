@@ -8,8 +8,9 @@
 #ifndef OLED_DISPLAY_H
 #define OLED_DISPLAY_H
 
-#include "../interfaces/interface_base.h"
-#include "../definitions.h"
+#include <cstdint>
+#include "../../interfaces/interface_base.h"
+#include "../../definitions.h"
 
 class OledDisplay : public DisplayInterface {
 public:

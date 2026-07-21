@@ -8,7 +8,8 @@
 #ifndef XPRESSNET_INTERFACE_H
 #define XPRESSNET_INTERFACE_H
 
-#include "../interfaces/interface_base.h"
+#include <cstdint>
+#include "../../interfaces/interface_base.h"
 
 class XpressNetInterface : public ProtocolInterface {
 public:

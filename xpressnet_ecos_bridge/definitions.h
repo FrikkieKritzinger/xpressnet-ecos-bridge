@@ -8,6 +8,9 @@
 #ifndef DEFINITIONS_H
 #define DEFINITIONS_H
 
+#include <cstdint>
+#include <cstring>
+#include <Arduino.h>
 #include "config.h"
 
 // ============================================================================
@@ -112,7 +115,7 @@ struct SystemStatus {
     
     // Diagnostic
     uint32_t total_commands;        // Lifetime command count
-    uint16_t current_heap_bytes;    // Available heap
+    uint32_t current_heap_bytes;    // Available heap (changed to uint32_t for larger values)
 };
 
 // ============================================================================

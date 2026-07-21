@@ -11,6 +11,8 @@
  * Tracks system status for display
  */
 
+#include <cstdint>
+#include <Arduino.h>
 #include "command_router.h"
 #include "utils/debug.h"
 #include "utils/timing.h"
