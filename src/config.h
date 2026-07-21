@@ -56,8 +56,8 @@
     
     // WiFi configuration (if not already configured)
     // Note: Could also be loaded from EEPROM, but for now hardcoded
-    #define WIFI_SSID               "YourWiFiNetwork"
-    #define WIFI_PASSWORD           "YourPassword"
+    #define WIFI_SSID               "HOMER"
+    #define WIFI_PASSWORD           "REDACTED-WIFI-PASSWORD"
     
     // Timeouts
     #define ECOS_TIMEOUT            5000            // TCP connection timeout (ms)
