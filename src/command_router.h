@@ -1,1 +1,146 @@
+/*
+ * Command Router - Bridge Commands Between Protocols
+ * 
+ * Routes commands from one protocol to another:
+ * - XpressNet command → Ecos LAN
+ * - Ecos update → XpressNet devices
+ * - LocoNet → Others (future)
+ * 
+ * Implements echo prevention to avoid loops:
+ * - When Ecos sends update back after we sent command
+ * - 500ms window to detect echoes
+ * 
+ * No persistence - relies on StateEngine for state storage
+ */
 
+#ifndef COMMAND_ROUTER_H
+#define COMMAND_ROUTER_H
+
+#include "config.h"
+#include "definitions.h"
+#include "state_engine.h"
+
+// Forward declarations
+#if ENABLE_XPRESSNET
+    class XpressNetInterface;
+#endif
+
+#if ENABLE_ECOS_LAN
+    class EcosInterface;
+#endif
+
+class CommandRouter {
+public:
+    /**
+     * Initialize router with references to protocols
+     * These are set after protocol interfaces are created
+     */
+    CommandRouter();
+    
+    /**
+     * Set reference to XpressNet interface (called after creation)
+     */
+    #if ENABLE_XPRESSNET
+    void setXpressNetInterface(XpressNetInterface* xnet);
+    #endif
+    
+    /**
+     * Set reference to Ecos interface (called after creation)
+     */
+    #if ENABLE_ECOS_LAN
+    void setEcosInterface(class EcosInterface* ecos);  // Forward declare
+    #endif
+    
+    /**
+     * Handle incoming command from XpressNet
+     * 1. Update state engine
+     * 2. Check echo prevention
+     * 3. Broadcast to other protocols
+     */
+    void handleXpressNetCommand(uint16_t address, uint8_t speed, uint8_t direction);
+    
+    /**
+     * Handle incoming function command from XpressNet
+     */
+    void handleXpressNetFunctionCommand(uint16_t address, uint32_t functions);
+    
+    /**
+     * Handle incoming command from Ecos
+     * 1. Update state engine
+     * 2. Check echo prevention
+     * 3. Broadcast to other protocols
+     */
+    void handleEcosCommand(uint16_t address, uint8_t speed, uint8_t direction);
+    
+    /**
+     * Handle incoming function command from Ecos
+     */
+    void handleEcosFunctionCommand(uint16_t address, uint32_t functions);
+    
+    /**
+     * Periodic housekeeping
+     * - Check for inactive locos
+     * - Send heartbeats
+     * Called from main loop every ~30 seconds
+     */
+    void update();
+    
+    /**
+     * Get system status for display
+     */
+    SystemStatus getSystemStatus() const;
+    
+    /**
+     * Get reference to state engine (for direct query if needed)
+     */
+    StateEngine& getStateEngine() { return state_engine; }
+    const StateEngine& getStateEngine() const { return state_engine; }
+
+private:
+    StateEngine state_engine;
+    
+    // Interface references (initialized in setters)
+    #if ENABLE_XPRESSNET
+    XpressNetInterface* xpressnet = nullptr;
+    #endif
+    
+    #if ENABLE_ECOS_LAN
+    class EcosInterface* ecos = nullptr;
+    #endif
+    
+    // Echo prevention state
+    struct EchoPreventionState {
+        uint16_t last_loco_address;
+        uint8_t last_command_type;      // SPEED, FUNCTION, etc.
+        unsigned long last_timestamp_ms;
+        LocoSource last_source;         // Which protocol sent it
+    };
+    
+    EchoPreventionState echo_state = {0, 0, 0, LocoSource::UNKNOWN};
+    
+    // Periodic task tracking
+    unsigned long last_expiry_check = 0;
+    unsigned long last_status_update = 0;
+    
+    // Helper methods
+    /**
+     * Check if incoming command is an echo of our recent outgoing command
+     * @param address Locomotive address
+     * @param source Which protocol this came from
+     * @return true if echo (suppress), false if new command (process)
+     */
+    bool isEchoCommand(uint16_t address, LocoSource source) const;
+    
+    /**
+     * Broadcast command to all active protocols except source
+     */
+    void broadcastCommand(uint16_t address, const LocoState& state, LocoSource source);
+    
+    /**
+     * Attempt to subscribe to unknown locomotive on Ecos
+     * When XpressNet sends command for unknown loco, request Ecos to start sending updates
+     */
+    void requestEcosSubscription(uint16_t address);
+};
+
+#endif  // COMMAND_ROUTER_H
