@@ -9,8 +9,8 @@
 #define OLED_DISPLAY_H
 
 #include <cstdint>
-#include "../../interfaces/interface_base.h"
-#include "../../definitions.h"
+#include "../interfaces/interface_base.h"
+#include "../definitions.h"
 
 class OledDisplay : public DisplayInterface {
 public:
