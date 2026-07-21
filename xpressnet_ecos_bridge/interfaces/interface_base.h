@@ -13,8 +13,8 @@
 
 #include <cstdint>
 #include <Arduino.h>
-#include "../../config.h"
-#include "../../definitions.h"
+#include "../config.h"
+#include "../definitions.h"
 
 // ============================================================================
 // PROTOCOL INTERFACE BASE CLASS
