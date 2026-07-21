@@ -11,8 +11,10 @@
 #ifndef INTERFACE_BASE_H
 #define INTERFACE_BASE_H
 
-#include "../config.h"
-#include "../definitions.h"
+#include <cstdint>
+#include <Arduino.h>
+#include "../../config.h"
+#include "../../definitions.h"
 
 // ============================================================================
 // PROTOCOL INTERFACE BASE CLASS
@@ -131,61 +133,7 @@ public:
     }
 };
 
-// ============================================================================
-// TIMING UTILITY BASE CLASS
-// ============================================================================
-
-/**
- * TimedTask - Helper for periodic non-blocking execution
- * 
- * Usage:
- *   TimedTask task(500);  // Every 500ms
- *   if (task.shouldExecute()) {
- *       doSomething();
- *   }
- * 
- * Simpler than millis() comparisons scattered everywhere
- */
-class TimedTask {
-public:
-    /**
-     * Create a task that triggers every interval_ms
-     * @param interval_ms How often to trigger (milliseconds)
-     */
-    explicit TimedTask(unsigned long interval_ms)
-        : last_execute(0), interval(interval_ms) {}
-    
-    /**
-     * Check if it's time to execute
-     * @return true if interval has passed since last call
-     */
-    bool shouldExecute() {
-        unsigned long now = millis();
-        if (now - last_execute >= interval) {
-            last_execute = now;
-            return true;
-        }
-        return false;
-    }
-    
-    /**
-     * Reset the timer to current time
-     */
-    void reset() {
-        last_execute = millis();
-    }
-    
-    /**
-     * Change the interval
-     * @param new_interval New interval in milliseconds
-     */
-    void setInterval(unsigned long new_interval) {
-        interval = new_interval;
-    }
-
-private:
-    unsigned long last_execute;  // Last execution timestamp
-    unsigned long interval;      // Target interval (ms)
-};
+// Note: TimedTask is defined in utils/timing.h - use that instead
+// TimedTask should NOT be defined here to avoid duplication
 
 #endif  // INTERFACE_BASE_H

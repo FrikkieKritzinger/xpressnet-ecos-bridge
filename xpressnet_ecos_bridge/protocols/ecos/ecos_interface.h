@@ -8,7 +8,8 @@
 #ifndef ECOS_INTERFACE_H
 #define ECOS_INTERFACE_H
 
-#include "../interfaces/interface_base.h"
+#include <cstdint>
+#include "../../interfaces/interface_base.h"
 
 class EcosInterface : public ProtocolInterface {
 public:

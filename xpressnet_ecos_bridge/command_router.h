@@ -16,6 +16,8 @@
 #ifndef COMMAND_ROUTER_H
 #define COMMAND_ROUTER_H
 
+#include <cstdint>
+#include <Arduino.h>
 #include "config.h"
 #include "definitions.h"
 #include "state_engine.h"

@@ -17,8 +17,10 @@
 #ifndef UTILS_DEBUG_H
 #define UTILS_DEBUG_H
 
+#include <cstdio>
+#include <cstdarg>
 #include <Arduino.h>
-#include "config.h"
+#include "../config.h"
 
 // ============================================================================
 // DEBUG MACROS - Main debug output (controlled by ENABLE_DEBUG)

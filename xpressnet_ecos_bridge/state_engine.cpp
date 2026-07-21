@@ -11,6 +11,9 @@
  * - Subscribed status tracking
  */
 
+#include <cstdint>
+#include <cstring>
+#include <Arduino.h>
 #include "state_engine.h"
 #include "utils/debug.h"
 #include "utils/memory.h"

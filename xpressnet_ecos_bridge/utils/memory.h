@@ -20,6 +20,7 @@
 #ifndef UTILS_MEMORY_H
 #define UTILS_MEMORY_H
 
+#include <cstdint>
 #include <Arduino.h>
 
 // ============================================================================
@@ -83,7 +84,7 @@ inline uint8_t getHeapFragmentation() {
  * @return Frequency (80 or 160 MHz typically)
  */
 inline uint32_t getCpuFreqMhz() {
-    return ESP.getCpuFreqMhz();
+    return ESP.getCpuFreqMHz();  // Note: method name has capital Z
 }
 
 /**
@@ -182,7 +183,7 @@ inline MemoryDiagnostics getMemoryDiagnostics() {
         .pressure = getMemoryPressure(),
         .sketch_size = ESP.getSketchSize(),
         .free_sketch_space = ESP.getFreeSketchSpace(),
-        .cpu_freq_mhz = (uint8_t)ESP.getCpuFreqMhz()
+        .cpu_freq_mhz = (uint8_t)ESP.getCpuFreqMHz()  // Note: capital Z
     };
 }
 

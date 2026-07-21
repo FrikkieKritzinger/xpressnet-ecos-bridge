@@ -23,6 +23,7 @@
 #ifndef UTILS_TIMING_H
 #define UTILS_TIMING_H
 
+#include <cstdint>
 #include <Arduino.h>
 
 // ============================================================================

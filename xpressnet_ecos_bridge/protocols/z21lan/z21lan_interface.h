@@ -8,7 +8,8 @@
 #ifndef Z21LAN_INTERFACE_H
 #define Z21LAN_INTERFACE_H
 
-#include "../interfaces/interface_base.h"
+#include <cstdint>
+#include "../../interfaces/interface_base.h"
 
 class Z21LanInterface : public ProtocolInterface {
 public:

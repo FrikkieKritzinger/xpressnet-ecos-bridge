@@ -8,7 +8,8 @@
 #ifndef LOCONET_INTERFACE_H
 #define LOCONET_INTERFACE_H
 
-#include "../interfaces/interface_base.h"
+#include <cstdint>
+#include "../../interfaces/interface_base.h"
 
 class LocoNetInterface : public ProtocolInterface {
 public:

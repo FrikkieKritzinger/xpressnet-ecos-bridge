@@ -15,6 +15,8 @@
 #ifndef STATE_ENGINE_H
 #define STATE_ENGINE_H
 
+#include <cstdint>
+#include <Arduino.h>
 #include "config.h"
 #include "definitions.h"
 
@@ -96,6 +98,20 @@ public:
      * @return total locos in engine
      */
     int getStats() const { return loco_count; }
+    
+    /**
+     * Debug: Print all locomotives
+     * Only compiled if ENABLE_DEBUG && DEBUG_STATE_ENGINE
+     */
+    #if ENABLE_DEBUG && DEBUG_STATE_ENGINE
+    void debugPrintAllLocos() const;
+    
+    /**
+     * Debug: Print specific locomotive details
+     * @param address DCC address to show
+     */
+    void debugPrintLoco(uint16_t address) const;
+    #endif
 
 private:
     // Internal storage
