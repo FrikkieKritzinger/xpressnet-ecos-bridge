@@ -95,6 +95,14 @@ public:
      */
     StateEngine& getStateEngine() { return state_engine; }
     const StateEngine& getStateEngine() const { return state_engine; }
+    
+    /**
+     * Debug: Print echo prevention state
+     * Only compiled if ENABLE_DEBUG
+     */
+    #if ENABLE_DEBUG
+    void debugPrintEchoState() const;
+    #endif
 
 private:
     StateEngine state_engine;
