@@ -11,8 +11,8 @@
 #ifndef INTERFACE_BASE_H
 #define INTERFACE_BASE_H
 
-#include "config.h"
-#include "definitions.h"
+#include "../config.h"
+#include "../definitions.h"
 
 // ============================================================================
 // PROTOCOL INTERFACE BASE CLASS
