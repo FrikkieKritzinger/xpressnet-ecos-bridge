@@ -1,0 +1,72 @@
+# Arduino IDE
+*.pde
+*.ino
+.DS_Store
+__pycache__
+*.pyc
+
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.exe
+*.elf
+
+# IDE files
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Dependencies
+libraries/XpressNetMaster/  # (Optional - add if using git submodule)
+node_modules/
+
+# Compiled output
+*.bin
+*.elf
+*.hex
+
+# ESP8266 specific
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+*.swp
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Linux
+.directory
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Documentation build
+docs/_build/
+site/
+
+# Configuration backups (local only, don't commit)
+src/config.local.h
+.env
+.env.local
