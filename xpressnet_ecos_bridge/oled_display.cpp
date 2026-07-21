@@ -26,9 +26,9 @@
 
 // Layout positioning (optimized for yellow/blue display)
 #define YELLOW_TITLE_Y      0     // Title in yellow
-#define YELLOW_STATUS_Y     7     // Status bar in yellow
-#define BLUE_CONTENT_Y     18     // Start of blue content (17 gives some gap)
-#define LINE_HEIGHT_SMALL   7     // Small text line height
+#define YELLOW_STATUS_Y     8     // Status bar in yellow
+#define BLUE_CONTENT_Y     17     // Start of blue content (17 gives some gap)
+#define LINE_HEIGHT_SMALL   8     // Small text line height
 #define LINE_HEIGHT_LARGE  10     // Large text line height
 
 // ============================================================================
@@ -139,7 +139,7 @@ void OledDisplay::update(const SystemStatus& status) {
 void OledDisplay::drawMainScreen() {
     // ========== YELLOW SECTION (Header) ==========
     display.setTextSize(1);
-    display.setCursor(18, YELLOW_TITLE_Y);
+    display.setCursor(20, YELLOW_TITLE_Y);
     display.println(F("XpressNet-Ecos"));
     
      // Status bar in yellow - CHANGED: Use text instead of icons
@@ -147,13 +147,12 @@ void OledDisplay::drawMainScreen() {
     display.print(F("XNet:"));
     drawStatusText(30, YELLOW_STATUS_Y, current_status.xnet_status);
     display.print(F(" Ecos:"));
-    drawStatusText(60, YELLOW_STATUS_Y, current_status.ecos_status);
+    drawStatusText(80, YELLOW_STATUS_Y, current_status.ecos_status);
     display.print(F(" L:"));
     display.print(current_status.active_locos);
     
     // ========== BLUE SECTION (Content) ==========
     
-    // Divider line
     display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
     
     // Memory info
@@ -178,7 +177,7 @@ void OledDisplay::drawMainScreen() {
     display.print(F("Fn: (TBD)"));
     
     // Footer with page indicator
-    display.setCursor(0, 56);  // Fixed position, not calculated
+    display.setCursor(0, 57);  // Fixed position, not calculated
     display.print(F("[Page 1/4]"));
 }
 
@@ -189,7 +188,7 @@ void OledDisplay::drawMainScreen() {
 void OledDisplay::drawDeviceStatusScreen() {
     // ========== YELLOW SECTION ==========
     display.setTextSize(1);
-    display.setCursor(20, YELLOW_TITLE_Y);
+    display.setCursor(30, YELLOW_TITLE_Y);
     display.println(F("DEVICE STATUS"));
     
     display.setCursor(18, YELLOW_STATUS_Y);
@@ -240,7 +239,7 @@ void OledDisplay::drawDeviceStatusScreen() {
     }
     
     // Footer
-    display.setCursor(0, 56);  // Fixed position, not calculated
+    display.setCursor(0, 57);  // Fixed position, not calculated
     display.print(F("[Page 2/4]"));
 }
 // ============================================================================
@@ -250,7 +249,7 @@ void OledDisplay::drawDeviceStatusScreen() {
 void OledDisplay::drawXpressNetScreen() {
     // ========== YELLOW SECTION ==========
     display.setTextSize(1);
-    display.setCursor(25, YELLOW_TITLE_Y);
+    display.setCursor(35, YELLOW_TITLE_Y);
     display.println(F("XPRESSNET"));
     
     display.setCursor(0, YELLOW_STATUS_Y);
@@ -284,7 +283,7 @@ void OledDisplay::drawXpressNetScreen() {
     display.print(F("Echo Prev: 0"));
     
     // Footer
-    display.setCursor(0, 56);  // Fixed position, not calculated
+    display.setCursor(0, 57);  // Fixed position, not calculated
     display.print(F("[Page 3/4]"));
 }
 
@@ -295,7 +294,7 @@ void OledDisplay::drawXpressNetScreen() {
 void OledDisplay::drawEcosScreen() {
     // ========== YELLOW SECTION ==========
     display.setTextSize(1);
-    display.setCursor(30, YELLOW_TITLE_Y);
+    display.setCursor(40, YELLOW_TITLE_Y);
     display.println(F("ECOS LAN"));
     
     display.setCursor(0, YELLOW_STATUS_Y);
@@ -331,7 +330,7 @@ void OledDisplay::drawEcosScreen() {
     display.print(F("Latency: 125ms"));
     
     // Footer
-    display.setCursor(0, 56);  // Fixed position, not calculated
+    display.setCursor(0, 57);  // Fixed position, not calculated
     display.print(F("[Page 4/4]"));
 }
 
