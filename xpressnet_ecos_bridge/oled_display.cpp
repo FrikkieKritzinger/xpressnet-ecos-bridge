@@ -1,14 +1,9 @@
 /*
  * OLED Display Driver Implementation
+ * Yellow/Blue 0.96" 128x64 SSD1306
  * 
- * SSD1306 128x64 I2C display on Wemos D1 Mini
- * 
- * Handles:
- * - 4-page information display
- * - Auto-rotation every 5 seconds
- * - Non-blocking updates
- * - Error/status popups with auto-dismiss
- * - Connection status indicators
+ * Yellow section (rows 0-15): Headers + connection status
+ * Blue section (rows 16-63): Content details
  */
 
 #include <cstdint>
@@ -19,66 +14,70 @@
 #include "definitions.h"
 #include "utils/debug.h"
 
-// Screen dimensions constant
+// ============================================================================
+// SCREEN LAYOUT CONSTANTS
+// ============================================================================
+
 #define SCREEN_WIDTH    128
 #define SCREEN_HEIGHT   64
+
+// Color split position (where yellow ends, blue begins)
+#define COLOR_SPLIT_Y   17
+
+// Layout positioning (optimized for yellow/blue display)
+#define YELLOW_TITLE_Y      0     // Title in yellow
+#define YELLOW_STATUS_Y     7     // Status bar in yellow
+#define BLUE_CONTENT_Y     20     // Start of blue content (17 gives some gap)
+#define LINE_HEIGHT_SMALL   7     // Small text line height
+#define LINE_HEIGHT_LARGE  10     // Large text line height
 
 // ============================================================================
 // CONSTRUCTOR
 // ============================================================================
 
 OledDisplay::OledDisplay()
-    : display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1),  // No reset pin
+    : display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1),
       current_page(PAGE_MAIN),
-      page_cycle_task(5000)  // 5 second auto-cycle
+      page_cycle_task(5000)
 {
-    // Initialize popup message state
     popup_message.message[0] = '\0';
     popup_message.show_time = 0;
     popup_message.is_error = false;
     popup_message.active = false;
     
-    DEBUG_PRINT("OledDisplay created (128x64 SSD1306)\n");
+    DEBUG_PRINT("OledDisplay created (128x64 SSD1306 Yellow/Blue)\n");
 }
-
 
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
 
 bool OledDisplay::begin() {
-    /*
-     * Initialize I2C and OLED display
-     * 
-     * Steps:
-     * 1. Start I2C on D1/D2 (SCL/SDA)
-     * 2. Initialize SSD1306 at address 0x3C
-     * 3. Clear display
-     * 4. Show startup message
-     * 5. Return status
-     */
-    
     DEBUG_STARTUP_PRINT("Initializing OLED display...\n");
     
-    // Start I2C
-    Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);  // D2=SDA, D1=SCL
+    Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
     
-    // Initialize display
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
         DEBUG_STARTUP_PRINTF("ERROR: OLED not found at address 0x%02X\n", OLED_ADDRESS);
         return false;
     }
     
-    // Clear and show startup
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(10, 20);
+    
+    // Title in yellow
+    display.setCursor(20, YELLOW_TITLE_Y);
     display.println(F("XpressNet-Ecos"));
-    display.setCursor(20, 30);
+    
+    // Subtitle in yellow
+    display.setCursor(35, YELLOW_STATUS_Y);
     display.println(F("Bridge"));
-    display.setCursor(15, 45);
+    
+    // Content in blue
+    display.setCursor(20, BLUE_CONTENT_Y + 10);
     display.println(F("Initializing..."));
+    
     display.display();
     
     DEBUG_STARTUP_PRINT("OLED display initialized successfully\n");
@@ -90,40 +89,22 @@ bool OledDisplay::begin() {
 // ============================================================================
 
 void OledDisplay::update(const SystemStatus& status) {
-    /*
-     * Update display with current status
-     * Called periodically (every 500ms from main loop)
-     * 
-     * Responsibilities:
-     * 1. Check if popup should clear
-     * 2. Check if page should auto-cycle
-     * 3. Draw appropriate screen based on current_page
-     * 4. Draw popup if active
-     * 5. Send to display
-     * 
-     * All non-blocking - no waits or delays
-     */
-    
-    // Cache current status for access by draw functions
     current_status = status;
     
-    // Check if error/status popup should auto-clear
     if (popup_message.active && shouldClearPopup()) {
         popup_message.active = false;
         DEBUG_TIMING_PRINT("Popup auto-cleared\n");
     }
     
-    // Check if page should auto-cycle (every 5 seconds)
     if (page_cycle_task.shouldExecute()) {
         cycleNextPage();
     }
     
-    // Clear display buffer
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     
-    // Draw appropriate page
+    // Draw page content
     switch (current_page) {
         case PAGE_MAIN:
             drawMainScreen();
@@ -148,7 +129,6 @@ void OledDisplay::update(const SystemStatus& status) {
         drawErrorPopup();
     }
     
-    // Send buffer to physical display
     display.display();
 }
 
@@ -157,54 +137,49 @@ void OledDisplay::update(const SystemStatus& status) {
 // ============================================================================
 
 void OledDisplay::drawMainScreen() {
-    /*
-     * ═ XpressNet-Ecos Bridge ═
-     * XNet:✓ Ecos:✓ WiFi:✓
-     * Locos: N  Heap: XXkB
-     * ───────────────────────
-     * Last: Loco 247
-     * Speed: 100  Dir: Fwd
-     * Fn: F0 F1 F2
-     * [Page 1/3]  ◀ ▶
-     */
-    
-    // Title
+    // ========== YELLOW SECTION (Header) ==========
     display.setTextSize(1);
-    display.setCursor(15, 0);
-    display.println(F("XpressNet-Ecos Bridge"));
+    display.setCursor(18, YELLOW_TITLE_Y);
+    display.println(F("XpressNet-Ecos"));
     
-    // Connection status row (simplified for 128px width)
-    display.setCursor(0, 10);
+     // Status bar in yellow - CHANGED: Use text instead of icons
+    display.setCursor(0, YELLOW_STATUS_Y);
     display.print(F("XNet:"));
-    drawStatusIcon(30, 10, current_status.xnet_status);
+    drawStatusText(30, YELLOW_STATUS_Y, current_status.xnet_status);
     display.print(F(" Ecos:"));
-    drawStatusIcon(65, 10, current_status.ecos_status);
-    
-    // Status line
-    display.setCursor(0, 20);
-    display.print(F("Locos:"));
+    drawStatusText(60, YELLOW_STATUS_Y, current_status.ecos_status);
+    display.print(F(" L:"));
     display.print(current_status.active_locos);
-    display.print(F(" Heap:"));
+    
+    // ========== BLUE SECTION (Content) ==========
+    
+    // Divider line
+    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
+    
+    // Memory info
+    display.setCursor(0, BLUE_CONTENT_Y);
+    display.print(F("Heap:"));
     display.print(current_status.current_heap_bytes / 1024);
-    display.print(F("KB"));
+    display.print(F("KB Mem:"));
+    uint8_t mem_percent = (current_status.current_heap_bytes * 100) / 81920;
+    display.print(mem_percent);
+    display.print(F("%"));
     
-    // Divider
-    display.drawLine(0, 28, 128, 28, SSD1306_WHITE);
-    
-    // Last locomotive info
-    display.setCursor(0, 33);
+    // Last command (placeholder for now)
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
     display.print(F("Last: Loco (TBD)"));
     
-    display.setCursor(0, 43);
-    display.print(F("Speed: (TBD)  Dir: (TBD)"));
+    // Speed and direction
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
+    display.print(F("Spd: (TBD) Dir: (TBD)"));
     
-    display.setCursor(0, 53);
+    // Functions
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
     display.print(F("Fn: (TBD)"));
     
     // Footer with page indicator
-    display.setCursor(0, 61);
-    display.setTextSize(1);
-    display.print(F("[Page 1/3]"));
+    display.setCursor(0, 56);  // Fixed position, not calculated
+    display.print(F("[Page 1/4]"));
 }
 
 // ============================================================================
@@ -212,31 +187,24 @@ void OledDisplay::drawMainScreen() {
 // ============================================================================
 
 void OledDisplay::drawDeviceStatusScreen() {
-    /*
-     * ════ DEVICE STATUS ═════
-     * Device: XNet-Ecos Bridge
-     * IP: 192.168.1.105
-     * Uptime: HH:MM:SS
-     * Heap: XXkB / 80KB
-     */
-    
-    // Title
-    display.setCursor(25, 0);
+    // ========== YELLOW SECTION ==========
     display.setTextSize(1);
+    display.setCursor(20, YELLOW_TITLE_Y);
     display.println(F("DEVICE STATUS"));
-    display.drawLine(0, 8, 128, 8, SSD1306_WHITE);
     
-    // Device name
-    display.setCursor(0, 12);
-    display.print(F("XNet-Ecos Bridge"));
+    display.setCursor(18, YELLOW_STATUS_Y);
+    display.println(F("XNet-Ecos Bridge"));
+    
+    // ========== BLUE SECTION ==========
+    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
     
     // IP address
-    display.setCursor(0, 22);
+    display.setCursor(0, BLUE_CONTENT_Y);
     display.print(F("IP: 192.168.1.105"));
     
     // Uptime
-    display.setCursor(0, 32);
-    display.print(F("Uptime: "));
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
+    display.print(F("Up: "));
     unsigned long seconds = current_status.uptime_ms / 1000;
     unsigned long hours = seconds / 3600;
     unsigned long minutes = (seconds % 3600) / 60;
@@ -251,8 +219,8 @@ void OledDisplay::drawDeviceStatusScreen() {
     if (secs < 10) display.print(F("0"));
     display.print(secs);
     
-    // Heap
-    display.setCursor(0, 42);
+    // Heap info
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
     uint32_t heap_kb = current_status.current_heap_bytes / 1024;
     uint8_t heap_percent = (current_status.current_heap_bytes * 100) / 81920;
     display.print(F("Heap: "));
@@ -261,58 +229,63 @@ void OledDisplay::drawDeviceStatusScreen() {
     display.print(heap_percent);
     display.print(F("%)"));
     
-    // Memory warning
+    // CPU and IRAM
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
+    display.print(F("CPU: 80MHz IRAM: 92%"));
+    
+    // Memory warning if critical
     if (current_status.current_heap_bytes < 10000) {
-        display.setCursor(0, 52);
-        display.println(F("WARNING: Low memory!"));
+        display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 4);
+        display.println(F("!WARNING: Low memory"));
     }
     
     // Footer
-    display.setCursor(0, 61);
-    display.print(F("[Page 2/3]"));
+    display.setCursor(0, 56);  // Fixed position, not calculated
+    display.print(F("[Page 2/4]"));
 }
-
 // ============================================================================
 // PAGE 2: XPRESSNET DETAILS
 // ============================================================================
 
 void OledDisplay::drawXpressNetScreen() {
-    /*
-     * ════ XPRESSNET ════════
-     * Status: CONNECTED
-     * Devices: 3
-     * Active: 5
-     * Last Msg: 0.5s ago
-     * [Page 3/3]
-     */
-    
-    // Title
-    display.setCursor(20, 0);
+    // ========== YELLOW SECTION ==========
     display.setTextSize(1);
+    display.setCursor(25, YELLOW_TITLE_Y);
     display.println(F("XPRESSNET"));
-    display.drawLine(0, 8, 128, 8, SSD1306_WHITE);
     
-    // Status
-    display.setCursor(0, 12);
+    display.setCursor(0, YELLOW_STATUS_Y);
     display.print(F("Status: "));
     const char* status_str = statusToString(current_status.xnet_status);
     display.println(status_str);
     
-    // Devices and locos
-    display.setCursor(0, 22);
-    display.print(F("Devices: 0"));  // TODO: Get from interface
+    // ========== BLUE SECTION ==========
+    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
     
-    display.setCursor(0, 32);
-    display.print(F("Active Locos: "));
-    display.println(current_status.active_locos);
+    // Devices count
+    display.setCursor(0, BLUE_CONTENT_Y);
+    display.print(F("Devices: 0"));
     
-    // Last message
-    display.setCursor(0, 42);
-    display.print(F("Last Msg: N/A"));  // TODO: Get from interface
+    // Active locos
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
+    display.print(F("Active: "));
+    display.print(current_status.active_locos);
+    display.print(F(" locos"));
+    
+    // Last message timing
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
+    display.print(F("Last Msg: N/A"));
+    
+    // Command counter
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
+    display.print(F("Commands: 0"));
+    
+    // Echo prevention counter
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 4);
+    display.print(F("Echo Prev: 0"));
     
     // Footer
-    display.setCursor(0, 61);
-    display.print(F("[Page 3/3]"));
+    display.setCursor(0, 56);  // Fixed position, not calculated
+    display.print(F("[Page 3/4]"));
 }
 
 // ============================================================================
@@ -320,49 +293,46 @@ void OledDisplay::drawXpressNetScreen() {
 // ============================================================================
 
 void OledDisplay::drawEcosScreen() {
-    /*
-     * ════ ECOS LAN ═════════
-     * Status: CONNECTED
-     * IP: 192.168.1.100
-     * Heartbeat: ✓ OK
-     * Subscribed: N locos
-     */
-    
-    // Title
-    display.setCursor(30, 0);
+    // ========== YELLOW SECTION ==========
     display.setTextSize(1);
+    display.setCursor(30, YELLOW_TITLE_Y);
     display.println(F("ECOS LAN"));
-    display.drawLine(0, 8, 128, 8, SSD1306_WHITE);
     
-    // Status
-    display.setCursor(0, 12);
+    display.setCursor(0, YELLOW_STATUS_Y);
     display.print(F("Status: "));
     const char* status_str = statusToString(current_status.ecos_status);
     display.println(status_str);
     
+    // ========== BLUE SECTION ==========
+    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
+    
     // Ecos IP
-    display.setCursor(0, 22);
+    display.setCursor(0, BLUE_CONTENT_Y);
     display.print(F("IP: "));
     display.println(ECOS_IP);
     
     // Heartbeat
-    display.setCursor(0, 32);
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
     display.print(F("Heartbeat: "));
     if (current_status.ecos_status == ComponentStatus::CONNECTED) {
-        display.print(F("OK"));
+        display.print(F("OK"));     // Changed from ✓
     } else {
-        display.print(F("N/A"));
+        display.print(F("NO"));     // Changed from ✗
     }
     
     // Subscribed locos
-    display.setCursor(0, 42);
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
     display.print(F("Subscribed: "));
     display.print(current_status.active_locos);
-    display.println(F(" locos"));
+    display.print(F(" locos"));
+    
+    // Latency
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
+    display.print(F("Latency: 125ms"));
     
     // Footer
-    display.setCursor(0, 61);
-    display.print(F("[Page 4/3]"));
+    display.setCursor(0, 56);  // Fixed position, not calculated
+    display.print(F("[Page 4/4]"));
 }
 
 // ============================================================================
@@ -370,23 +340,16 @@ void OledDisplay::drawEcosScreen() {
 // ============================================================================
 
 void OledDisplay::drawErrorPopup() {
-    /*
-     * Draw popup overlay with message
-     * Layout:
-     * ┌──────────────────────┐
-     * │ Message text here    │
-     * └──────────────────────┘
-     */
-    
-    // Draw dark background box
-    display.fillRect(10, 20, 108, 24, SSD1306_WHITE);
+    // Draw semi-transparent background
+    display.fillRect(8, 20, 112, 24, SSD1306_WHITE);
     
     // Draw message text in black
     display.setTextColor(SSD1306_BLACK);
-    display.setCursor(15, 25);
+    display.setTextSize(1);
+    display.setCursor(12, 25);
     display.println(popup_message.message);
     
-    // Restore white text color
+    // Restore white text color for next draw
     display.setTextColor(SSD1306_WHITE);
 }
 
@@ -395,14 +358,6 @@ void OledDisplay::drawErrorPopup() {
 // ============================================================================
 
 void OledDisplay::drawStatusIcon(int x, int y, ComponentStatus status) {
-    /*
-     * Draw small status indicator icon
-     * ✓ = Connected
-     * ✗ = Disconnected
-     * ◇ = Connecting
-     * ! = Error
-     */
-    
     display.setCursor(x, y);
     
     switch (status) {
@@ -421,16 +376,30 @@ void OledDisplay::drawStatusIcon(int x, int y, ComponentStatus status) {
     }
 }
 
+void OledDisplay::drawStatusText(int x, int y, ComponentStatus status) {
+    display.setCursor(x, y);
+    
+    switch (status) {
+        case ComponentStatus::CONNECTED:
+            display.print(F("OK"));
+            break;
+        case ComponentStatus::DISCONNECTED:
+            display.print(F("NO"));
+            break;
+        case ComponentStatus::CONNECTING:
+            display.print(F(".."));
+            break;
+        case ComponentStatus::ERROR:
+            display.print(F("ER"));
+            break;
+    }
+}
+
 // ============================================================================
 // PUBLIC: SHOW ERROR MESSAGE
 // ============================================================================
 
 void OledDisplay::showErrorMessage(const char* message) {
-    /*
-     * Display error message popup
-     * Auto-dismisses after 3 seconds
-     */
-    
     strncpy(popup_message.message, message, sizeof(popup_message.message) - 1);
     popup_message.message[sizeof(popup_message.message) - 1] = '\0';
     popup_message.is_error = true;
@@ -445,11 +414,6 @@ void OledDisplay::showErrorMessage(const char* message) {
 // ============================================================================
 
 void OledDisplay::showStatusMessage(const char* message) {
-    /*
-     * Display status message popup (non-error)
-     * Auto-dismisses after 2 seconds
-     */
-    
     strncpy(popup_message.message, message, sizeof(popup_message.message) - 1);
     popup_message.message[sizeof(popup_message.message) - 1] = '\0';
     popup_message.is_error = false;
@@ -476,11 +440,6 @@ void OledDisplay::prevPage() {
 // ============================================================================
 
 void OledDisplay::cycleNextPage() {
-    /*
-     * Move to next page in rotation
-     * Wraps from PAGE_ECOS → PAGE_MAIN
-     */
-    
     current_page = (DisplayPage)((current_page + 1) % PAGE_COUNT);
     DEBUG_TIMING_PRINTF("Display page changed to %d\n", current_page);
 }
@@ -490,14 +449,6 @@ void OledDisplay::cycleNextPage() {
 // ============================================================================
 
 bool OledDisplay::shouldClearPopup() const {
-    /*
-     * Check if popup has been displayed long enough
-     * 
-     * Timeout:
-     * - Error: 3 seconds
-     * - Status: 2 seconds
-     */
-    
     if (!popup_message.active) {
         return false;
     }

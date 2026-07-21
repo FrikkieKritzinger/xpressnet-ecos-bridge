@@ -127,6 +127,7 @@ private:
     void drawErrorPopup();
     
     void drawStatusIcon(int x, int y, ComponentStatus status);
+	void drawStatusText(int x, int y, ComponentStatus status);
     
     /**
      * Check if popup should be cleared
