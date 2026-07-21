@@ -116,6 +116,8 @@ struct SystemStatus {
     // Diagnostic
     uint32_t total_commands;        // Lifetime command count
     uint32_t current_heap_bytes;    // Available heap (changed to uint32_t for larger values)
+	
+	LocoState* last_loco;           // Pointer to last active loco (for display)
 };
 
 // ============================================================================
