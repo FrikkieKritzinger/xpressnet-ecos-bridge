@@ -22,12 +22,12 @@
 #define SCREEN_HEIGHT   64
 
 // Color split position (where yellow ends, blue begins)
-#define COLOR_SPLIT_Y   17
+#define COLOR_SPLIT_Y   15
 
 // Layout positioning (optimized for yellow/blue display)
 #define YELLOW_TITLE_Y      0     // Title in yellow
 #define YELLOW_STATUS_Y     7     // Status bar in yellow
-#define BLUE_CONTENT_Y     20     // Start of blue content (17 gives some gap)
+#define BLUE_CONTENT_Y     18     // Start of blue content (17 gives some gap)
 #define LINE_HEIGHT_SMALL   7     // Small text line height
 #define LINE_HEIGHT_LARGE  10     // Large text line height
 
