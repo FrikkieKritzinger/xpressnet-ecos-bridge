@@ -17,6 +17,7 @@
 #include "utils/debug.h"
 #include "utils/timing.h"
 #include "utils/memory.h"
+#include "utils/now_ms.h"
 
 // Forward declarations for optional protocol interfaces
 #if ENABLE_XPRESSNET
@@ -134,7 +135,7 @@ void CommandRouter::handleXpressNetCommand(uint16_t address, uint8_t speed, uint
     // Update echo prevention state
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 0;  // SPEED command type
-    echo_state.last_timestamp_ms = millis();
+    echo_state.last_timestamp_ms = now_ms();
     echo_state.last_source = LocoSource::XPRESSNET;
 }
 
@@ -193,7 +194,7 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
     // Update echo prevention
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 1;  // FUNCTION command type
-    echo_state.last_timestamp_ms = millis();
+    echo_state.last_timestamp_ms = now_ms();
     echo_state.last_source = LocoSource::XPRESSNET;
 }
 
@@ -261,7 +262,7 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
     // Update echo prevention
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 0;  // SPEED
-    echo_state.last_timestamp_ms = millis();
+    echo_state.last_timestamp_ms = now_ms();
     echo_state.last_source = LocoSource::ECOS;
 }
 
@@ -310,7 +311,7 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
     // Update echo prevention
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 1;  // FUNCTION
-    echo_state.last_timestamp_ms = millis();
+    echo_state.last_timestamp_ms = now_ms();
     echo_state.last_source = LocoSource::ECOS;
 }
 
@@ -347,8 +348,8 @@ void CommandRouter::update() {
     }
 
     // Log status (if debug enabled)
-    if (last_status_update == 0 || millis() - last_status_update > 60000) {
-        last_status_update = millis();
+    if (last_status_update == 0 || now_ms() - last_status_update > 60000) {
+        last_status_update = now_ms();
 
         SystemStatus status = getSystemStatus();
         DEBUG_STATE_PRINTF("Status: XNet=%s Ecos=%s Active=%d\n",
@@ -380,7 +381,7 @@ bool CommandRouter::isEchoCommand(uint16_t address, LocoSource source) const {
      * within the 500ms window
      */
     
-    unsigned long now = millis();
+    unsigned long now = now_ms();
     unsigned long time_since_last = now - echo_state.last_timestamp_ms;
     
     // Not an echo if more than 500ms has passed
@@ -492,7 +493,7 @@ SystemStatus CommandRouter::getSystemStatus() const {
     status.wifi_rssi = 0;  // TODO: Get from WiFi
     
     // Uptime
-    status.uptime_ms = millis();
+    status.uptime_ms = now_ms();
     
     // Diagnostics
     status.total_commands = 0;  // TODO: Track in router
@@ -517,7 +518,7 @@ void CommandRouter::debugPrintEchoState() const {
     DEBUG_ECHO_PRINTF("Last command:   %u\n", echo_state.last_command_type);
     DEBUG_ECHO_PRINTF("Last source:    %s\n", locoSourceToString(echo_state.last_source));
     
-    unsigned long age = millis() - echo_state.last_timestamp_ms;
+    unsigned long age = now_ms() - echo_state.last_timestamp_ms;
     DEBUG_ECHO_PRINTF("Age:            %lu ms\n", age);
     DEBUG_ECHO_PRINTF("Window:         %lu ms\n", (unsigned long)ECHO_PREVENTION_WINDOW);
     

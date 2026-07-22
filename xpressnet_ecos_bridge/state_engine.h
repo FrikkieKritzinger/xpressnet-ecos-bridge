@@ -16,7 +16,6 @@
 #define STATE_ENGINE_H
 
 #include <cstdint>
-#include <Arduino.h>
 #include "config.h"
 #include "definitions.h"
 

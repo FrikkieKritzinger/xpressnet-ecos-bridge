@@ -17,6 +17,7 @@
 #include "state_engine.h"
 #include "utils/debug.h"
 #include "utils/memory.h"
+#include "utils/now_ms.h"
 
 // ============================================================================
 // CONSTRUCTOR
@@ -79,7 +80,7 @@ bool StateEngine::addOrUpdateLoco(uint16_t address, const LocoState& state) {
         existing.direction = state.direction;
         existing.functions = state.functions;
         existing.last_source = state.last_source;
-        existing.last_update_ms = millis();
+        existing.last_update_ms = now_ms();
         existing.subscribed_to_ecos = state.subscribed_to_ecos;
         
         return true;
@@ -99,7 +100,7 @@ bool StateEngine::addOrUpdateLoco(uint16_t address, const LocoState& state) {
     new_loco.direction = state.direction;
     new_loco.functions = state.functions;
     new_loco.last_source = state.last_source;
-    new_loco.last_update_ms = millis();
+    new_loco.last_update_ms = now_ms();
     new_loco.subscribed_to_ecos = state.subscribed_to_ecos;
     new_loco.unknown = false;
     
@@ -196,7 +197,7 @@ int StateEngine::expungeInactiveLocos() {
      * when we remove items
      */
     
-    unsigned long now = millis();
+    unsigned long now = now_ms();
     int removed_count = 0;
 
     // Iterate backwards to safely remove while iterating
@@ -292,7 +293,7 @@ void StateEngine::debugPrintAllLocos() const {
         return;
     }
     
-    unsigned long now = millis();
+    unsigned long now = now_ms();
     
     DEBUG_STATE_PRINT("Addr  Spd Dir Fn        Age(ms) Source    Ecos\n");
     DEBUG_STATE_PRINT("---- ---- --- -------- ------- --------- ----\n");
@@ -326,7 +327,7 @@ void StateEngine::debugPrintLoco(uint16_t address) const {
     }
     
     const LocoState& loco = locos[index];
-    unsigned long age = millis() - loco.last_update_ms;
+    unsigned long age = now_ms() - loco.last_update_ms;
     
     DEBUG_STATE_PRINTF("\n=== Locomotive %u ===\n", address);
     DEBUG_STATE_PRINTF("Speed:              %u\n", loco.speed);
