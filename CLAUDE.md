@@ -47,8 +47,49 @@
   * `env:native` — Host CPU compilation for testing (requires g++/MinGW)
   * `env:debug` — ESP8266 with debug output enabled
 - **Note**: Native compilation deferred (g++ not in PATH on Windows)
-- **Commit 2d89d64**: Phase 4.1 complete
-- **Next**: Phase 4.2 - Test Scaffold (create tests/ directory, mocks, fixtures)
+- **Commits**: 521ae62 (design doc), 2d89d64 (foundation), ae6b990 (CLAUDE.md update)
+- **Status**: Phase 4.1 foundation complete, paused for later resumption
+
+---
+
+## 🎯 Next Session (Phase 4.2)
+
+**When resuming Phase 4, start with Phase 4.2: Test Scaffold**
+
+1. Create `tests/` directory structure:
+   ```
+   tests/
+   ├── test_xpressnet_parser.cpp
+   ├── test_ecos_parser.cpp
+   ├── test_ecos_command_builder.cpp
+   ├── test_state_engine.cpp
+   ├── test_command_router.cpp
+   ├── mocks/
+   │   ├── mock_protocol_interface.h
+   │   └── mock_now_ms.cpp
+   └── fixtures/
+       ├── xpressnet_messages.h
+       └── ecos_responses.h
+   ```
+
+2. Create `MockProtocolInterface` class (derives from `ProtocolInterface`)
+   - Mock implementations of sendSpeedCommand, sendFunctionCommand
+   - Track calls for verification in tests
+
+3. Create fixture data files with hardcoded valid/invalid test messages
+
+4. Compile with PlatformIO native environment to verify test framework setup
+   - Note: Requires g++/MinGW installed and in PATH
+   - Windows users: Install MinGW or use WSL for g++
+
+5. Then implement Phase 4.3-4.5 (actual unit tests, one per test file)
+
+**Files to reference**:
+- Design: `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md` (Steps 5-10)
+- Current state: See Development Status section below
+- Time seam: `utils/now_ms.h` (already in place)
+
+---
 
 ---
 
@@ -468,8 +509,9 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 ## Design Documents & Implementation Blueprints
 
 - **`docs/01_DESIGN_DOCUMENT.md`**: Overall architecture and Phase 1-2 specification
-- **`docs/02_PHASE_3_2_ECOS_DESIGN.md`**: Ecos LAN protocol (TCP/XML, echo prevention, subscription model)
-- **Implementation Status**: See "Development Status" section (Phase 3.1 done, 3.2 design complete)
+- **`docs/02_PHASE_3_2_ECOS_DESIGN.md`**: Ecos LAN protocol (TCP/text, echo prevention, subscription model)
+- **`docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`**: Complete Phase 4 testing plan (12 steps, frameworks, success criteria)
+- **Implementation Status**: See "Development Status" section (Phase 3.1-3.2 done, Phase 4.1 foundation complete)
 
 ## Useful References
 
@@ -495,4 +537,4 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
-**Last Updated**: 2026-07-22 (After Phase 3.1 XpressNet implementation)
+**Last Updated**: 2026-07-22 (Phase 4.1 Foundation & Testing Infrastructure complete, paused)
