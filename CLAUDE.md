@@ -31,6 +31,25 @@
 - **Key Decision**: Native test suite will actually pass in this environment (not just verified by reading)
 - **Next**: Implement Phase 4 (start with PlatformIO installation, then write/run tests)
 
+**2026-07-22 — Phase 4.1: Foundation & Testing Infrastructure Setup ✅ COMPLETE**
+- ✅ **Step 1**: Installed PlatformIO 6.1.19 via `pip install platformio`
+- ✅ **Step 2**: Fixed blocker issues
+  * Guarded Arduino-only code in `utils/debug.h` (#ifdef ARDUINO)
+  * Removed Arduino.h from `state_engine.h` and `command_router.h` (pure logic files)
+  * Added native/test fallback: `fprintf(stdout)` for debug output when not Arduino
+- ✅ **Step 3**: Created time seam abstraction (`utils/now_ms.h`)
+  * Arduino: wraps `millis()` for real hardware
+  * Tests: uses injected `mock_now_ms` global for deterministic time control
+  * Updated `state_engine.cpp`: 5 millis() → now_ms() calls
+  * Updated `command_router.cpp`: 10 millis() → now_ms() calls
+- ✅ **Step 4**: Created `platformio.ini` with three environments
+  * `env:wemos` — ESP8266 production build
+  * `env:native` — Host CPU compilation for testing (requires g++/MinGW)
+  * `env:debug` — ESP8266 with debug output enabled
+- **Note**: Native compilation deferred (g++ not in PATH on Windows)
+- **Commit 2d89d64**: Phase 4.1 complete
+- **Next**: Phase 4.2 - Test Scaffold (create tests/ directory, mocks, fixtures)
+
 ---
 
 ## Architecture Overview
@@ -129,16 +148,35 @@ All disabled features = zero compiled code overhead.
 
 **Phase 3.4: Z21 LAN** (Future)
 
-### Phase 4: Testing ⏳ DESIGNED, READY FOR IMPLEMENTATION
-- **Design Document**: Comprehensive Phase 4 plan (PlatformIO + Unity framework)
-- **Approach**: Install PlatformIO in this environment (Python 3.10 available), compile and run native unit tests for real (not just read-back verification)
-- **Native unit tests**: Message parsers, protocol builder, state engine, command router (with mocked time seam for deterministic expiry/echo testing), mock ProtocolInterface for router tests
-- **Time seam**: New `utils/now_ms.h` abstracts `millis()` for testability
-- **Mock Ecos server**: Python script for integration testing without real Ecos hardware
-- **Hardware test procedures**: Written checklist for manual end-to-end testing on real ESP8266 + XpressNet bus
-- **Blockers fixed**: Debug.h Arduino guard, vestigial includes removed
-- **Test framework**: Unity (ThrowTheSwitch) via PlatformIO native environment
-- **Status**: Ready to implement — plan file saved, awaiting code execution
+### Phase 4: Testing Infrastructure ⏳ IN PROGRESS
+
+**Phase 4.1: Foundation & Setup** ✅ COMPLETE
+- **Step 1**: Installed PlatformIO 6.1.19
+- **Step 2**: Fixed blocker issues
+  * Guarded Arduino-only code in `utils/debug.h`
+  * Removed unnecessary `#include <Arduino.h>` from `state_engine.h`, `command_router.h`
+- **Step 3**: Created time seam (`utils/now_ms.h`)
+  * Arduino: wraps `millis()` for real hardware
+  * Tests: uses injected `mock_now_ms` for deterministic control
+  * Updated state_engine.cpp and command_router.cpp to use `now_ms()`
+- **Step 4**: Created `platformio.ini` with three environments
+  * `env:wemos` — ESP8266 production
+  * `env:native` — Host compilation for testing (requires g++/MinGW)
+  * `env:debug` — ESP8266 with debug enabled
+- **Design Document**: `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`
+
+**Phase 4.2: Test Scaffold** ⏳ NEXT
+- Create tests/ directory structure with mocks and fixtures
+- Set up MockProtocolInterface for router testing
+- Prepare XpressNet message and Ecos response fixtures
+
+**Phase 4.3-4.5: Unit Tests** (Pending)
+- 5 core unit test files (parsers, builders, state engine, router)
+- Deterministic expiry/echo testing via time mock
+- Mock Ecos server (Python) for integration
+
+**Phase 4.6: Hardware Procedures** (Pending)
+- Manual test checklist for real ESP8266 + XpressNet bus
 
 ---
 
