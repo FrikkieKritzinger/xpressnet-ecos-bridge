@@ -54,12 +54,13 @@ enum class ComponentStatus {
 struct LocoState {
     // Identity
     uint16_t dcc_address;           // DCC address (0-9999), short or long
-    
+    uint16_t ecos_object_id;        // Ecos-internal object ID (maps DCC address to Ecos ID, 0=unknown)
+
     // Control state
     uint8_t speed;                  // Speed: 0-126 (0 = stop)
     uint8_t direction;              // Direction: 0 = reverse, 1 = forward
     uint32_t functions;             // Function bits F0-F31 (1 bit each)
-    
+
     // Metadata
     LocoSource last_source;         // Where last command came from
     unsigned long last_update_ms;   // Timestamp of last update (for expiry)

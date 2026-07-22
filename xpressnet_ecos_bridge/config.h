@@ -46,7 +46,8 @@
 // ============================================================================
 // ECOS LAN CONFIGURATION
 // ============================================================================
-// ESU Ecos command system - communicates via XML over TCP/WiFi
+// ESU Ecos command system - communicates via plain-text line-based object protocol
+// over TCP/WiFi (NOT XML). Protocol: request(id,mode), set(id,prop[val]), <EVENT>/<REPLY>/<END> framing
 // Requires WiFi connectivity
 
 #if ENABLE_ECOS_LAN
@@ -59,10 +60,19 @@
     #define WIFI_SSID               "HOMER"
     #define WIFI_PASSWORD           "20146979"
     
-    // Timeouts
-    #define ECOS_TIMEOUT            5000            // TCP connection timeout (ms)
-    #define ECOS_HEARTBEAT_INTERVAL 30000           // Heartbeat to Ecos (ms)
-    #define ECOS_RECONNECT_INTERVAL 10000           // Try reconnect every X ms
+    // Timeouts and intervals
+    #define ECOS_TIMEOUT                5000            // TCP connection timeout (ms)
+    #define ECOS_HEARTBEAT_INTERVAL     30000           // Heartbeat query every X ms
+    #define ECOS_RECONNECT_INTERVAL     10000           // Backoff retry interval (ms)
+    #define ECOS_ADDRESS_MAP_REFRESH_INTERVAL 600000    // Refresh loco list every 10 minutes
+
+    // Echo prevention (WiFi/TCP is slower than RS485, need longer window)
+    #define ECOS_ECHO_WINDOW_MS         2000            // 2 seconds (accounts for TCP latency)
+
+    // Buffers
+    #define MAX_ECOS_OBJECTS            100             // Max locomotives in address map
+    #define MAX_PENDING_QUERIES         5               // Commands queued while object ID unknown
+    #define MAX_OUTGOING_QUEUE          10              // Commands queued while disconnected
 #endif
 
 // ============================================================================

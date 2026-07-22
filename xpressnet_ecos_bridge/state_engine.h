@@ -69,9 +69,11 @@ public:
     /**
      * Expire all locos that haven't been updated in LOCO_INACTIVITY_TIMEOUT
      * Called periodically (every ~30 seconds)
+     * @param removed_out Optional output array to receive DCC addresses that were removed
+     * @param max_out Maximum entries in removed_out array
      * @return number of locos removed
      */
-    int expungeInactiveLocos();
+    int expungeInactiveLocos(uint16_t* removed_out = nullptr, int max_out = 0);
     
     /**
      * Get total number of locos currently in state engine

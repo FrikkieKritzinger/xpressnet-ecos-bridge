@@ -198,23 +198,29 @@ int StateEngine::expungeInactiveLocos() {
     
     unsigned long now = millis();
     int removed_count = 0;
-    
+
     // Iterate backwards to safely remove while iterating
     for (int i = loco_count - 1; i >= 0; i--) {
         unsigned long age = now - locos[i].last_update_ms;
-        
+
         if (age > LOCO_INACTIVITY_TIMEOUT) {
             DEBUG_STATE_PRINTF("Expiring inactive loco %u (age: %lu ms)\n",
                               locos[i].dcc_address, age);
+
+            // Capture address if output array provided
+            if (removed_out && removed_count < max_out) {
+                removed_out[removed_count] = locos[i].dcc_address;
+            }
+
             removeLoco(i);
             removed_count++;
         }
     }
-    
+
     if (removed_count > 0) {
         DEBUG_STATE_PRINTF("Expunge complete: removed %d locos\n", removed_count);
     }
-    
+
     return removed_count;
 }
 

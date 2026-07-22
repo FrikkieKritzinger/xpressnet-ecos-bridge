@@ -1,56 +1,275 @@
 /*
- * Ecos LAN Interface - Stub for Phase 3 Implementation
- * 
- * This is a skeleton that will be fully implemented in Phase 3.
- * For now, it provides the minimal interface to allow compilation.
+ * Ecos LAN Interface - WiFi TCP Client Master Implementation
+ *
+ * Manages connection to ESU Ecos command station over WiFi/TCP.
+ * Parses text-based object protocol (not XML), tracks locomotive state,
+ * subscribes/unsubscribes from locos, prevents echo loops, and routes
+ * updates through CommandRouter for multi-throttle consistency.
+ *
+ * Non-blocking design: all operations in update() are non-blocking poll loops.
  */
 
 #ifndef ECOS_INTERFACE_H
 #define ECOS_INTERFACE_H
 
 #include <cstdint>
+#include <ESP8266WiFi.h>
 #include "../../interfaces/interface_base.h"
+#include "ecos_message_parser.h"
+
+// Forward declaration
+class CommandRouter;
 
 class EcosInterface : public ProtocolInterface {
 public:
-    EcosInterface() {}
-    
-    bool begin() override {
-        // TODO: Phase 3 - Initialize WiFi and TCP connection to Ecos
-        return false;
-    }
-    
-    void update() override {
-        // TODO: Phase 3 - Non-blocking TCP read from Ecos, parse XML
-    }
-    
-    void sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) override {
-        // TODO: Phase 3 - Send XML speed/direction command to Ecos
-        (void)address; (void)speed; (void)direction;
-    }
-    
-    void sendFunctionCommand(uint16_t address, uint32_t functions) override {
-        // TODO: Phase 3 - Send XML function states to Ecos
-        (void)address; (void)functions;
-    }
-    
+    EcosInterface();
+    ~EcosInterface();
+
+    /**
+     * Initialize WiFi and Ecos TCP connection
+     * Starts WiFi connection (non-blocking); actual TCP connection happens in update()
+     * @return true if initialization started successfully
+     */
+    bool begin() override;
+
+    /**
+     * Non-blocking update - process TCP data, connection state, heartbeat
+     * Called every main loop iteration (lower priority than XpressNet)
+     * - Reads available TCP bytes into message parser
+     * - Updates connection status with backoff retry
+     * - Sends periodic heartbeat to keep connection alive
+     * - Flushes pending query buffer and outgoing command queue
+     * Must NEVER block
+     */
+    void update() override;
+
+    /**
+     * Send speed/direction command to Ecos for a locomotive
+     * @param address DCC locomotive address
+     * @param speed 0-126
+     * @param direction 0=reverse, 1=forward
+     */
+    void sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) override;
+
+    /**
+     * Send function states to Ecos for a locomotive
+     * @param address DCC locomotive address
+     * @param functions Bitmap F0-F31
+     */
+    void sendFunctionCommand(uint16_t address, uint32_t functions) override;
+
+    /**
+     * Get current Ecos connection status
+     * @return CONNECTED, DISCONNECTED, CONNECTING, ERROR
+     */
     ComponentStatus getStatus() const override {
-        // TODO: Phase 3 - Return actual status
-        return ComponentStatus::DISCONNECTED;
+        return current_status;
     }
-    
+
+    /**
+     * Get protocol name for display
+     * @return "Ecos"
+     */
     const char* getName() const override {
         return "Ecos";
     }
-    
+
     /**
-     * Subscribe to locomotive on Ecos
-     * Called when XpressNet sends command for unknown loco
-     * TODO: Phase 3 - Send subscription XML to Ecos
+     * Subscribe to locomotive updates on Ecos
+     * Called by CommandRouter when a new loco is first seen from XpressNet
+     * @param address DCC address
      */
-    void subscribeToLoco(uint16_t address) {
-        (void)address;
-    }
+    void subscribeToLoco(uint16_t address);
+
+    /**
+     * Unsubscribe from locomotive on Ecos
+     * Called by CommandRouter when a loco expires from state engine
+     * @param address DCC address
+     */
+    void unsubscribeFromLoco(uint16_t address);
+
+    /**
+     * Set reference to command router (called after construction)
+     * @param router Pointer to CommandRouter instance
+     */
+    void setCommandRouter(CommandRouter* router);
+
+private:
+    // ========================================================================
+    // CONNECTION STATE
+    // ========================================================================
+
+    ComponentStatus current_status;
+    unsigned long connected_time_ms;          // When current TCP connection established
+    unsigned long last_message_time;          // Last byte received from Ecos
+    WiFiClient wifi_client;                   // TCP socket to Ecos
+    EcosMessageParser* parser;                // Message parser (allocated in begin())
+    CommandRouter* router;                    // Pointer to router for callbacks
+
+    // ========================================================================
+    // ADDRESS MAPPING (DCC address ↔ Ecos object ID)
+    // ========================================================================
+
+    static const int MAX_ECOS_OBJECTS = 100;
+
+    struct AddressMapEntry {
+        uint16_t dcc_address;
+        uint16_t ecos_id;
+    };
+
+    AddressMapEntry address_map[MAX_ECOS_OBJECTS];
+    uint16_t address_map_count;
+    unsigned long address_map_last_refresh;
+
+    /**
+     * Find Ecos object ID for a DCC address
+     * Returns 0 if not found
+     */
+    uint16_t findEcosObjectId(uint16_t dcc_address) const;
+
+    /**
+     * Add entry to address map
+     * Returns false if map is full
+     */
+    bool addAddressMapEntry(uint16_t dcc_address, uint16_t ecos_id);
+
+    /**
+     * Query Ecos for list of all locomotives and their addresses
+     * Results are accumulated in handleReply() into address_map
+     */
+    void queryAddressMap();
+
+    // ========================================================================
+    // PENDING QUERY BUFFER
+    // ========================================================================
+
+    static const int MAX_PENDING_QUERIES = 5;
+
+    struct PendingQuery {
+        uint16_t address;
+        uint8_t speed;
+        uint8_t direction;
+    };
+
+    PendingQuery pending_queries[MAX_PENDING_QUERIES];
+    uint16_t pending_query_count;
+
+    /**
+     * Queue a command for an address whose Ecos object ID isn't known yet
+     * When address map is updated, these are processed
+     */
+    void queuePendingQuery(uint16_t address, uint8_t speed, uint8_t direction);
+
+    /**
+     * Process all pending queries whose addresses are now in the map
+     */
+    void flushPendingQueries();
+
+    // ========================================================================
+    // ECHO PREVENTION QUEUE
+    // ========================================================================
+
+    static const int MAX_ECHO_QUEUE = 10;
+    static const int ECHO_TYPE_SPEED = 0;
+    static const int ECHO_TYPE_FUNCTION = 1;
+
+    struct EchoEntry {
+        uint16_t address;
+        uint8_t cmd_type;
+        uint8_t value;
+        unsigned long timestamp;
+    };
+
+    EchoEntry echo_queue[MAX_ECHO_QUEUE];
+    uint16_t echo_queue_head;
+    uint16_t echo_queue_tail;
+
+    /**
+     * Add outgoing command to echo queue (so we can suppress our own echoes)
+     */
+    void addToEchoQueue(uint16_t address, uint8_t cmd_type, uint8_t value);
+
+    /**
+     * Check if a received command is an echo of our own recent outgoing command
+     * Window: ECOS_ECHO_WINDOW_MS from config.h (2 seconds, accounts for TCP latency)
+     */
+    bool isEchoCommand(uint16_t address, uint8_t cmd_type, uint8_t value) const;
+
+    // ========================================================================
+    // OUTGOING COMMAND QUEUE (for while disconnected)
+    // ========================================================================
+
+    static const int MAX_OUTGOING_QUEUE = 10;
+    static const int MAX_COMMAND_LENGTH = 80;
+
+    struct QueuedCommand {
+        char cmd[MAX_COMMAND_LENGTH];
+        uint16_t len;
+        unsigned long timestamp;
+    };
+
+    QueuedCommand outgoing_queue[MAX_OUTGOING_QUEUE];
+    uint16_t outgoing_queue_head;
+    uint16_t outgoing_queue_tail;
+
+    /**
+     * Queue an outgoing command (used if connection drops)
+     * Small circular buffer; oldest entries are discarded if full
+     */
+    bool queueOutgoingCommand(const char* cmd, uint16_t len);
+
+    /**
+     * Flush queued commands to Ecos (called when connection re-established)
+     */
+    void flushOutgoingQueue();
+
+    // ========================================================================
+    // CONNECTION/BACKOFF MANAGEMENT
+    // ========================================================================
+
+    TimedTask heartbeat_timer{ECOS_HEARTBEAT_INTERVAL};
+    TimedTask address_map_refresh_timer{ECOS_ADDRESS_MAP_REFRESH_INTERVAL};
+
+    uint16_t reconnect_attempt;              // Current backoff level (0-3)
+    unsigned long last_reconnect_attempt;
+
+    /**
+     * Update connection state machine
+     * Polls WiFi status, TCP socket, timeouts, triggers reconnect
+     */
+    void updateConnectionStatus();
+
+    /**
+     * Attempt to establish TCP connection to Ecos
+     * Assumes WiFi is already connected
+     */
+    void attemptTcpConnect();
+
+    /**
+     * Attempt to reconnect with exponential backoff
+     */
+    void attemptReconnect();
+
+    /**
+     * Get current backoff delay (5s, 10s, 20s, 60s max)
+     */
+    unsigned long getBackoffDelay();
+
+    /**
+     * Send heartbeat query to keep connection alive
+     * Sends a cheap get() query every 30 seconds
+     */
+    void sendHeartbeat();
+
+    // ========================================================================
+    // REPLY HANDLING
+    // ========================================================================
+
+    /**
+     * Process a parsed Ecos reply/event
+     * Routes to address map update, echo prevention check, or CommandRouter
+     */
+    void handleReply(const EcosReply& reply);
 };
 
 #endif  // ECOS_INTERFACE_H

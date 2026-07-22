@@ -321,23 +321,35 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
 void CommandRouter::update() {
     /*
      * Called periodically from main loop (every 30 seconds)
-     * 
+     *
      * Responsibilities:
      * - Expunge inactive locos
+     * - Unsubscribe from Ecos for removed locos
      * - Update status
      * - Log diagnostics
      */
-    
-    // Expunge locos inactive for 5 minutes
-    int removed = state_engine.expungeInactiveLocos();
+
+    // Expunge locos inactive for 5 minutes, capturing which ones were removed
+    uint16_t removed_addresses[MAX_LOCOS];
+    int removed = state_engine.expungeInactiveLocos(removed_addresses, MAX_LOCOS);
+
     if (removed > 0) {
         DEBUG_STATE_PRINTF("Expunged %d inactive locomotives\n", removed);
+
+        // Unsubscribe from Ecos for each removed loco
+        #if ENABLE_ECOS_LAN
+        if (ecos != nullptr) {
+            for (int i = 0; i < removed; i++) {
+                ecos->unsubscribeFromLoco(removed_addresses[i]);
+            }
+        }
+        #endif
     }
-    
+
     // Log status (if debug enabled)
     if (last_status_update == 0 || millis() - last_status_update > 60000) {
         last_status_update = millis();
-        
+
         SystemStatus status = getSystemStatus();
         DEBUG_STATE_PRINTF("Status: XNet=%s Ecos=%s Active=%d\n",
                           statusToString(status.xnet_status),
@@ -431,12 +443,11 @@ void CommandRouter::requestEcosSubscription(uint16_t address) {
      * Request Ecos to start sending updates for locomotive
      * Called when XpressNet sends command for unknown loco
      */
-    
+
     #if ENABLE_ECOS_LAN
     if (ecos != nullptr) {
         DEBUG_STATE_PRINTF("Requesting Ecos subscription for loco %u\n", address);
-        // TODO: Ecos interface will need a subscribeToLoco() method
-        // For now, just log the intent
+        ecos->subscribeToLoco(address);
     }
     #endif
 }
