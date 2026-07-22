@@ -7,6 +7,18 @@
 
 ---
 
+## 📝 Recent Updates (This Session)
+
+**2026-07-22 — Phase 3.2 Design & Documentation**
+- ✅ Created Phase 3.2 Ecos LAN protocol design document (563 lines)
+- ✅ Updated CLAUDE.md to reflect current status
+- ✅ Committed XpressNet Phase 3.1 implementation (1009 lines)
+- ✅ Committed CLAUDE.md development guide (404 lines)
+- **Key Design Decision**: State engine as truth (XpressNet priority, Ecos backfill)
+- **Next**: Phase 3.2 implementation (Ecos TCP/XML handler)
+
+---
+
 ## Architecture Overview
 
 ### Layered Design
@@ -70,17 +82,30 @@ All disabled features = zero compiled code overhead.
 - Speed/direction command reception (0-126 speed)
 - Emergency stop (speed 127)
 - Function toggles F0-F31
-- Echo prevention integration
+- Echo prevention integration (queue-based, 500ms window)
 - Bus timeout detection (5 sec)
-- Non-blocking serial I/O
-- Status tracking (throttle count)
+- Non-blocking serial I/O (message accumulation state machine)
+- Status tracking (throttle count, device detection)
+- **Files**: `xpressnet_interface.h/cpp`, `xpressnet_message_parser.h/cpp`
+- **Commit**: 5205b94
 
-**Phase 3.2: Ecos LAN Protocol** ⏳ NOT STARTED
-- TCP connection over WiFi
-- XML message parsing/generation
-- Loco status queries
-- Function state synchronization
-- Heartbeat/keep-alive
+**Phase 3.2: Ecos LAN Protocol** ⏳ DESIGN COMPLETE, IMPLEMENTATION PENDING
+- **Design Document**: `docs/02_PHASE_3_2_ECOS_DESIGN.md` (563 lines)
+- TCP connection over WiFi with resilience
+- XML message parsing/generation (protocol TBD)
+- Loco status queries (on-demand for unknown addresses)
+- Subscribe-only-known strategy (memory efficient)
+- Function state synchronization (F0-F31 bitmap)
+- Echo prevention: Outgoing command queue (10 items, 2-sec window)
+- Pending query buffer: Queue commands for addresses being queried
+- Activity-based lifecycle: 5-minute inactivity expiry, auto-resubscribe
+- Multi-throttle consistency: Broadcast Ecos updates to XpressNet
+- Accessory/turnout management: Track state, query status, command Ecos
+- Heartbeat/keep-alive (30 sec), exponential backoff reconnect (5s → 60s)
+- OLED display: Connection status, IP:port, uptime (diagnostics only)
+- **Key Principle**: State engine is truth (second only to Ecos). XpressNet priority, Ecos backfill.
+- **Design Date**: 2026-07-22
+- **Ready for**: Implementation
 
 **Phase 3.3: LocoNet** (Future)
 
@@ -378,13 +403,20 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
+## Design Documents & Implementation Blueprints
+
+- **`docs/01_DESIGN_DOCUMENT.md`**: Overall architecture and Phase 1-2 specification
+- **`docs/02_PHASE_3_2_ECOS_DESIGN.md`**: Ecos LAN protocol (TCP/XML, echo prevention, subscription model)
+- **Implementation Status**: See "Development Status" section (Phase 3.1 done, 3.2 design complete)
+
 ## Useful References
 
 - **XpressNet Protocol**: Lenz standard, Gahtow's library docs
 - **DCC Standard**: NMRA S-9.1 (loco addressing, speed steps)
 - **Ecos Protocol**: ESU documentation (XML commands, subscription model)
 - **ESP8266 Constraints**: 160MHz single-core, WiFi pre-empts timing
-- **Design Doc**: `docs/01_DESIGN_DOCUMENT.md` (detailed specs)
+- **Echo Prevention**: Queue-based (10-item buffer, 2-sec window for TCP latency)
+- **State Engine**: Truth table (XpressNet priority, Ecos backfill)
 
 ---
 
