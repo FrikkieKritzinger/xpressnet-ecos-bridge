@@ -109,6 +109,7 @@ void setup() {
         } else {
             debugPrintf("XpressNet interface initialized\n");
             router.setXpressNetInterface(&xnet_interface);
+            xnet_interface.setCommandRouter(&router);
         }
     #endif
     
