@@ -9,13 +9,18 @@
 
 ## 📝 Recent Updates (This Session)
 
-**2026-07-22 — Phase 3.2 Design & Documentation**
-- ✅ Created Phase 3.2 Ecos LAN protocol design document (563 lines)
-- ✅ Updated CLAUDE.md to reflect current status
-- ✅ Committed XpressNet Phase 3.1 implementation (1009 lines)
-- ✅ Committed CLAUDE.md development guide (404 lines)
-- **Key Design Decision**: State engine as truth (XpressNet priority, Ecos backfill)
-- **Next**: Phase 3.2 implementation (Ecos TCP/XML handler)
+**2026-07-22 — Phase 3.2 Implementation Complete**
+- ✅ Implemented full Ecos LAN WiFi TCP protocol (1700+ lines)
+- ✅ Corrected protocol assumption: XML → real ESU text-based object protocol
+- ✅ Built message parser (line/block accumulation, key[value] extraction)
+- ✅ Implemented command builders (request, set, get, release, queryObjects)
+- ✅ Integrated with CommandRouter (echo prevention, subscriptions, loco expiry)
+- ✅ Updated state_engine.h/cpp (capture removed locos on expiry)
+- ✅ Updated definitions.h (added ecos_object_id to LocoState)
+- ✅ Corrected design doc (protocol section: XML → text-based)
+- **Key Architecture**: DCC address ↔ Ecos object ID mapping, XpressNet priority
+- **Commit 4c3e0d6**: Phase 3.2 implementation
+- **Next**: Phase 4 (testing & hardware validation)
 
 ---
 
@@ -89,23 +94,27 @@ All disabled features = zero compiled code overhead.
 - **Files**: `xpressnet_interface.h/cpp`, `xpressnet_message_parser.h/cpp`
 - **Commit**: 5205b94
 
-**Phase 3.2: Ecos LAN Protocol** ⏳ DESIGN COMPLETE, IMPLEMENTATION PENDING
-- **Design Document**: `docs/02_PHASE_3_2_ECOS_DESIGN.md` (563 lines)
-- TCP connection over WiFi with resilience
-- XML message parsing/generation (protocol TBD)
-- Loco status queries (on-demand for unknown addresses)
-- Subscribe-only-known strategy (memory efficient)
-- Function state synchronization (F0-F31 bitmap)
-- Echo prevention: Outgoing command queue (10 items, 2-sec window)
-- Pending query buffer: Queue commands for addresses being queried
-- Activity-based lifecycle: 5-minute inactivity expiry, auto-resubscribe
-- Multi-throttle consistency: Broadcast Ecos updates to XpressNet
-- Accessory/turnout management: Track state, query status, command Ecos
-- Heartbeat/keep-alive (30 sec), exponential backoff reconnect (5s → 60s)
-- OLED display: Connection status, IP:port, uptime (diagnostics only)
-- **Key Principle**: State engine is truth (second only to Ecos). XpressNet priority, Ecos backfill.
-- **Design Date**: 2026-07-22
-- **Ready for**: Implementation
+**Phase 3.2: Ecos LAN Protocol** ✅ COMPLETE
+- **Implementation**: Commit 4c3e0d6 (1703 insertions)
+- **Files**: ecos_protocol.h/cpp, ecos_message_parser.h/cpp, ecos_interface.cpp (full header)
+- **Design Document**: `docs/02_PHASE_3_2_ECOS_DESIGN.md` (corrected from XML assumption)
+- TCP connection over WiFi with exponential backoff resilience (5s → 60s)
+- Text-based protocol parsing (NOT XML) — corrected; real ESU Ecos object protocol
+  * Line-based: `request(id, view)`, `set(id, speed[64])`, `<EVENT>/<REPLY>/<END>` framing
+  * DCC address ↔ Ecos object ID mapping via `queryObjects(10, addr, name)`
+- Loco status queries on-demand (queryObjects at startup, refresh every 10 min)
+- Subscribe-only-known strategy: subscribe on first XpressNet cmd, unsubscribe on expiry
+- Function state synchronization (F0-F31 bitmap, `func[n,0|1]` wire format)
+- Echo prevention: Circular queue (10 entries, 2-sec window accounts for TCP latency)
+- Pending query buffer (5 entries): Commands while object ID resolution in flight
+- Activity-based lifecycle: 5-minute inactivity expiry, auto-resubscribe on next update
+- Multi-throttle consistency: Broadcasts Ecos updates back to XpressNet (via CommandRouter)
+- Heartbeat/keep-alive (30 sec query), non-blocking polling with yield()
+- Outgoing queue (10 entries) for buffering during WiFi/TCP disconnect
+- OLED display: Connection status, IP:port, uptime (diagnostics only, no per-loco sync)
+- **Architecture**: State engine is truth (second only to Ecos). XpressNet priority, Ecos backfill.
+- **Scope**: Locomotives only (accessories deferred until XpressNet supports them)
+- **Commit Date**: 2026-07-22
 
 **Phase 3.3: LocoNet** (Future)
 
