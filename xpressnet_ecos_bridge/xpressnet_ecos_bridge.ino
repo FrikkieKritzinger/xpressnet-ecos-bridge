@@ -120,6 +120,7 @@ void setup() {
         } else {
             debugPrintf("Ecos LAN interface initialized\n");
             router.setEcosInterface(&ecos_interface);
+            ecos_interface.setCommandRouter(&router);
         }
     #endif
     

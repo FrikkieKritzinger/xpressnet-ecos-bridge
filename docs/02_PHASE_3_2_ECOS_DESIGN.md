@@ -258,31 +258,41 @@ If queue fills: Drop oldest items (prioritize recent)
 
 ---
 
-## TCP Protocol Details
+## TCP Protocol Details - ESU Ecos LAN Protocol (Text-Based, NOT XML)
 
-### Message Format (TBD - Ecos XML)
-**Assumption**: Ecos uses XML over TCP/15471
+### Message Format (CORRECTED)
+**Protocol**: Plain-text, line-based, object/property format over TCP/15471
 
-Examples (hypothetical):
-```xml
-<!-- Query loco status -->
-<query type="loco" address="100"/>
+All commands end with `\n` (LF). All replies/events are framed by `<REPLY>`/`<EVENT>` start and `<END code>` marker.
 
-<!-- Subscribe to loco updates -->
-<subscribe type="loco" address="100"/>
-
-<!-- Update loco -->
-<command type="loco" address="100">
-  <speed>64</speed>
-  <direction>1</direction>
-  <functions value="0x0F"/>
-</command>
-
-<!-- Accessory command -->
-<command type="accessory" address="1">
-  <position>0</position>
-</command>
+**Wire Format Examples**:
 ```
+→ queryObjects(10, addr, name)
+← <REPLY queryObjects(10, addr, name)>
+← 1000 addr[100] name[My Locomotive]
+← 1001 addr[101] name[Other Loco]
+← <END 0 (OK)>
+
+→ request(1000, view)
+← <REPLY request(1000,view)>
+← 1000 speed[0] direction[1]
+← <END 0 (OK)>
+
+← <EVENT 1000>
+← 1000 speed[64] direction[1]
+← <END 0 (OK)>
+
+→ set(1000, speed[80])
+← <REPLY set(1000, speed[80])>
+← <END 0 (OK)>
+```
+
+**Key Points**:
+- Object IDs (e.g., 1000) are Ecos-internal, independent of DCC address
+- DCC address is queried via `queryObjects(10, ...)` — returns addr[n] properties
+- Commands: `queryObjects(10,...)`, `request(id,view|control)`, `set(id,prop[val])`, `get(id,prop)`, `release(id,mode)`
+- Functions encoded as separate properties: `func[0,1]` (F0 on), `func[1,0]` (F1 off)
+- `<END n (text)>` closes block (n=0 success, n≥1 error)
 
 ### Buffer Management
 ```cpp
