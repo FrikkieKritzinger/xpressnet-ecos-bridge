@@ -18,9 +18,18 @@
 - ✅ Updated state_engine.h/cpp (capture removed locos on expiry)
 - ✅ Updated definitions.h (added ecos_object_id to LocoState)
 - ✅ Corrected design doc (protocol section: XML → text-based)
-- **Key Architecture**: DCC address ↔ Ecos object ID mapping, XpressNet priority
 - **Commit 4c3e0d6**: Phase 3.2 implementation
-- **Next**: Phase 4 (testing & hardware validation)
+- **Commit e405a04**: CLAUDE.md status update
+
+**2026-07-22 — Phase 4 Testing Infrastructure Planned**
+- ✅ Designed comprehensive testing strategy (PlatformIO + Unity)
+- ✅ Discovered Python 3.10 + pip available in this environment
+- ✅ Updated approach: Install PlatformIO here, compile & run native tests for real
+- ✅ Identified blocker issues (debug.h Arduino guard, vestigial includes)
+- ✅ Designed time abstraction seam (utils/now_ms.h) for deterministic testing
+- ✅ Planned 5 core unit test files + mock Ecos server + hardware procedures doc
+- **Key Decision**: Native test suite will actually pass in this environment (not just verified by reading)
+- **Next**: Implement Phase 4 (start with PlatformIO installation, then write/run tests)
 
 ---
 
@@ -120,10 +129,16 @@ All disabled features = zero compiled code overhead.
 
 **Phase 3.4: Z21 LAN** (Future)
 
-### Phase 4: Testing ⏳ PLANNED
-- Unit tests (message parsing, state engine)
-- Integration tests (hardware with real XpressNet/Ecos)
-- Tests directory: `tests/`
+### Phase 4: Testing ⏳ DESIGNED, READY FOR IMPLEMENTATION
+- **Design Document**: Comprehensive Phase 4 plan (PlatformIO + Unity framework)
+- **Approach**: Install PlatformIO in this environment (Python 3.10 available), compile and run native unit tests for real (not just read-back verification)
+- **Native unit tests**: Message parsers, protocol builder, state engine, command router (with mocked time seam for deterministic expiry/echo testing), mock ProtocolInterface for router tests
+- **Time seam**: New `utils/now_ms.h` abstracts `millis()` for testability
+- **Mock Ecos server**: Python script for integration testing without real Ecos hardware
+- **Hardware test procedures**: Written checklist for manual end-to-end testing on real ESP8266 + XpressNet bus
+- **Blockers fixed**: Debug.h Arduino guard, vestigial includes removed
+- **Test framework**: Unity (ThrowTheSwitch) via PlatformIO native environment
+- **Status**: Ready to implement — plan file saved, awaiting code execution
 
 ---
 
