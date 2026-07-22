@@ -19,8 +19,11 @@
 
 #include <cstdio>
 #include <cstdarg>
-#include <Arduino.h>
 #include "../config.h"
+
+#ifdef ARDUINO
+#include <Arduino.h>
+#endif
 
 // ============================================================================
 // DEBUG MACROS - Main debug output (controlled by ENABLE_DEBUG)
@@ -28,19 +31,17 @@
 
 #if ENABLE_DEBUG
 
+#ifdef ARDUINO
     /**
      * Debug print with newline
      * Usage: DEBUG_PRINT("Message\n");
      */
     #define DEBUG_PRINT(msg) \
         do { Serial.print(msg); } while(0)
-    
+
     /**
      * Debug printf (formatted output)
      * Usage: DEBUG_PRINTF("Value: %d\n", value);
-     * 
-     * Note: Uses FLASH strings to save RAM on AVR
-     * On ESP8266, this is just sprintf
      */
     #define DEBUG_PRINTF(fmt, ...) \
         do { \
@@ -48,7 +49,7 @@
             snprintf(_debug_buf, sizeof(_debug_buf), fmt, ##__VA_ARGS__); \
             Serial.print(_debug_buf); \
         } while(0)
-    
+
     /**
      * Debug print with timestamp
      * Useful to see timing of events
@@ -61,7 +62,7 @@
             Serial.print("ms] "); \
             Serial.print(msg); \
         } while(0)
-    
+
     /**
      * Debug printf with timestamp
      * Usage: DEBUG_PRINTF_TS("Value: %d\n", value);
@@ -75,6 +76,20 @@
             Serial.print("ms] "); \
             Serial.print(_debug_buf); \
         } while(0)
+#else  // !ARDUINO (native/test environment)
+    // When compiling natively (not Arduino), debug output goes to stdout
+    #define DEBUG_PRINT(msg) \
+        do { fprintf(stdout, "%s", msg); fflush(stdout); } while(0)
+
+    #define DEBUG_PRINTF(fmt, ...) \
+        do { fprintf(stdout, fmt, ##__VA_ARGS__); fflush(stdout); } while(0)
+
+    #define DEBUG_PRINT_TS(msg) \
+        do { fprintf(stdout, "[ts] %s", msg); fflush(stdout); } while(0)
+
+    #define DEBUG_PRINTF_TS(fmt, ...) \
+        do { fprintf(stdout, "[ts] " fmt, ##__VA_ARGS__); fflush(stdout); } while(0)
+#endif
 
 #else  // !ENABLE_DEBUG
 
@@ -87,9 +102,10 @@
 #endif  // ENABLE_DEBUG
 
 // ============================================================================
-// SELECTIVE DEBUG CATEGORIES
+// SELECTIVE DEBUG CATEGORIES (Arduino only)
 // ============================================================================
-// These allow fine-grained control of what gets logged
+
+#ifdef ARDUINO
 
 #if ENABLE_DEBUG && DEBUG_STARTUP
     #define DEBUG_STARTUP_PRINT(msg) DEBUG_PRINT(msg)
@@ -151,10 +167,13 @@
     #define DEBUG_MEMORY_PRINTF(fmt, ...) do {} while(0)
 #endif
 
+#endif  // ARDUINO
+
 // ============================================================================
-// ASSERTION MACROS (Debugging aid)
+// ASSERTION MACROS (Arduino only, Debugging aid)
 // ============================================================================
 
+#ifdef ARDUINO
 #if ENABLE_DEBUG
 
     /**
@@ -173,7 +192,7 @@
                 Serial.println(__LINE__); \
             } \
         } while(0)
-    
+
     /**
      * Assert that condition is true (no message)
      * Usage: ASSERT_TRUE(value == expected);
@@ -187,7 +206,7 @@
                 Serial.println(__LINE__); \
             } \
         } while(0)
-    
+
     /**
      * Assert that condition is false
      * Usage: ASSERT_FALSE(error_flag);
@@ -199,70 +218,53 @@
     #define ASSERT_TRUE(condition) do {} while(0)
     #define ASSERT_FALSE(condition) do {} while(0)
 #endif
+#else  // !ARDUINO
+    #define ASSERT(condition, message) do {} while(0)
+    #define ASSERT_TRUE(condition) do {} while(0)
+    #define ASSERT_FALSE(condition) do {} while(0)
+#endif
 
 // ============================================================================
-// HELPER FUNCTIONS
+// HELPER FUNCTIONS (Arduino only)
 // ============================================================================
 
+#ifdef ARDUINO
 #if ENABLE_DEBUG
 
 /**
- * Print a buffer as hex bytes
+ * Print a buffer as hex bytes (Arduino only)
  * Useful for debugging binary data
- * 
- * @param buffer Pointer to data
- * @param length Number of bytes
- * @param label Label to print before bytes
- * 
- * Usage:
- *   uint8_t msg[] = {0xE4, 0x00, 0x64, 0x50};
- *   debugPrintHex(msg, 4, "Message");
- *   // Output: Message: E4 00 64 50
  */
 inline void debugPrintHex(const uint8_t* buffer, size_t length, const char* label = nullptr) {
-    #if ENABLE_DEBUG
-        if (label) {
-            Serial.print(label);
-            Serial.print(": ");
-        }
-        for (size_t i = 0; i < length; i++) {
-            if (buffer[i] < 0x10) Serial.print("0");
-            Serial.print(buffer[i], HEX);
-            Serial.print(" ");
-        }
-        Serial.println();
-    #endif
+    if (label) {
+        Serial.print(label);
+        Serial.print(": ");
+    }
+    for (size_t i = 0; i < length; i++) {
+        if (buffer[i] < 0x10) Serial.print("0");
+        Serial.print(buffer[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
 }
 
 /**
- * Print free heap memory
+ * Print free heap memory (Arduino only)
  * Useful to detect memory leaks
- * 
- * Usage:
- *   debugPrintHeap("Before operation");
- *   doSomething();
- *   debugPrintHeap("After operation");
  */
 inline void debugPrintHeap(const char* label = nullptr) {
-    #if ENABLE_DEBUG
-        if (label) {
-            Serial.print(label);
-            Serial.print(": ");
-        }
-        Serial.print("Free heap: ");
-        Serial.print(ESP.getFreeHeap());
-        Serial.println(" bytes");
-    #endif
+    if (label) {
+        Serial.print(label);
+        Serial.print(": ");
+    }
+    Serial.print("Free heap: ");
+    Serial.print(ESP.getFreeHeap());
+    Serial.println(" bytes");
 }
 
 /**
- * Print a formatted debug section header
+ * Print a formatted debug section header (Arduino only)
  * Makes debug output easier to read
- * 
- * Usage:
- *   DEBUG_SECTION_START("Initialization");
- *   initializeStuff();
- *   DEBUG_SECTION_END("Initialization");
  */
 #define DEBUG_SECTION_START(name) \
     do { \
@@ -275,7 +277,19 @@ inline void debugPrintHeap(const char* label = nullptr) {
         Serial.println("=== " name " DONE ==="); \
     } while(0)
 
-#else
+#else  // !ENABLE_DEBUG
+    inline void debugPrintHex(const uint8_t* buffer, size_t length, const char* label = nullptr) {
+        (void)buffer; (void)length; (void)label;
+    }
+    inline void debugPrintHeap(const char* label = nullptr) {
+        (void)label;
+    }
+    #define DEBUG_SECTION_START(name) do {} while(0)
+    #define DEBUG_SECTION_END(name) do {} while(0)
+#endif
+
+#else  // !ARDUINO (native/test environment)
+    // Stub implementations for native compilation
     inline void debugPrintHex(const uint8_t* buffer, size_t length, const char* label = nullptr) {
         (void)buffer; (void)length; (void)label;
     }
