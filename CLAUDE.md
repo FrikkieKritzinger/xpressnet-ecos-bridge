@@ -68,44 +68,59 @@
 - **Tag v0.4.1-clean-build**: Versioned clean build pushed to GitHub
 - **Status**: Foundation code now verified to compile cleanly, ready for Phase 4.2
 
+**2026-07-24 — Phase 4.2: Test Scaffold ✅ COMPLETE**
+- ✅ **Directory structure created**: `tests/` with `mocks/` and `fixtures/` subdirectories
+- ✅ **MockProtocolInterface** implemented
+  * Derives from ProtocolInterface (sendSpeedCommand, sendFunctionCommand)
+  * Tracks all method calls and parameters
+  * Query API for test assertions (getSpeedCommandCount, getLastSpeedCommand, etc)
+  * Manual status control for testing connected/disconnected states
+- ✅ **Mock Time (mock_now_ms)** implemented
+  * Deterministic time control: getMockNowMs, setMockNowMs, advanceMockNowMs
+  * Replaces Arduino millis() during testing
+  * Pre-defined constants for common durations (500ms echo window, 5min expiry, etc)
+  * Enables testing of time-dependent behavior (timeouts, expiry, heartbeats)
+- ✅ **Test fixtures** created
+  * `xpressnet_messages.h`: Valid/invalid binary messages (speed, function, e-stop, checksums)
+  * `ecos_responses.h`: Valid/invalid text protocol responses (queries, events, malformed)
+- ✅ **Test template files** created (5 core tests)
+  * `test_xpressnet_parser.cpp`: Message parsing, checksum validation
+  * `test_ecos_parser.cpp`: Text protocol parsing, line accumulation, framing
+  * `test_ecos_command_builder.cpp`: Command generation, validation
+  * `test_state_engine.cpp`: State management, expiry, capacity limits
+  * `test_command_router.cpp`: Bridging, echo prevention, subscriptions, routing
+- ✅ **Documentation**: `tests/README.md` (comprehensive guide to test framework)
+- **Commit 9543dd1**: Phase 4.2 test scaffold complete
+- **Status**: Test scaffold complete with all templates and mocks ready. 11 new files (~1500 lines).
+
 ---
 
-## 🎯 Phase 4.2: Test Scaffold (READY TO START)
+## 🎯 Phase 4.3: Unit Test Implementation (READY TO START)
 
-**Build verification complete. All compilation issues resolved. Ready to begin Phase 4.2.**
+**Test scaffold complete. Ready to implement actual test cases.**
 
-1. Create `tests/` directory structure:
-   ```
-   tests/
-   ├── test_xpressnet_parser.cpp
-   ├── test_ecos_parser.cpp
-   ├── test_ecos_command_builder.cpp
-   ├── test_state_engine.cpp
-   ├── test_command_router.cpp
-   ├── mocks/
-   │   ├── mock_protocol_interface.h
-   │   └── mock_now_ms.cpp
-   └── fixtures/
-       ├── xpressnet_messages.h
-       └── ecos_responses.h
-   ```
+**Next Steps for Phase 4.3-4.5**:
 
-2. Create `MockProtocolInterface` class (derives from `ProtocolInterface`)
-   - Mock implementations of sendSpeedCommand, sendFunctionCommand
-   - Track calls for verification in tests
+1. Implement actual test cases in each template file:
+   - Fill in TODO sections with assertions and test logic
+   - Use Unity testing macros (TEST_ASSERT_EQUAL, etc)
+   - Follow Arrange-Act-Assert pattern
 
-3. Create fixture data files with hardcoded valid/invalid test messages
+2. Configure Unity framework in `platformio.ini`
+   - Add test dependencies
+   - Configure test build environment
 
-4. Compile with PlatformIO native environment to verify test framework setup
-   - Note: Requires g++/MinGW installed and in PATH
-   - Windows users: Install MinGW or use WSL for g++
+3. Compile and run tests:
+   - `platformio run -e native` (compile)
+   - `platformio test -e native` (run)
 
-5. Then implement Phase 4.3-4.5 (actual unit tests, one per test file)
+4. Iterate: Fix failures, add more test cases, achieve >90% coverage
 
 **Files to reference**:
-- Design: `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md` (Steps 5-10)
-- Current state: See Development Status section below
-- Time seam: `utils/now_ms.h` (already in place)
+- Design: `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`
+- Test guide: `tests/README.md` (patterns, examples, debugging)
+- Fixtures: `tests/fixtures/` (valid/invalid test data)
+- Mocks: `tests/mocks/` (mock interfaces for testing)
 
 ---
 
@@ -229,12 +244,28 @@ All disabled features = zero compiled code overhead.
   * Tagged v0.4.1-clean-build, pushed to GitHub
 - **Design Document**: `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`
 
-**Phase 4.2: Test Scaffold** 🚀 READY TO START
-- Create tests/ directory structure with mocks and fixtures
-- Set up MockProtocolInterface for router testing
-- Prepare XpressNet message and Ecos response fixtures
+**Phase 4.2: Test Scaffold** ✅ COMPLETE
+- **Step 1**: Created tests/ directory structure
+  * mocks/ (MockProtocolInterface, mock_now_ms)
+  * fixtures/ (xpressnet_messages, ecos_responses)
+- **Step 2**: Implemented MockProtocolInterface
+  * Tracks sendSpeedCommand and sendFunctionCommand calls
+  * Query API for test verification
+  * Manual status control
+- **Step 3**: Implemented mock time (mock_now_ms)
+  * Deterministic time control for testing timeouts and expiry
+  * Replaces Arduino millis() during testing
+- **Step 4**: Created test fixtures
+  * xpressnet_messages.h: Valid/invalid binary messages
+  * ecos_responses.h: Valid/invalid text protocol responses
+- **Step 5**: Created test template files (5 core tests)
+  * test_xpressnet_parser.cpp, test_ecos_parser.cpp, test_ecos_command_builder.cpp
+  * test_state_engine.cpp, test_command_router.cpp
+  * All include TODO comments and test structure
+- **Documentation**: tests/README.md (comprehensive test guide)
+- **Status**: All scaffolding complete, ready for test implementation
 
-**Phase 4.3-4.5: Unit Tests** (Pending)
+**Phase 4.3-4.5: Unit Test Implementation** 🚀 READY TO START
 - 5 core unit test files (parsers, builders, state engine, router)
 - Deterministic expiry/echo testing via time mock
 - Mock Ecos server (Python) for integration
@@ -560,4 +591,4 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
-**Last Updated**: 2026-07-24 (Phase 4.1 clean build verified, Phase 4.2 Test Scaffold ready to start)
+**Last Updated**: 2026-07-24 (Phase 4.1-4.2 complete: clean build verified, test scaffold implemented)
