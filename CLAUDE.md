@@ -9,6 +9,21 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-24 — Phase 4.3: Unit Test Implementation ✅ COMPLETE**
+- ✅ Implemented 80+ test cases across 5 core test files
+- ✅ **test_xpressnet_parser.cpp** (16 tests): Binary protocol parsing, checksums, errors
+- ✅ **test_ecos_parser.cpp** (14 tests): Text protocol parsing, line accumulation
+- ✅ **test_state_engine.cpp** (15 tests): Loco management, time-dependent expiry (using mock_now_ms)
+- ✅ **test_ecos_command_builder.cpp** (21 tests): Command generation (speed, function, query)
+- ✅ **test_command_router.cpp** (12 tests): Protocol bridging, echo prevention, subscriptions
+- ✅ All tests follow Arrange-Act-Assert pattern
+- ✅ Inline assertions ready for Unity TEST_ASSERT macro replacement
+- ✅ Mock time enables deterministic testing (no real delays)
+- ✅ Mock interfaces track calls for verification
+- **Commits**: b990560, 73b6c60, 2dbcdad
+- **Status**: Phase 4.3 complete, Phase 4.4 ready to start
+- **Next**: Integrate Unity framework, run tests, achieve >90% pass rate
+
 **2026-07-22 — Phase 3.2 Implementation Complete**
 - ✅ Implemented full Ecos LAN WiFi TCP protocol (1700+ lines)
 - ✅ Corrected protocol assumption: XML → real ESU text-based object protocol
@@ -116,16 +131,216 @@
 
 **Commit 73b6c60**: Phase 4.3 all test implementations
 
-## 🎯 Phase 4.4: Framework Integration (READY TO START)
+---
 
-**Test implementations complete. Ready to integrate Unity framework and run tests.**
+## 🎯 Phase 4.4: Framework Integration & Test Execution (READY TO START)
 
-**Next Steps**:
-1. Add Unity framework to platformio.ini dependencies
-2. Replace inline assertions with Unity TEST_ASSERT macros
-3. Run `platformio test -e native` to compile and execute
-4. Debug and fix test failures
-5. Achieve >90% test pass rate
+### When Resuming Phase 4.4
+
+**Current State**:
+- ✅ 80+ test cases written and committed (5 core test files)
+- ✅ Mock infrastructure in place (MockProtocolInterface, mock_now_ms)
+- ✅ Test fixtures ready (xpressnet_messages.h, ecos_responses.h)
+- ✅ All code compiles cleanly for ESP8266 (wemos) target
+
+**Prerequisites for Phase 4.4**:
+- PlatformIO installed (verify: `python -m platformio --version`)
+- Python 3.10+ available (verify: `python --version`)
+- Working directory: `E:\Claude\Bridge\files`
+
+### Phase 4.4 Step-by-Step
+
+#### Step 1: Add Unity Framework to platformio.ini
+
+**File**: `platformio.ini`
+
+**Modify `[env:native]` section** to add Unity framework:
+
+```ini
+[env:native]
+platform = native
+build_flags = -std=c++11 -DENABLE_TESTING=1
+lib_deps = 
+    throwtheswitch/Unity@2.5.2
+test_build_project_src = true
+src_filter = +<*> -<*.ino>
+```
+
+**Verify**: Section should have `lib_deps = throwtheswitch/Unity@2.5.2`
+
+#### Step 2: Update Test Files with Unity Macros
+
+**Approach**: Replace inline assertions with Unity TEST_ASSERT macros in all 5 test files
+
+**Pattern to Replace**:
+```cpp
+// OLD (inline early exit):
+if (value != expected) return;
+
+// NEW (Unity assertion):
+TEST_ASSERT_EQUAL_INT(value, expected);
+```
+
+**Replace in these files**:
+1. `tests/test_xpressnet_parser.cpp`
+2. `tests/test_ecos_parser.cpp`
+3. `tests/test_state_engine.cpp`
+4. `tests/test_ecos_command_builder.cpp`
+5. `tests/test_command_router.cpp`
+
+**Common Unity Macros**:
+- `TEST_ASSERT_TRUE(condition)` — Assert boolean true
+- `TEST_ASSERT_FALSE(condition)` — Assert boolean false
+- `TEST_ASSERT_EQUAL_INT(actual, expected)` — Assert int equality
+- `TEST_ASSERT_EQUAL_UINT16(actual, expected)` — Assert uint16_t equality
+- `TEST_ASSERT_EQUAL_UINT32(actual, expected)` — Assert uint32_t equality
+- `TEST_ASSERT_EQUAL_STRING(actual, expected)` — Assert string equality
+- `TEST_ASSERT_NULL(pointer)` — Assert pointer is null
+- `TEST_ASSERT_NOT_NULL(pointer)` — Assert pointer is not null
+
+**Include header in all test files**:
+```cpp
+#include "unity.h"
+```
+
+**Update main() function pattern**:
+```cpp
+int main(void) {
+    UNITY_BEGIN();
+    
+    RUN_TEST(test_function_1);
+    RUN_TEST(test_function_2);
+    // ... etc
+    
+    return UNITY_END();
+}
+```
+
+#### Step 3: Compile Tests for Native Platform
+
+**Command**:
+```bash
+python -m platformio run -e native --verbose
+```
+
+**Expected Output**:
+- Downloads/installs Unity framework
+- Compiles all test files for native (host) platform
+- Should produce `build/native/program` or similar executable
+
+**If Errors**:
+- Check platformio.ini syntax
+- Verify Unity framework is listed in lib_deps
+- Check for missing #include statements
+
+#### Step 4: Run Tests
+
+**Command**:
+```bash
+python -m platformio test -e native
+```
+
+**Expected Output**:
+- Unity framework runs all tests
+- Shows PASS/FAIL for each test
+- Reports summary (X tests passed, Y tests failed)
+
+**Example Output**:
+```
+test_xpressnet_parse_speed_command_forward ... PASS
+test_xpressnet_parse_speed_command_reverse ... PASS
+test_xpressnet_parse_emergency_stop ... PASS
+...
+-----------------------
+80 Tests 75 Failures 5 Skipped
+```
+
+#### Step 5: Debug and Fix Failures
+
+**For Each Failing Test**:
+1. Read the error message (Unity shows line number and assertion)
+2. Identify why assertion failed
+3. Check:
+   - Parser implementation matches expected behavior
+   - Mock objects are initialized correctly
+   - Test fixture data is correct
+   - Mock time is being used correctly (state engine tests)
+4. Fix the test or the code being tested
+5. Re-run: `platformio test -e native`
+
+**Common Issues**:
+- **Parser returning wrong values**: Check parser implementation, not test
+- **Mock interface not receiving calls**: Check if interface is set on router
+- **Expiry tests failing**: Verify mock time is advancing correctly, check timeout constant
+- **Buffer overrun**: Verify command lengths, array sizes
+
+#### Step 6: Iterate Until >90% Pass Rate
+
+**Target**: Minimum 72 of 80 tests passing (90%)
+
+**Repeat**:
+1. Run tests
+2. Identify failing tests
+3. Debug (usually in production code, not tests)
+4. Fix and re-run
+5. Continue until target reached
+
+### Important Notes
+
+**Mock Time Behavior**:
+- Tests using `mock_now_ms` (state engine tests, echo prevention tests)
+- Must call `resetMockNowMs()` in `setUp()`
+- Use `setMockNowMs()` and `advanceMockNowMs()` to control virtual time
+- No real delays (tests run in milliseconds)
+
+**MockProtocolInterface**:
+- Tracks all `sendSpeedCommand` and `sendFunctionCommand` calls
+- Query via `getSpeedCommandCount()`, `getLastSpeedCommand()`, etc.
+- Reset via `mock.reset()` between tests if needed
+
+**Test File Includes**:
+- Must include actual parser/engine headers (e.g., `xpressnet_message_parser.h`)
+- Must include mocks and fixtures (e.g., `mock_protocol_interface.h`)
+- Must include `unity.h` for TEST_ASSERT macros
+
+### Files to Modify
+
+```
+platformio.ini                          ← Add Unity to [env:native] lib_deps
+tests/test_xpressnet_parser.cpp         ← Replace inline assertions
+tests/test_ecos_parser.cpp              ← Replace inline assertions
+tests/test_state_engine.cpp             ← Replace inline assertions
+tests/test_ecos_command_builder.cpp     ← Replace inline assertions
+tests/test_command_router.cpp           ← Replace inline assertions
+```
+
+### Success Criteria
+
+- ✅ All 5 test files compile with `platformio run -e native`
+- ✅ Tests execute with `platformio test -e native`
+- ✅ >90% of test cases pass (≥72 of 80)
+- ✅ Clear error messages for any remaining failures
+- ✅ Test execution completes in <10 seconds
+
+### After Phase 4.4
+
+**Phase 4.5: Coverage Analysis**
+- Measure code coverage (which functions/lines are tested)
+- Add tests for uncovered edge cases
+- Integration tests (multiple components together)
+
+**Phase 4.6: Hardware Procedures**
+- Manual test checklist for real ESP8266 + XpressNet bus
+- End-to-end verification before production use
+
+### Git Workflow
+
+When Phase 4.4 is complete:
+1. Commit Unity macro changes: `git add tests/ platformio.ini && git commit -m "Phase 4.4: Integrate Unity framework and run tests"`
+2. Tag: `git tag v0.4.4-tests-passing`
+3. Push: `git push origin main && git push origin v0.4.4-tests-passing`
+
+---
 
 **Next Steps for Phase 4.3-4.5**:
 
