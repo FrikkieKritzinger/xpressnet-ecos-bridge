@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <ESP8266WiFi.h>
 #include "../../interfaces/interface_base.h"
+#include "../../utils/timing.h"
 #include "ecos_message_parser.h"
 
 // Forward declaration
@@ -110,8 +111,6 @@ private:
     // ADDRESS MAPPING (DCC address ↔ Ecos object ID)
     // ========================================================================
 
-    static const int MAX_ECOS_OBJECTS = 100;
-
     struct AddressMapEntry {
         uint16_t dcc_address;
         uint16_t ecos_id;
@@ -142,8 +141,6 @@ private:
     // ========================================================================
     // PENDING QUERY BUFFER
     // ========================================================================
-
-    static const int MAX_PENDING_QUERIES = 5;
 
     struct PendingQuery {
         uint16_t address;
@@ -199,7 +196,6 @@ private:
     // OUTGOING COMMAND QUEUE (for while disconnected)
     // ========================================================================
 
-    static const int MAX_OUTGOING_QUEUE = 10;
     static const int MAX_COMMAND_LENGTH = 80;
 
     struct QueuedCommand {
@@ -227,8 +223,8 @@ private:
     // CONNECTION/BACKOFF MANAGEMENT
     // ========================================================================
 
-    TimedTask heartbeat_timer{ECOS_HEARTBEAT_INTERVAL};
-    TimedTask address_map_refresh_timer{ECOS_ADDRESS_MAP_REFRESH_INTERVAL};
+    TimedTask heartbeat_timer;
+    TimedTask address_map_refresh_timer;
 
     uint16_t reconnect_attempt;              // Current backoff level (0-3)
     unsigned long last_reconnect_attempt;

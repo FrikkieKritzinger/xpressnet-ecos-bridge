@@ -73,7 +73,7 @@ bool StateEngine::addOrUpdateLoco(uint16_t address, const LocoState& state) {
         // Update existing locomotive
         LocoState& existing = locos[index];
         
-        DEBUG_STATE_PRINTF("Updating loco %u: speed=%u dir=%u fn=0x%lx\n",
+        DEBUG_STATE_PRINTF("Updating loco %u: speed=%u dir=%u fn=0x%x\n",
                           address, state.speed, state.direction, state.functions);
         
         existing.speed = state.speed;
@@ -186,7 +186,7 @@ bool StateEngine::removeLocoByAddress(uint16_t address) {
 // EXPUNGE INACTIVE LOCOMOTIVES
 // ============================================================================
 
-int StateEngine::expungeInactiveLocos() {
+int StateEngine::expungeInactiveLocos(uint16_t* removed_out, int max_out) {
     /*
      * Remove all locos not updated in LOCO_INACTIVITY_TIMEOUT
      * Called periodically (every ~30 seconds from main loop)
@@ -302,7 +302,7 @@ void StateEngine::debugPrintAllLocos() const {
         const LocoState& loco = locos[i];
         unsigned long age = now - loco.last_update_ms;
         
-        DEBUG_STATE_PRINTF("%4u %3u %s   0x%06lx %7lu %-9s %s\n",
+        DEBUG_STATE_PRINTF("%4u %3u %s   0x%06x %7lu %-9s %s\n",
                           loco.dcc_address,
                           loco.speed,
                           (loco.direction ? "F" : "R"),
@@ -332,7 +332,7 @@ void StateEngine::debugPrintLoco(uint16_t address) const {
     DEBUG_STATE_PRINTF("\n=== Locomotive %u ===\n", address);
     DEBUG_STATE_PRINTF("Speed:              %u\n", loco.speed);
     DEBUG_STATE_PRINTF("Direction:         %s\n", loco.direction ? "Forward" : "Reverse");
-    DEBUG_STATE_PRINTF("Functions:         0x%08lx\n", loco.functions);
+    DEBUG_STATE_PRINTF("Functions:         0x%08x\n", loco.functions);
     
     // Print individual functions
     DEBUG_STATE_PRINT("  Functions: ");

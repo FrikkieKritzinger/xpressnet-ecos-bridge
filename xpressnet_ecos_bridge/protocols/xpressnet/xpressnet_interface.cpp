@@ -58,7 +58,8 @@ bool XpressNetInterface::begin() {
 
         // Initialize Serial1 for XpressNet (9600 baud, 8N1)
         // XpressNet uses 9-bit protocol, but Arduino handles it at 8-bit level
-        Serial1.begin(XPRESSNET_BAUD, SERIAL_8N1, XPRESSNET_RX_PIN, XPRESSNET_TX_PIN);
+        // ESP8266 Serial1: RX fixed to D7 (GPIO13), TX configurable (default D8/GPIO15)
+        Serial1.begin(XPRESSNET_BAUD, SERIAL_8N1, SERIAL_FULL, XPRESSNET_TX_PIN);
 
         if (!Serial1) {
             DEBUG_XNET_PRINTF("ERROR: Serial1 initialization failed!\n");
@@ -252,7 +253,7 @@ void XpressNetInterface::handleCommand(const XNetCommand& cmd) {
             break;
 
         case XNetCommand::FUNCTION:
-            DEBUG_XNET_PRINTF("XpressNet RX: Function - Addr=%u Fn=0x%08lx\n",
+            DEBUG_XNET_PRINTF("XpressNet RX: Function - Addr=%u Fn=0x%08x\n",
                             cmd.address, cmd.functions);
             // Route function command
             router->handleXpressNetFunctionCommand(cmd.address, cmd.functions);
@@ -313,7 +314,7 @@ void XpressNetInterface::sendFunctionCommand(uint16_t address, uint32_t function
         }
     }
 
-    DEBUG_XNET_PRINTF("XpressNet TX: Functions - Addr=%u Fn=0x%08lx\n",
+    DEBUG_XNET_PRINTF("XpressNet TX: Functions - Addr=%u Fn=0x%08x\n",
                      address, functions);
 }
 

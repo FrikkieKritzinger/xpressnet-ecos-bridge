@@ -143,13 +143,18 @@ inline bool isWithinTimeout(unsigned long timestamp, unsigned long timeout) {
 class TimedTask {
 public:
     /**
+     * Default constructor - creates task with 0 interval (must be reconfigured)
+     */
+    TimedTask() : last_execute(millis()), interval(0) {}
+
+    /**
      * Create a task that executes at specified interval
-     * 
+     *
      * @param interval_ms How often to trigger (milliseconds)
      * @param execute_immediately If true, triggers on first call
      */
     explicit TimedTask(unsigned long interval_ms, bool execute_immediately = false)
-        : last_execute(execute_immediately ? 0 : millis()), 
+        : last_execute(execute_immediately ? 0 : millis()),
           interval(interval_ms) {}
     
     /**
