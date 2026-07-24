@@ -245,14 +245,14 @@ inline bool checkMemoryAndWarn(uint32_t critical_threshold = MEMORY_WARNING_CRIT
  */
 inline void debugPrintMemory() {
     MemoryDiagnostics mem = getMemoryDiagnostics();
-    
+
     Serial.println("\n=== Memory Diagnostics ===");
-    Serial.printf("Free heap:        %lu bytes\n", mem.free_heap);
-    Serial.printf("Largest block:    %lu bytes\n", mem.largest_block);
+    Serial.printf("Free heap:        %u bytes\n", mem.free_heap);
+    Serial.printf("Largest block:    %u bytes\n", mem.largest_block);
     Serial.printf("Fragmentation:    %u%%\n", mem.fragmentation);
     Serial.printf("Memory usage:     %u%%\n", mem.pressure);
-    Serial.printf("Sketch size:      %lu bytes\n", mem.sketch_size);
-    Serial.printf("Free flash:       %lu bytes\n", mem.free_sketch_space);
+    Serial.printf("Sketch size:      %u bytes\n", mem.sketch_size);
+    Serial.printf("Free flash:       %u bytes\n", mem.free_sketch_space);
     Serial.printf("CPU frequency:    %u MHz\n", mem.cpu_freq_mhz);
     Serial.printf("Memory status:    %s\n", getMemoryStatus());
     Serial.println("==========================\n");
@@ -271,7 +271,7 @@ inline void debugPrintMemory() {
 inline void* testAllocateMemory(size_t size_bytes) {
     void* ptr = malloc(size_bytes);
     if (ptr) {
-        Serial.printf("Allocated %u bytes at %p, free heap now: %lu\n", 
+        Serial.printf("Allocated %u bytes at %p, free heap now: %u\n",
                      size_bytes, ptr, ESP.getFreeHeap());
     } else {
         Serial.printf("Failed to allocate %u bytes!\n", size_bytes);

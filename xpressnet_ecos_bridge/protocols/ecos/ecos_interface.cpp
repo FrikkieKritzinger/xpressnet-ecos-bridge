@@ -29,6 +29,8 @@ EcosInterface::EcosInterface()
     : current_status(ComponentStatus::DISCONNECTED),
       connected_time_ms(0),
       last_message_time(0),
+      parser(nullptr),
+      router(nullptr),
       address_map_count(0),
       address_map_last_refresh(0),
       pending_query_count(0),
@@ -36,8 +38,8 @@ EcosInterface::EcosInterface()
       outgoing_queue_tail(0),
       echo_queue_head(0),
       echo_queue_tail(0),
-      router(nullptr),
-      parser(nullptr),
+      heartbeat_timer(ECOS_HEARTBEAT_INTERVAL),
+      address_map_refresh_timer(ECOS_ADDRESS_MAP_REFRESH_INTERVAL),
       reconnect_attempt(0),
       last_reconnect_attempt(0) {
     memset(address_map, 0, sizeof(address_map));
@@ -520,7 +522,7 @@ void EcosInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
         }
     }
 
-    DEBUG_ECOS_PRINTF("Ecos TX: Functions loco %u = 0x%08lx\n", address, functions);
+    DEBUG_ECOS_PRINTF("Ecos TX: Functions loco %u = 0x%08x\n", address, functions);
 }
 
 // ============================================================================

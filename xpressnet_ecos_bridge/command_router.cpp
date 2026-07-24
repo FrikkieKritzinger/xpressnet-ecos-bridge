@@ -150,7 +150,7 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
      * Functions are F0-F31 (32-bit bitmap)
      */
     
-    DEBUG_XNET_PRINTF("XpressNet: Loco %u Functions 0x%08lx\n", address, functions);
+    DEBUG_XNET_PRINTF("XpressNet: Loco %u Functions 0x%08x\n", address, functions);
     
     // Validate address
     if (!isValidDccAddress(address)) {
@@ -271,7 +271,7 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
      * Process function state update from Ecos
      */
     
-    DEBUG_ECOS_PRINTF("Ecos: Loco %u Functions 0x%08lx\n", address, functions);
+    DEBUG_ECOS_PRINTF("Ecos: Loco %u Functions 0x%08x\n", address, functions);
     
     // Validate
     if (!isValidDccAddress(address)) {
