@@ -50,11 +50,29 @@
 - **Commits**: 521ae62 (design doc), 2d89d64 (foundation), ae6b990 (CLAUDE.md update)
 - **Status**: Phase 4.1 foundation complete, paused for later resumption
 
+**2026-07-24 — Phase 4.1 Build Verification & Compilation Fixes ✅ VERIFIED**
+- ✅ **First build test** revealed 8 compilation issues that needed fixing:
+  1. Macro redefinition conflicts (MAX_ECOS_OBJECTS, MAX_PENDING_QUERIES, MAX_OUTGOING_QUEUE)
+     - Removed static const redeclarations in ecos_interface.h that conflicted with config.h macros
+  2. Missing include: Added `#include "../../utils/timing.h"` to ecos_interface.h
+  3. TimedTask: Added default constructor for member variable initialization
+  4. Serial1.begin(): Fixed parameter order (use SERIAL_FULL instead of GPIO pin)
+  5. Format specifiers: Fixed %lx → %x and %lu → %u for uint32_t throughout codebase
+  6. Member initialization order: Reordered EcosInterface constructor to match declaration order
+  7. Function signature: Fixed expungeInactiveLocos() to include optional parameters
+- ✅ **Clean build achieved**:
+  * ESP8266 (wemos) target: **PASS** (no errors, no warnings)
+  * Memory usage: 43.4% RAM (35588 / 81920 bytes), 30.0% Flash (313215 / 1044464 bytes)
+  * Excellent headroom for testing framework additions
+- **Commit 7211782**: Fix compilation issues
+- **Tag v0.4.1-clean-build**: Versioned clean build pushed to GitHub
+- **Status**: Foundation code now verified to compile cleanly, ready for Phase 4.2
+
 ---
 
-## 🎯 Next Session (Phase 4.2)
+## 🎯 Phase 4.2: Test Scaffold (READY TO START)
 
-**When resuming Phase 4, start with Phase 4.2: Test Scaffold**
+**Build verification complete. All compilation issues resolved. Ready to begin Phase 4.2.**
 
 1. Create `tests/` directory structure:
    ```
@@ -204,9 +222,14 @@ All disabled features = zero compiled code overhead.
   * `env:wemos` — ESP8266 production
   * `env:native` — Host compilation for testing (requires g++/MinGW)
   * `env:debug` — ESP8266 with debug enabled
+- **Build Verification** (2026-07-24): ✅ Clean build achieved
+  * Fixed 8 compilation issues (macro conflicts, missing includes, format specifiers)
+  * ESP8266 (wemos) target: PASS (no errors, no warnings)
+  * Memory: 43.4% RAM, 30.0% Flash (excellent headroom)
+  * Tagged v0.4.1-clean-build, pushed to GitHub
 - **Design Document**: `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`
 
-**Phase 4.2: Test Scaffold** ⏳ NEXT
+**Phase 4.2: Test Scaffold** 🚀 READY TO START
 - Create tests/ directory structure with mocks and fixtures
 - Set up MockProtocolInterface for router testing
 - Prepare XpressNet message and Ecos response fixtures
@@ -537,4 +560,4 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
-**Last Updated**: 2026-07-22 (Phase 4.1 Foundation & Testing Infrastructure complete, paused)
+**Last Updated**: 2026-07-24 (Phase 4.1 clean build verified, Phase 4.2 Test Scaffold ready to start)
