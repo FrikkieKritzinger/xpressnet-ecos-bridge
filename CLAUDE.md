@@ -571,17 +571,18 @@ All disabled features = zero compiled code overhead.
 - **12 tests**: Command router (bridging, echo prevention, subscriptions)
 - **Status**: All tests written with inline assertions, ready for Unity integration
 
-**Phase 4.4: Framework Integration & Test Execution** 🚀 READY TO START
-- Configure Unity framework in platformio.ini
-- Replace inline assertions with Unity TEST_ASSERT macros
-- Compile with PlatformIO native environment
-- Execute tests and debug failures
-- Target: >90% pass rate
+**Phase 4.4: Framework Integration & Test Execution** ✅ COMPLETE
+- Unity framework integrated, native build environment established (MinGW-w64)
+- All inline assertions replaced with real TEST_ASSERT macros
+- 84/84 tests passing (grew from 80+ as test_ecos_command_builder went from 21 stubs to 25 real tests)
+- Fixed 2 real production bugs and several fixture bugs the tests caught (see 2026-07-27 entry above)
+- ESP8266 (wemos) firmware build re-verified clean after all changes
+- **Commit**: 37c17d2
 
-**Phase 4.5: Test Coverage Analysis** (Pending)
-- Measure code coverage with PlatformIO
-- Add additional tests for edge cases
-- Integration tests (multiple components together)
+**Phase 4.5: Test Coverage Analysis** 🚀 READY TO START (Next)
+- Measure code coverage with PlatformIO (gcov/lcov via native env)
+- Add tests for edge cases not yet covered (e.g., true short-address branch in XNetMessageParser, buffer-overflow paths, MAX_LOCOS capacity limit)
+- Integration tests (multiple components together, e.g. full XpressNet→CommandRouter→Ecos round trip)
 
 **Phase 4.6: Hardware Procedures** (Pending)
 - Manual test checklist for real ESP8266 + XpressNet bus
@@ -904,4 +905,4 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
-**Last Updated**: 2026-07-24 (Phase 4.1-4.3 complete: 80+ tests implemented, ready for Framework Integration)
+**Last Updated**: 2026-07-27 (Phase 4.4 complete: native test harness working for the first time, 84/84 tests passing, ready for Phase 4.5 coverage analysis)
