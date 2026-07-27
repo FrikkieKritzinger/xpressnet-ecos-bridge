@@ -66,6 +66,79 @@ void test_router_route_function_command(void) {
     TEST_ASSERT_EQUAL_UINT32(0x01, ecos_mock.getLastFunctionCommand().functions);
 }
 
+void test_router_xpressnet_function_command_updates_existing_loco(void) {
+    // handleXpressNetFunctionCommand's "existing loco" branch (as opposed
+    // to the "brand new loco" branch exercised above)
+    CommandRouter router;
+
+    router.handleXpressNetCommand(50, 64, 1);            // creates loco 50
+    router.handleXpressNetFunctionCommand(50, 0x03);      // updates it
+
+    LocoState state;
+    router.getStateEngine().getLoco(50, state);
+    TEST_ASSERT_EQUAL_UINT32(0x03, state.functions);
+    TEST_ASSERT_EQUAL_UINT8(64, state.speed);  // Speed preserved
+}
+
+// ============================================================================
+// TESTS - VALIDATION (all four handlers)
+// ============================================================================
+
+void test_router_xpressnet_function_command_rejects_invalid_address(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleXpressNetFunctionCommand(0, 0x01);
+
+    TEST_ASSERT_EQUAL_INT(0, ecos_mock.getFunctionCommandCount());
+    TEST_ASSERT_TRUE(router.getStateEngine().findLoco(0) < 0);
+}
+
+void test_router_ecos_command_rejects_invalid_address(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleEcosCommand(0, 64, 1);
+
+    TEST_ASSERT_EQUAL_INT(0, xnet_mock.getSpeedCommandCount());
+    TEST_ASSERT_TRUE(router.getStateEngine().findLoco(0) < 0);
+}
+
+void test_router_ecos_command_rejects_invalid_speed(void) {
+    CommandRouter router;
+
+    router.handleEcosCommand(100, 127, 1);  // 127 is E-stop, not a valid Ecos speed here
+
+    LocoState state;
+    TEST_ASSERT_FALSE(router.getStateEngine().getLoco(100, state));
+}
+
+void test_router_ecos_function_command_rejects_invalid_address(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleEcosFunctionCommand(0, 0x01);
+
+    TEST_ASSERT_EQUAL_INT(0, xnet_mock.getFunctionCommandCount());
+    TEST_ASSERT_TRUE(router.getStateEngine().findLoco(0) < 0);
+}
+
+void test_router_ecos_function_command_updates_existing_loco(void) {
+    // handleEcosFunctionCommand's "existing loco" branch
+    CommandRouter router;
+
+    router.handleEcosCommand(75, 50, 1);              // creates loco 75
+    router.handleEcosFunctionCommand(75, 0x07);        // updates it
+
+    LocoState state;
+    router.getStateEngine().getLoco(75, state);
+    TEST_ASSERT_EQUAL_UINT32(0x07, state.functions);
+    TEST_ASSERT_EQUAL_UINT8(50, state.speed);  // Speed preserved
+}
+
 // ============================================================================
 // TESTS - ECHO PREVENTION
 // ============================================================================
@@ -109,6 +182,23 @@ void test_router_echo_prevention_window_expires(void) {
     router.handleEcosCommand(100, 64, 1);         // t=600, from ECOS
 
     TEST_ASSERT_EQUAL_INT(1, xnet_mock.getSpeedCommandCount());  // Should pass through
+}
+
+void test_router_echo_prevention_reverse_direction_suppressed(void) {
+    // The opposite-source suppression test above only exercised
+    // handleEcosCommand's own echo check (XpressNet-first, Ecos-second).
+    // This exercises handleXpressNetCommand's own echo check (lines
+    // 90-92) by reversing the order: Ecos-first, XpressNet-second.
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleEcosCommand(100, 64, 1);         // t=0, from ECOS (broadcasts to xpressnet, not ecos)
+    router.handleXpressNetCommand(100, 90, 1);     // t=0, from XPRESSNET (opposite source) - should be suppressed
+
+    // If NOT suppressed, this second call would broadcast to ecos_mock
+    // (source=XPRESSNET broadcasts to Ecos). Suppression means it never does.
+    TEST_ASSERT_EQUAL_INT(0, ecos_mock.getSpeedCommandCount());
 }
 
 // ============================================================================
@@ -238,6 +328,34 @@ void test_router_surfaces_ecos_status_in_system_status(void) {
     TEST_ASSERT_EQUAL_INT((int)ComponentStatus::CONNECTED, (int)status.ecos_status);
 }
 
+void test_router_surfaces_xnet_status_in_system_status(void) {
+    // getSystemStatus() reads xpressnet->getStatus() only when an
+    // XpressNet interface is actually set - covers that branch, distinct
+    // from the "xpressnet == nullptr -> DISCONNECTED" default path.
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    xnet_mock.setStatus(ComponentStatus::CONNECTED);
+    router.setXpressNetInterface(&xnet_mock);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_INT((int)ComponentStatus::CONNECTED, (int)status.xnet_status);
+}
+
+#if ENABLE_DEBUG
+void test_router_debug_print_echo_state_does_not_crash(void) {
+    // Smoke test for debugPrintEchoState(), covering both its
+    // "still within window" and "window expired" branches.
+    CommandRouter router;
+    router.handleXpressNetCommand(100, 64, 1);
+
+    router.debugPrintEchoState();       // age < ECHO_PREVENTION_WINDOW
+    advanceMockNowMs(600);
+    router.debugPrintEchoState();       // age >= ECHO_PREVENTION_WINDOW
+
+    TEST_PASS();  // Reaching here without crashing is the assertion
+}
+#endif
+
 // ============================================================================
 // TEST RUNNER
 // ============================================================================
@@ -247,8 +365,16 @@ int main(void) {
 
     RUN_TEST(test_router_route_xpressnet_speed_to_ecos);
     RUN_TEST(test_router_route_function_command);
+    RUN_TEST(test_router_xpressnet_function_command_updates_existing_loco);
+
+    RUN_TEST(test_router_xpressnet_function_command_rejects_invalid_address);
+    RUN_TEST(test_router_ecos_command_rejects_invalid_address);
+    RUN_TEST(test_router_ecos_command_rejects_invalid_speed);
+    RUN_TEST(test_router_ecos_function_command_rejects_invalid_address);
+    RUN_TEST(test_router_ecos_function_command_updates_existing_loco);
 
     RUN_TEST(test_router_echo_prevention_opposite_source_suppressed);
+    RUN_TEST(test_router_echo_prevention_reverse_direction_suppressed);
     RUN_TEST(test_router_same_source_repeat_is_not_echo);
     RUN_TEST(test_router_echo_prevention_window_expires);
 
@@ -265,6 +391,11 @@ int main(void) {
     RUN_TEST(test_router_reject_invalid_speed);
 
     RUN_TEST(test_router_surfaces_ecos_status_in_system_status);
+    RUN_TEST(test_router_surfaces_xnet_status_in_system_status);
+
+    #if ENABLE_DEBUG
+    RUN_TEST(test_router_debug_print_echo_state_does_not_crash);
+    #endif
 
     return UNITY_END();
 }

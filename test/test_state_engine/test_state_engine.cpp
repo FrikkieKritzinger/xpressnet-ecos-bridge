@@ -281,6 +281,118 @@ void test_state_engine_remove_loco_by_address(void) {
     TEST_ASSERT_TRUE(engine.findLoco(100) < 0);
 }
 
+void test_state_engine_remove_nonexistent_loco_by_address(void) {
+    // removeLocoByAddress for an address that was never added should fail cleanly
+    StateEngine engine;
+
+    bool success = engine.removeLocoByAddress(999);
+    TEST_ASSERT_FALSE(success);
+}
+
+// ============================================================================
+// TESTS - VALIDATION & CAPACITY
+// ============================================================================
+
+void test_state_engine_reject_invalid_address(void) {
+    // addOrUpdateLoco should reject addresses outside 1-9999
+    StateEngine engine;
+    LocoState state;
+    state.dcc_address = 0;
+    state.speed = 50;
+
+    bool success = engine.addOrUpdateLoco(0, state);
+    TEST_ASSERT_FALSE(success);
+    TEST_ASSERT_TRUE(engine.findLoco(0) < 0);
+}
+
+void test_state_engine_full_capacity_rejects_new_loco(void) {
+    // Fill the engine to MAX_LOCOS, then verify the next add is rejected
+    StateEngine engine;
+
+    for (int i = 0; i < MAX_LOCOS; i++) {
+        LocoState state;
+        state.dcc_address = 1 + i;
+        state.speed = 0;
+        TEST_ASSERT_TRUE(engine.addOrUpdateLoco(1 + i, state));
+    }
+    TEST_ASSERT_EQUAL_INT(MAX_LOCOS, engine.getLocoCount());
+
+    // One more (a brand new address) should be rejected - engine is full
+    LocoState overflow_state;
+    overflow_state.dcc_address = 9999;
+    overflow_state.speed = 0;
+    bool success = engine.addOrUpdateLoco(9999, overflow_state);
+    TEST_ASSERT_FALSE(success);
+    TEST_ASSERT_EQUAL_INT(MAX_LOCOS, engine.getLocoCount());  // Unchanged
+
+    // Updating an EXISTING loco should still work even when full
+    LocoState update_state;
+    update_state.dcc_address = 1;
+    update_state.speed = 42;
+    TEST_ASSERT_TRUE(engine.addOrUpdateLoco(1, update_state));
+}
+
+// ============================================================================
+// TESTS - INDEX-BASED ITERATION
+// ============================================================================
+
+void test_state_engine_get_loco_by_index_valid(void) {
+    StateEngine engine;
+    LocoState state;
+    state.dcc_address = 100;
+    state.speed = 64;
+    engine.addOrUpdateLoco(100, state);
+
+    LocoState* loco = engine.getLocoByIndex(0);
+    TEST_ASSERT_NOT_NULL(loco);
+    TEST_ASSERT_EQUAL_UINT16(100, loco->dcc_address);
+    TEST_ASSERT_EQUAL_UINT8(64, loco->speed);
+}
+
+void test_state_engine_get_loco_by_index_invalid(void) {
+    StateEngine engine;
+    LocoState state;
+    state.dcc_address = 100;
+    engine.addOrUpdateLoco(100, state);
+
+    TEST_ASSERT_NULL(engine.getLocoByIndex(-1));
+    TEST_ASSERT_NULL(engine.getLocoByIndex(1));  // Only index 0 exists
+}
+
+void test_state_engine_get_loco_by_index_const(void) {
+    StateEngine engine;
+    LocoState state;
+    state.dcc_address = 100;
+    state.speed = 64;
+    engine.addOrUpdateLoco(100, state);
+
+    const StateEngine& const_engine = engine;
+    const LocoState* loco = const_engine.getLocoByIndex(0);
+    TEST_ASSERT_NOT_NULL(loco);
+    TEST_ASSERT_EQUAL_UINT16(100, loco->dcc_address);
+    TEST_ASSERT_NULL(const_engine.getLocoByIndex(-1));
+}
+
+// ============================================================================
+// TESTS - CLEAR
+// ============================================================================
+
+void test_state_engine_clear_removes_all_locos(void) {
+    StateEngine engine;
+
+    for (int i = 0; i < 5; i++) {
+        LocoState state;
+        state.dcc_address = 100 + i;
+        engine.addOrUpdateLoco(100 + i, state);
+    }
+    TEST_ASSERT_EQUAL_INT(5, engine.getLocoCount());
+
+    engine.clear();
+
+    TEST_ASSERT_EQUAL_INT(0, engine.getLocoCount());
+    TEST_ASSERT_TRUE(engine.findLoco(100) < 0);
+}
+
 // ============================================================================
 // TESTS - EDGE CASES
 // ============================================================================
@@ -343,6 +455,16 @@ int main(void) {
 
     RUN_TEST(test_state_engine_loco_count);
     RUN_TEST(test_state_engine_remove_loco_by_address);
+    RUN_TEST(test_state_engine_remove_nonexistent_loco_by_address);
+
+    RUN_TEST(test_state_engine_reject_invalid_address);
+    RUN_TEST(test_state_engine_full_capacity_rejects_new_loco);
+
+    RUN_TEST(test_state_engine_get_loco_by_index_valid);
+    RUN_TEST(test_state_engine_get_loco_by_index_invalid);
+    RUN_TEST(test_state_engine_get_loco_by_index_const);
+
+    RUN_TEST(test_state_engine_clear_removes_all_locos);
 
     RUN_TEST(test_state_engine_address_max_long);
     RUN_TEST(test_state_engine_address_min_long);

@@ -92,6 +92,25 @@ void test_xpressnet_parse_long_address(void) {
 }
 
 // ============================================================================
+// TESTS - LOW-LEVEL HELPERS (called directly, not just via parse())
+// ============================================================================
+
+void test_xpressnet_extract_address_short_form(void) {
+    // Bit 0x40 set in the high byte means SHORT address: the low byte IS
+    // the address (masked to 7 bits). This branch is never exercised via
+    // parse() with the current fixtures (they all use the long-address
+    // path), so it's tested directly here.
+    uint16_t address = XNetMessageParser::extractAddress(0x40, 50);
+    TEST_ASSERT_EQUAL_UINT16(50, address);
+}
+
+void test_xpressnet_determine_command_type_rejects_short_buffer(void) {
+    uint8_t data[] = {0x00, 0x64};
+    XNetCommand::Type type = XNetMessageParser::determineCommandType(data, 2);
+    TEST_ASSERT_EQUAL_INT(XNetCommand::INVALID, type);
+}
+
+// ============================================================================
 // TESTS - CHECKSUM VALIDATION
 // ============================================================================
 
@@ -106,6 +125,22 @@ void test_xpressnet_checksum_valid(void) {
 void test_xpressnet_checksum_invalid(void) {
     // XNET_BAD_CHECKSUM should fail validation
     TEST_ASSERT_FALSE(XNetMessageParser::isValidMessage(XNET_BAD_CHECKSUM, XNET_MSG_SIZE_VALID));
+}
+
+void test_xpressnet_parse_rejects_bad_checksum(void) {
+    // parse() itself must reject a bad-checksum message (not just isValidMessage()
+    // called in isolation) - this exercises parse()'s own checksum-failure branch.
+    XNetCommand cmd;
+    bool success = XNetMessageParser::parse(XNET_BAD_CHECKSUM, XNET_MSG_SIZE_VALID, cmd);
+
+    TEST_ASSERT_FALSE(success);
+    TEST_ASSERT_EQUAL_INT(XNetCommand::INVALID, cmd.type);
+}
+
+void test_xpressnet_isValidMessage_rejects_short_buffer(void) {
+    // isValidMessage() has its own length<4 guard, independent of parse()'s
+    uint8_t data[] = {0x00};
+    TEST_ASSERT_FALSE(XNetMessageParser::isValidMessage(data, 1));
 }
 
 void test_xpressnet_checksum_calculation(void) {
@@ -224,8 +259,13 @@ int main(void) {
     RUN_TEST(test_xpressnet_parse_function_command);
     RUN_TEST(test_xpressnet_parse_long_address);
 
+    RUN_TEST(test_xpressnet_extract_address_short_form);
+    RUN_TEST(test_xpressnet_determine_command_type_rejects_short_buffer);
+
     RUN_TEST(test_xpressnet_checksum_valid);
     RUN_TEST(test_xpressnet_checksum_invalid);
+    RUN_TEST(test_xpressnet_parse_rejects_bad_checksum);
+    RUN_TEST(test_xpressnet_isValidMessage_rejects_short_buffer);
     RUN_TEST(test_xpressnet_checksum_calculation);
 
     RUN_TEST(test_xpressnet_parse_incomplete_message);

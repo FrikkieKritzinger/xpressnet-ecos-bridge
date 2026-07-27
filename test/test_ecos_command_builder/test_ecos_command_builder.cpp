@@ -206,6 +206,13 @@ void test_ecos_parse_end_code_error(void) {
     TEST_ASSERT_EQUAL_INT16(1, code);
 }
 
+void test_ecos_parse_end_code_multi_digit(void) {
+    // Exercises the multi-digit accumulation loop (single-digit codes
+    // 0/1 never touch it)
+    int16_t code = ecosParseEndCode("<END 12 (Warning)>");
+    TEST_ASSERT_EQUAL_INT16(12, code);
+}
+
 void test_ecos_parse_end_code_invalid_line(void) {
     int16_t code = ecosParseEndCode("garbage");
     TEST_ASSERT_EQUAL_INT16(-1, code);
@@ -250,6 +257,7 @@ int main(void) {
     RUN_TEST(test_ecos_parse_event_object_id_not_an_event);
     RUN_TEST(test_ecos_parse_end_code_ok);
     RUN_TEST(test_ecos_parse_end_code_error);
+    RUN_TEST(test_ecos_parse_end_code_multi_digit);
     RUN_TEST(test_ecos_parse_end_code_invalid_line);
 
     return UNITY_END();

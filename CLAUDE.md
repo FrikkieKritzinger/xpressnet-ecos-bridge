@@ -9,6 +9,46 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-27 — Phase 4.5: Test Coverage Analysis ✅ COMPLETE**
+- ✅ **Coverage measurement set up**: `--coverage` + `-lgcov` added to `env:native` build
+  flags (gcov instrumentation), `gcovr` installed via pip for reporting (lcov isn't
+  available on Windows/MinGW). `-O0` added for accurate line mapping.
+- ✅ **Baseline measured**: 76.1% line / 88.1% function / 47.8% branch coverage across
+  the 5 core modules (state_engine.cpp, command_router.cpp, xpressnet_message_parser.cpp,
+  ecos_message_parser.cpp, ecos_protocol.cpp)
+- ✅ **27 new tests added** closing real gaps (not just line-count filler):
+  * **state_engine**: MAX_LOCOS capacity-full rejection, invalid-address rejection,
+    `getLocoByIndex()` (const + non-const, valid + invalid index - previously 0% covered),
+    `clear()`, removing a non-existent address
+  * **xpressnet_message_parser**: the short-address branch in `extractAddress()`
+    (bit 0x40 set - never exercised by any fixture, since they all use the long-address
+    path), `parse()`'s own checksum-failure branch (previously only `isValidMessage()`
+    was tested directly), `isValidMessage()`/`determineCommandType()` short-buffer guards
+  * **ecos_message_parser**: stray `<END>` without an open block, stray content line
+    before any block starts, bare empty line, line-too-long discard (>256 bytes),
+    block-too-many-lines oldest-discard (>20 lines), `addr[...]` key extraction
+  * **command_router**: invalid-address/speed rejection for the 3 handler methods that
+    only had it tested on the 4th (`handleXpressNetFunctionCommand`, `handleEcosCommand`,
+    `handleEcosFunctionCommand`), the "update existing loco" branch on the two function
+    handlers, reverse-direction echo suppression (only one direction was tested before),
+    `xpressnet->getStatus()` branch in `getSystemStatus()`, `debugPrintEchoState()` smoke test
+- ✅ **Result**: 88.3% line / 96.6% function / 58.1% branch coverage (up from the
+  baseline), **111/111 tests passing**
+- 📝 **Known limitation flagged (not fixed - out of scope for this pass)**: in
+  `xpressnet_message_parser.cpp`, `determineCommandType()`'s STATUS message classification
+  is currently unreachable dead code - the SPEED check (`data_byte & 0x7F <= 126`) and
+  E-stop check together partition the *entire* possible byte range, so no data_byte value
+  can ever fall through to the STATUS/INVALID checks below them for length>=4 messages.
+  STATUS message support was seemingly never fully wired up (comment says "minimal
+  parsing for now"). Needs a real design decision on how STATUS messages should be
+  distinguished on the wire before it can be fixed - same category of issue as the
+  FUNCTION/SPEED disambiguation fixed in Phase 4.4.
+- Remaining uncovered lines are narrow boundary conditions (e.g. a line landing exactly
+  at MAX_LINE_LENGTH-1 when '\n' arrives) or genuinely unreachable defensive code
+  (e.g. `processLine()`'s own empty-line guard, which `processByte()` already filters
+  before ever calling it) - diminishing returns past this point.
+- ESP8266 (wemos) firmware build re-verified unaffected (same 43.4% RAM / 30.0% Flash)
+
 **2026-07-27 — Phase 4.4: Framework Integration & Test Execution ✅ COMPLETE**
 - ✅ **Native build environment established** (previously never verified - g++ wasn't installed)
   * Installed MinGW-w64 (GCC 16.1.0) via winget
@@ -579,12 +619,21 @@ All disabled features = zero compiled code overhead.
 - ESP8266 (wemos) firmware build re-verified clean after all changes
 - **Commit**: 37c17d2
 
-**Phase 4.5: Test Coverage Analysis** 🚀 READY TO START (Next)
-- Measure code coverage with PlatformIO (gcov/lcov via native env)
-- Add tests for edge cases not yet covered (e.g., true short-address branch in XNetMessageParser, buffer-overflow paths, MAX_LOCOS capacity limit)
-- Integration tests (multiple components together, e.g. full XpressNet→CommandRouter→Ecos round trip)
+**Phase 4.5: Test Coverage Analysis** ✅ COMPLETE
+- Coverage measured via gcov + gcovr (lcov unavailable on Windows/MinGW): 76.1%→88.3%
+  line, 88.1%→96.6% function, 47.8%→58.1% branch across the 5 core modules
+- 27 new tests added (111 total) closing real gaps: MAX_LOCOS capacity limit,
+  `getLocoByIndex()` (was 0% covered), the true short-address branch in
+  `extractAddress()`, buffer-overflow/line-too-long/block-too-many-lines paths in
+  `EcosMessageParser`, invalid-input validation on 3 of 4 CommandRouter handlers that
+  only had it tested on the 4th, reverse-direction echo suppression
+- Flagged (not fixed): `determineCommandType()`'s STATUS message path is unreachable
+  dead code - needs a real design decision, out of scope for this pass
+- Integration tests (multi-component round trips) not yet added - deferred, current
+  unit-level coverage was the higher-value target
+- **Status**: 111/111 tests passing, wemos firmware build re-verified unaffected
 
-**Phase 4.6: Hardware Procedures** (Pending)
+**Phase 4.6: Hardware Procedures** 🚀 READY TO START (Next)
 - Manual test checklist for real ESP8266 + XpressNet bus
 
 ---
@@ -905,4 +954,4 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
-**Last Updated**: 2026-07-27 (Phase 4.4 complete: native test harness working for the first time, 84/84 tests passing, ready for Phase 4.5 coverage analysis)
+**Last Updated**: 2026-07-27 (Phase 4.5 complete: coverage measured and improved to 88.3% line / 96.6% function / 58.1% branch, 111/111 tests passing, ready for Phase 4.6 hardware procedures)
