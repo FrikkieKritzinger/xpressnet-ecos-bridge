@@ -18,7 +18,11 @@
 
 // Global mock time value (in milliseconds)
 // Updated by test harness to control virtual time progression
-static unsigned long mock_now_ms_value = 0;
+//
+// Non-static and typed uint32_t to exactly match the `extern uint32_t
+// mock_now_ms;` declaration in utils/now_ms.h - that's the actual symbol
+// now_ms() links against on native builds.
+uint32_t mock_now_ms = 0;
 
 // ============================================================================
 // PUBLIC API - Tests use these functions
@@ -32,7 +36,7 @@ static unsigned long mock_now_ms_value = 0;
  *   unsigned long now = getMockNowMs();
  */
 unsigned long getMockNowMs(void) {
-    return mock_now_ms_value;
+    return mock_now_ms;
 }
 
 /**
@@ -45,7 +49,7 @@ unsigned long getMockNowMs(void) {
  *   setMockNowMs(300000);      // Jump to 5 minutes
  */
 void setMockNowMs(unsigned long ms) {
-    mock_now_ms_value = ms;
+    mock_now_ms = ms;
 }
 
 /**
@@ -57,7 +61,7 @@ void setMockNowMs(unsigned long ms) {
  *   advanceMockNowMs(300000);  // Advance 5 minutes
  */
 void advanceMockNowMs(unsigned long delta_ms) {
-    mock_now_ms_value += delta_ms;
+    mock_now_ms += delta_ms;
 }
 
 /**
@@ -67,7 +71,7 @@ void advanceMockNowMs(unsigned long delta_ms) {
  *   resetMockNowMs();
  */
 void resetMockNowMs(void) {
-    mock_now_ms_value = 0;
+    mock_now_ms = 0;
 }
 
 // ============================================================================
@@ -82,7 +86,7 @@ void resetMockNowMs(void) {
  * @return Current mock time in milliseconds
  */
 unsigned long millis(void) {
-    return mock_now_ms_value;
+    return mock_now_ms;
 }
 
 // ============================================================================

@@ -79,6 +79,19 @@ public:
      * @return string like "XpressNet", "Ecos", "LocoNet"
      */
     virtual const char* getName() const = 0;
+
+    /**
+     * Subscribe to unsolicited updates for a locomotive, if the protocol
+     * supports it (e.g. Ecos "request(id, view)"). No-op by default -
+     * only Ecos overrides this; XpressNet has no subscription concept.
+     */
+    virtual void subscribeToLoco(uint16_t address) { (void)address; }
+
+    /**
+     * Unsubscribe from a locomotive's updates, if the protocol supports it.
+     * No-op by default.
+     */
+    virtual void unsubscribeFromLoco(uint16_t address) { (void)address; }
 };
 
 // ============================================================================

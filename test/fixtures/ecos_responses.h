@@ -13,17 +13,25 @@
 // ============================================================================
 
 // Simple get request reply (e.g., query loco status)
-// Format: <REPLY id 100 speed[64] dir[1] func[0,1]>
-static const char* ECOS_REPLY_SPEED_QUERY = "<REPLY id 100 speed[64] dir[1] func[0,0]>";
+// Real block shape: start marker (no id here - REPLY doesn't carry one),
+// then a property line with the object ID as its leading token, then <END>.
+static const char* ECOS_REPLY_SPEED_QUERY =
+    "<REPLY get(100, view)>\n"
+    "100 speed[64] direction[1] func[0,0]\n"
+    "<END 0 (OK)>\n";
 
 // Event: Loco speed change (unsolicited update from Ecos)
-// Format: <EVENT id 101 speed[90] dir[1] func[1,0]>
-static const char* ECOS_EVENT_SPEED_CHANGE = "<EVENT id 101 speed[90] dir[1] func[1,0]>";
+// EVENT lines DO carry the object ID directly (see ecosParseEventObjectId),
+// format "<EVENT 1000>" - no "id" keyword.
+static const char* ECOS_EVENT_SPEED_CHANGE =
+    "<EVENT 101>\n"
+    "101 speed[90] direction[1] func[1,0]\n"
+    "<END 0 (OK)>\n";
 
 // Multiple lines (typical: request then reply)
 static const char* ECOS_MULTILINE_RESPONSE =
     "request(100, view)\n"
-    "<REPLY id 100 speed[64] dir[1] func[0,0]>\n"
+    "<REPLY id 100 speed[64] direction[1] func[0,0]>\n"
     "<END>";
 
 // Query objects response (address map discovery)
@@ -76,8 +84,6 @@ static const char* ECOS_MULTIPLE_ENDS =
 // RESPONSE LENGTHS
 // ============================================================================
 
-static const int ECOS_REPLY_SPEED_QUERY_LEN = 40;  // strlen of ECOS_REPLY_SPEED_QUERY
-static const int ECOS_EVENT_SPEED_CHANGE_LEN = 41;
 static const int ECOS_PARTIAL_LEN = 22;
 
 // ============================================================================
@@ -85,7 +91,10 @@ static const int ECOS_PARTIAL_LEN = 22;
 // ============================================================================
 
 // Single message broken into multiple writes (e.g., one byte at a time)
-static const char ECOS_BYTE_BY_BYTE[] = "<REPLY id 100 speed[64]>";
+static const char ECOS_BYTE_BY_BYTE[] =
+    "<REPLY get(100, view)>\n"
+    "100 speed[64]\n"
+    "<END 0 (OK)>\n";
 
 // Message with various line endings
 static const char* ECOS_WITH_CR = "<REPLY id 100 speed[64]>\r";
@@ -97,7 +106,7 @@ static const char* ECOS_FORMATTED =
     "<REPLY\n"
     "  id 100\n"
     "  speed[64]\n"
-    "  dir[1]\n"
+    "  direction[1]\n"
     ">";
 
 #endif  // ECOS_RESPONSES_H

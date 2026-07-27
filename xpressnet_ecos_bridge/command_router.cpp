@@ -19,15 +19,6 @@
 #include "utils/memory.h"
 #include "utils/now_ms.h"
 
-// Forward declarations for optional protocol interfaces
-#if ENABLE_XPRESSNET
-    #include "protocols/xpressnet/xpressnet_interface.h"
-#endif
-
-#if ENABLE_ECOS_LAN
-    #include "protocols/ecos/ecos_interface.h"
-#endif
-
 // ============================================================================
 // CONSTRUCTOR
 // ============================================================================
@@ -46,7 +37,7 @@ CommandRouter::CommandRouter() {
 // ============================================================================
 
 #if ENABLE_XPRESSNET
-void CommandRouter::setXpressNetInterface(XpressNetInterface* xnet) {
+void CommandRouter::setXpressNetInterface(ProtocolInterface* xnet) {
     /*
      * Register XpressNet interface after it's created
      * Called from main.ino during setup
@@ -57,7 +48,7 @@ void CommandRouter::setXpressNetInterface(XpressNetInterface* xnet) {
 #endif
 
 #if ENABLE_ECOS_LAN
-void CommandRouter::setEcosInterface(EcosInterface* ecos_intf) {
+void CommandRouter::setEcosInterface(ProtocolInterface* ecos_intf) {
     /*
      * Register Ecos interface after it's created
      * Called from main.ino during setup

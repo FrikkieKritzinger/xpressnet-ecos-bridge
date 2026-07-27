@@ -12,12 +12,10 @@
 
 #include <cstdint>
 #include <cstring>
-#include "../xpressnet_ecos_bridge/state_engine.h"
-#include "../xpressnet_ecos_bridge/definitions.h"
+#include <unity.h>
+#include "state_engine.h"
+#include "definitions.h"
 #include "mocks/mock_now_ms.h"
-
-// TODO: Include Unity framework headers once configured
-// #include "unity.h"
 
 // ============================================================================
 // TEST SETUP / TEARDOWN
@@ -46,14 +44,14 @@ void test_state_engine_add_new_loco(void) {
     state.functions = 0x00;
 
     bool success = engine.addOrUpdateLoco(100, state);
-    if (!success) return;  // Failed to add
+    TEST_ASSERT_TRUE(success);
 
     // Verify: loco exists with correct values
     LocoState retrieved;
     bool found = engine.getLoco(100, retrieved);
-    if (!found) return;
-    if (retrieved.speed != 64) return;
-    if (retrieved.direction != 1) return;
+    TEST_ASSERT_TRUE(found);
+    TEST_ASSERT_EQUAL_UINT8(64, retrieved.speed);
+    TEST_ASSERT_EQUAL_UINT8(1, retrieved.direction);
 }
 
 void test_state_engine_add_multiple_locos(void) {
@@ -67,13 +65,13 @@ void test_state_engine_add_multiple_locos(void) {
         state.direction = (i % 2);
         state.functions = i;
 
-        if (!engine.addOrUpdateLoco(100 + i, state)) return;
+        TEST_ASSERT_TRUE(engine.addOrUpdateLoco(100 + i, state));
     }
 
     // Verify all exist
     for (int i = 0; i < 10; i++) {
         int index = engine.findLoco(100 + i);
-        if (index < 0) return;  // Not found
+        TEST_ASSERT_TRUE(index >= 0);
     }
 }
 
@@ -87,7 +85,7 @@ void test_state_engine_find_loco_returns_index(void) {
     engine.addOrUpdateLoco(50, state);
 
     int index = engine.findLoco(50);
-    if (index < 0) return;  // Should find it
+    TEST_ASSERT_TRUE(index >= 0);
 }
 
 void test_state_engine_find_nonexistent_returns_negative(void) {
@@ -95,7 +93,7 @@ void test_state_engine_find_nonexistent_returns_negative(void) {
     StateEngine engine;
 
     int index = engine.findLoco(999);
-    if (index >= 0) return;  // Should return -1
+    TEST_ASSERT_TRUE(index < 0);
 }
 
 // ============================================================================
@@ -119,7 +117,7 @@ void test_state_engine_update_speed(void) {
     // Verify new speed
     LocoState retrieved;
     engine.getLoco(100, retrieved);
-    if (retrieved.speed != 100) return;
+    TEST_ASSERT_EQUAL_UINT8(100, retrieved.speed);
 }
 
 void test_state_engine_update_direction(void) {
@@ -138,7 +136,7 @@ void test_state_engine_update_direction(void) {
 
     LocoState retrieved;
     engine.getLoco(50, retrieved);
-    if (retrieved.direction != 0) return;
+    TEST_ASSERT_EQUAL_UINT8(0, retrieved.direction);
 }
 
 void test_state_engine_update_functions(void) {
@@ -156,7 +154,7 @@ void test_state_engine_update_functions(void) {
 
     LocoState retrieved;
     engine.getLoco(75, retrieved);
-    if (retrieved.functions != 0x01) return;
+    TEST_ASSERT_EQUAL_UINT32(0x01, retrieved.functions);
 }
 
 // ============================================================================
@@ -177,11 +175,11 @@ void test_state_engine_loco_expires_after_5_minutes(void) {
     setMockNowMs(300000 + 1);
 
     int removed_count = engine.expungeInactiveLocos();
-    if (removed_count != 1) return;  // Should remove 1
+    TEST_ASSERT_EQUAL_INT(1, removed_count);
 
     // Verify loco is gone
     int index = engine.findLoco(100);
-    if (index >= 0) return;  // Should not find it
+    TEST_ASSERT_TRUE(index < 0);
 }
 
 void test_state_engine_loco_does_not_expire_before_5_minutes(void) {
@@ -198,11 +196,11 @@ void test_state_engine_loco_does_not_expire_before_5_minutes(void) {
     setMockNowMs(240000);
 
     int removed_count = engine.expungeInactiveLocos();
-    if (removed_count != 0) return;  // Should remove 0
+    TEST_ASSERT_EQUAL_INT(0, removed_count);
 
     // Verify loco still exists
     int index = engine.findLoco(100);
-    if (index < 0) return;  // Should find it
+    TEST_ASSERT_TRUE(index >= 0);
 }
 
 void test_state_engine_expunge_multiple_expired(void) {
@@ -240,11 +238,11 @@ void test_state_engine_expunge_multiple_expired(void) {
 
     // Expunge - should remove locos 1, 2, 3
     int removed_count = engine.expungeInactiveLocos();
-    if (removed_count != 3) return;
+    TEST_ASSERT_EQUAL_INT(3, removed_count);
 
     // Verify locos 4, 5 still exist
-    if (engine.findLoco(4) < 0) return;
-    if (engine.findLoco(5) < 0) return;
+    TEST_ASSERT_TRUE(engine.findLoco(4) >= 0);
+    TEST_ASSERT_TRUE(engine.findLoco(5) >= 0);
 }
 
 // ============================================================================
@@ -263,7 +261,7 @@ void test_state_engine_loco_count(void) {
     }
 
     // Verify count
-    if (engine.getLocoCount() != 7) return;
+    TEST_ASSERT_EQUAL_INT(7, engine.getLocoCount());
 }
 
 void test_state_engine_remove_loco_by_address(void) {
@@ -277,10 +275,10 @@ void test_state_engine_remove_loco_by_address(void) {
 
     // Remove by address
     bool success = engine.removeLocoByAddress(100);
-    if (!success) return;
+    TEST_ASSERT_TRUE(success);
 
     // Verify removed
-    if (engine.findLoco(100) >= 0) return;  // Should not find it
+    TEST_ASSERT_TRUE(engine.findLoco(100) < 0);
 }
 
 // ============================================================================
@@ -295,9 +293,8 @@ void test_state_engine_address_max_long(void) {
     state.speed = 50;
 
     bool success = engine.addOrUpdateLoco(9999, state);
-    if (!success) return;
-
-    if (engine.findLoco(9999) < 0) return;
+    TEST_ASSERT_TRUE(success);
+    TEST_ASSERT_TRUE(engine.findLoco(9999) >= 0);
 }
 
 void test_state_engine_address_min_long(void) {
@@ -308,9 +305,8 @@ void test_state_engine_address_min_long(void) {
     state.speed = 50;
 
     bool success = engine.addOrUpdateLoco(100, state);
-    if (!success) return;
-
-    if (engine.findLoco(100) < 0) return;
+    TEST_ASSERT_TRUE(success);
+    TEST_ASSERT_TRUE(engine.findLoco(100) >= 0);
 }
 
 void test_state_engine_address_max_short(void) {
@@ -321,9 +317,8 @@ void test_state_engine_address_max_short(void) {
     state.speed = 50;
 
     bool success = engine.addOrUpdateLoco(99, state);
-    if (!success) return;
-
-    if (engine.findLoco(99) < 0) return;
+    TEST_ASSERT_TRUE(success);
+    TEST_ASSERT_TRUE(engine.findLoco(99) >= 0);
 }
 
 // ============================================================================
@@ -331,30 +326,27 @@ void test_state_engine_address_max_short(void) {
 // ============================================================================
 
 int main(void) {
-    // Run all tests
-    setUp();
+    UNITY_BEGIN();
 
-    test_state_engine_add_new_loco();
-    test_state_engine_add_multiple_locos();
-    test_state_engine_find_loco_returns_index();
-    test_state_engine_find_nonexistent_returns_negative();
+    RUN_TEST(test_state_engine_add_new_loco);
+    RUN_TEST(test_state_engine_add_multiple_locos);
+    RUN_TEST(test_state_engine_find_loco_returns_index);
+    RUN_TEST(test_state_engine_find_nonexistent_returns_negative);
 
-    test_state_engine_update_speed();
-    test_state_engine_update_direction();
-    test_state_engine_update_functions();
+    RUN_TEST(test_state_engine_update_speed);
+    RUN_TEST(test_state_engine_update_direction);
+    RUN_TEST(test_state_engine_update_functions);
 
-    test_state_engine_loco_expires_after_5_minutes();
-    test_state_engine_loco_does_not_expire_before_5_minutes();
-    test_state_engine_expunge_multiple_expired();
+    RUN_TEST(test_state_engine_loco_expires_after_5_minutes);
+    RUN_TEST(test_state_engine_loco_does_not_expire_before_5_minutes);
+    RUN_TEST(test_state_engine_expunge_multiple_expired);
 
-    test_state_engine_loco_count();
-    test_state_engine_remove_loco_by_address();
+    RUN_TEST(test_state_engine_loco_count);
+    RUN_TEST(test_state_engine_remove_loco_by_address);
 
-    test_state_engine_address_max_long();
-    test_state_engine_address_min_long();
-    test_state_engine_address_max_short();
+    RUN_TEST(test_state_engine_address_max_long);
+    RUN_TEST(test_state_engine_address_min_long);
+    RUN_TEST(test_state_engine_address_max_short);
 
-    tearDown();
-
-    return 0;  // TODO: Return UNITY_END() result
+    return UNITY_END();
 }

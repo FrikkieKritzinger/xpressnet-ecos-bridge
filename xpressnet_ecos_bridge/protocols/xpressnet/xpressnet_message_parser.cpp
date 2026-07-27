@@ -136,20 +136,14 @@ uint16_t XNetMessageParser::extractAddress(uint8_t high, uint8_t low) {
         // Short address (1-99) - in low byte, high byte has type info
         return (uint16_t)(low & 0x7F);  // Mask out any control bits
     } else {
-        // Long address (100-9999)
-        // Reconstruct from high and low bytes
-        uint16_t address = ((uint16_t)high << 8) | low;
-
-        // Mask out control bits (typically bit 7 of high byte)
+        // Long address (100-9999). Strip known marker/flag bits from the
+        // high byte before reconstructing - 0x40 (short-address flag) and
+        // 0x20 (function-command flag, see determineCommandType) are not
+        // part of the address value itself.
+        uint8_t high_address_bits = high & ~(0x40 | 0x20);
+        uint16_t address = ((uint16_t)high_address_bits << 8) | low;
         address &= 0x3FFF;  // 14-bit address field
-
-        // Offset long addresses (DCC standard)
-        if (address >= 100) {
-            return address;
-        } else {
-            // Re-encode if needed
-            return ((uint16_t)high << 8) | low;
-        }
+        return address;
     }
 }
 
@@ -183,10 +177,9 @@ void XNetMessageParser::extractSpeedDirection(uint8_t data,
     // Check for E-stop
     is_estop = (speed == 127);
 
-    // Clamp speed to valid range
-    if (speed > 126) {
-        speed = 126;  // E-stop becomes speed 126 (or could be 0)
-    }
+    // Speed 127 is preserved as-is: it's the documented E-stop marker
+    // (XNetCommand::speed doc: "0-126 (0=stop, 127=E-stop)"). CommandRouter
+    // is responsible for converting E-stop to speed=0 when broadcasting.
 }
 
 // ============================================================================
@@ -221,7 +214,13 @@ XNetCommand::Type XNetMessageParser::determineCommandType(const uint8_t* buffer,
 
     uint8_t data_byte = buffer[2];
 
-    // Check for specific patterns
+    // Function command: bit 5 (0x20) of the address-high byte marks this as
+    // a function message rather than a speed message. Must be checked FIRST:
+    // a function bitmap byte (e.g. 0xFF, all F0-F7 on) can otherwise collide
+    // with the E-stop/speed patterns below, which only look at data_byte.
+    if (length == 4 && (buffer[0] & 0x20) != 0) {
+        return XNetCommand::FUNCTION;
+    }
 
     // E-stop: speed = 127 (bits 6-0 = 1111111)
     if ((data_byte & 0x7F) == 0x7F) {
@@ -234,23 +233,10 @@ XNetCommand::Type XNetMessageParser::determineCommandType(const uint8_t* buffer,
         return XNetCommand::SPEED;
     }
 
-    // Function command: different encoding
-    // XpressNet function messages may have different format markers
-    // For now, check if buffer[0] has specific pattern
-    if (length == 4 && (buffer[0] & 0x20) != 0) {
-        // Assumed function message marker
-        return XNetCommand::FUNCTION;
-    }
-
     // Status message: specific address patterns or length markers
     if (length >= 5 && (buffer[0] & 0x0F) == 0x00 && (buffer[1] & 0x0F) == 0x00) {
         // Broadcast/status message
         return XNetCommand::STATUS;
-    }
-
-    // Default to speed if it looks reasonable
-    if ((data_byte & 0x7F) <= 126) {
-        return XNetCommand::SPEED;
     }
 
     return XNetCommand::INVALID;

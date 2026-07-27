@@ -20,15 +20,7 @@
 #include "config.h"
 #include "definitions.h"
 #include "state_engine.h"
-
-// Forward declarations
-#if ENABLE_XPRESSNET
-    class XpressNetInterface;
-#endif
-
-#if ENABLE_ECOS_LAN
-    class EcosInterface;
-#endif
+#include "interfaces/interface_base.h"
 
 class CommandRouter {
 public:
@@ -37,19 +29,23 @@ public:
      * These are set after protocol interfaces are created
      */
     CommandRouter();
-    
+
     /**
      * Set reference to XpressNet interface (called after creation)
+     * Accepts the abstract ProtocolInterface so tests can inject a mock
+     * without depending on the concrete (Arduino-coupled) XpressNetInterface.
      */
     #if ENABLE_XPRESSNET
-    void setXpressNetInterface(XpressNetInterface* xnet);
+    void setXpressNetInterface(ProtocolInterface* xnet);
     #endif
-    
+
     /**
      * Set reference to Ecos interface (called after creation)
+     * Accepts the abstract ProtocolInterface so tests can inject a mock
+     * without depending on the concrete (Arduino-coupled) EcosInterface.
      */
     #if ENABLE_ECOS_LAN
-    void setEcosInterface(class EcosInterface* ecos);  // Forward declare
+    void setEcosInterface(ProtocolInterface* ecos);
     #endif
     
     /**
@@ -110,11 +106,11 @@ private:
     
     // Interface references (initialized in setters)
     #if ENABLE_XPRESSNET
-    XpressNetInterface* xpressnet = nullptr;
+    ProtocolInterface* xpressnet = nullptr;
     #endif
-    
+
     #if ENABLE_ECOS_LAN
-    class EcosInterface* ecos = nullptr;
+    ProtocolInterface* ecos = nullptr;
     #endif
     
     // Echo prevention state

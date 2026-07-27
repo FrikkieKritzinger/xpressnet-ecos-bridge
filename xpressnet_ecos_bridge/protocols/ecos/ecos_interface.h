@@ -80,14 +80,14 @@ public:
      * Called by CommandRouter when a new loco is first seen from XpressNet
      * @param address DCC address
      */
-    void subscribeToLoco(uint16_t address);
+    void subscribeToLoco(uint16_t address) override;
 
     /**
      * Unsubscribe from locomotive on Ecos
      * Called by CommandRouter when a loco expires from state engine
      * @param address DCC address
      */
-    void unsubscribeFromLoco(uint16_t address);
+    void unsubscribeFromLoco(uint16_t address) override;
 
     /**
      * Set reference to command router (called after construction)

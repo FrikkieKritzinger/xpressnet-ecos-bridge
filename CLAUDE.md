@@ -9,6 +9,60 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-27 — Phase 4.4: Framework Integration & Test Execution ✅ COMPLETE**
+- ✅ **Native build environment established** (previously never verified - g++ wasn't installed)
+  * Installed MinGW-w64 (GCC 16.1.0) via winget
+  * Created `test/native_stubs/Arduino.h` stub (Serial/ESP/millis) for the handful of
+    production files that unconditionally include `<Arduino.h>` - no real Arduino core
+    exists for native builds
+  * Fixed real pre-existing bugs the native build immediately surfaced:
+    - `utils/debug.h`: per-component debug macros (`DEBUG_XNET_PRINTF` etc.) were only
+      ever defined inside `#ifdef ARDUINO`, with no native counterpart - removed the guard
+    - `utils/memory.h`: missing `<cstdlib>` include for `malloc`; ESP8266-only stack
+      intrinsics (inline asm) now guarded behind `#ifdef ARDUINO`
+    - `platformio.ini`: updated for PlatformIO 6.1.19's current API (`test_dir` removed,
+      hardcoded to `./test`; `src_filter`→`build_src_filter`; `test_build_project_src`→
+      `test_build_src`); restructured `tests/`→`test/` with one subdirectory per suite
+      (this PlatformIO version bundles flat `test_*.cpp` files into one binary otherwise)
+- ✅ **CommandRouter refactored for testability**: `setEcosInterface`/`setXpressNetInterface`
+  now accept the abstract `ProtocolInterface*` instead of concrete `EcosInterface*`/
+  `XpressNetInterface*`, so `MockProtocolInterface` can be injected directly. Added
+  `subscribeToLoco()`/`unsubscribeFromLoco()` as virtual no-op methods on `ProtocolInterface`.
+- ✅ **test_command_router.cpp rewritten**: fixed method-name mismatches
+  (`handleXpressNetCommand`/`handleEcosCommand`, not the `*SpeedCommand` variants used
+  by the Phase 4.3 draft), fixed `isEchoCommand()` test assumptions (it compares
+  address+source+time window only, not command values)
+- ✅ **test_ecos_command_builder.cpp implemented for real** (Phase 4.3 left it as 21 empty
+  stubs) against the actual `ecosBuild*Cmd` free-function API (object ID, not DCC address;
+  trailing `\n`)
+- ✅ **Unity framework integrated**: all 5 files converted from inline early-return
+  assertions to real `TEST_ASSERT_*` macros
+- ✅ **Fixed real bugs the tests caught** (not just test-code bugs):
+  * `xpressnet_message_parser.cpp`: `determineCommandType()` could never classify a
+    message as FUNCTION (its SPEED check matched everything first) - real XpressNet
+    function commands were being misinterpreted as speed commands. Fixed by checking
+    a function-marker bit (0x20) first; `extractAddress()` updated to strip marker bits
+    before reconstructing the address
+  * `xpressnet_message_parser.cpp`: E-stop (speed=127) was being clamped to 126,
+    contradicting `XNetCommand::speed`'s own documented contract ("127=E-stop") and
+    CLAUDE.md's documented design ("Router converts to speed=0", implying the parser
+    should preserve 127)
+  * `test/fixtures/xpressnet_messages.h`: 5 of 9 fixtures had hand-computed checksums
+    that were simply arithmetic errors; 2 fixtures set the wrong address-encoding bit
+    (0x40 means SHORT address per CLAUDE.md's own spec, not "long" as the fixture
+    comments claimed)
+  * `test/fixtures/ecos_responses.h` + `test_ecos_parser.cpp`: fixtures crammed
+    everything into one line (`"<REPLY id 100 speed[64]>"`), but the real parser
+    requires a 3-line block (marker, then a property line with the object ID as
+    its leading token, then `<END 0 (OK)>`) - REPLY doesn't carry an id on its
+    marker line the way EVENT does. Also fixed a key-name mismatch: fixtures used
+    `dir[...]` but the parser matches the property key `direction`.
+- **Result**: **84/84 tests passing (100%)**, well above the 90% target
+  * test_xpressnet_parser: 16/16, test_ecos_parser: 14/14, test_state_engine: 15/15,
+    test_ecos_command_builder: 25/25 (expanded from 21), test_command_router: 14/14
+- **Status**: Phase 4.4 complete. Native test suite (`platformio test -e native`) is a
+  real, working regression harness for the first time in this project's history.
+
 **2026-07-24 — Phase 4.3: Unit Test Implementation ✅ COMPLETE**
 - ✅ Implemented 80+ test cases across 5 core test files
 - ✅ **test_xpressnet_parser.cpp** (16 tests): Binary protocol parsing, checksums, errors

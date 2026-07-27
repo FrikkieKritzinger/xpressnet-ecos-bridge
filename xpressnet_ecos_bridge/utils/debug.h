@@ -102,10 +102,12 @@
 #endif  // ENABLE_DEBUG
 
 // ============================================================================
-// SELECTIVE DEBUG CATEGORIES (Arduino only)
+// SELECTIVE DEBUG CATEGORIES
+//
+// These only expand to DEBUG_PRINT/DEBUG_PRINTF, which are already defined
+// per-platform above (Serial on Arduino, stdout natively) - so this section
+// is NOT guarded by #ifdef ARDUINO and applies to both.
 // ============================================================================
-
-#ifdef ARDUINO
 
 #if ENABLE_DEBUG && DEBUG_STARTUP
     #define DEBUG_STARTUP_PRINT(msg) DEBUG_PRINT(msg)
@@ -166,8 +168,6 @@
     #define DEBUG_MEMORY_PRINT(msg) do {} while(0)
     #define DEBUG_MEMORY_PRINTF(fmt, ...) do {} while(0)
 #endif
-
-#endif  // ARDUINO
 
 // ============================================================================
 // ASSERTION MACROS (Arduino only, Debugging aid)

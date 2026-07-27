@@ -50,6 +50,16 @@ public:
         return "MockProtocol";
     }
 
+    void subscribeToLoco(uint16_t address) override {
+        last_subscribed_address = address;
+        subscribe_call_count++;
+    }
+
+    void unsubscribeFromLoco(uint16_t address) override {
+        last_unsubscribed_address = address;
+        unsubscribe_call_count++;
+    }
+
     // ========================================================================
     // TESTING INTERFACE - Verification and control
     // ========================================================================
@@ -72,6 +82,10 @@ public:
     int getUpdateCallCount() const { return update_call_count; }
     int getSpeedCommandCount() const { return speed_command_count; }
     int getFunctionCommandCount() const { return function_command_count; }
+    int getSubscribeCallCount() const { return subscribe_call_count; }
+    int getUnsubscribeCallCount() const { return unsubscribe_call_count; }
+    uint16_t getLastSubscribedAddress() const { return last_subscribed_address; }
+    uint16_t getLastUnsubscribedAddress() const { return last_unsubscribed_address; }
 
     // Get last commands sent
     const SpeedCommand& getLastSpeedCommand() const { return last_speed_command; }
@@ -86,6 +100,10 @@ public:
         update_call_count = 0;
         speed_command_count = 0;
         function_command_count = 0;
+        subscribe_call_count = 0;
+        unsubscribe_call_count = 0;
+        last_subscribed_address = 0;
+        last_unsubscribed_address = 0;
         last_speed_command = {0, 0, 0, 0};
         last_function_command = {0, 0, 0};
     }
@@ -99,6 +117,10 @@ private:
     int update_call_count;
     int speed_command_count;
     int function_command_count;
+    int subscribe_call_count;
+    int unsubscribe_call_count;
+    uint16_t last_subscribed_address;
+    uint16_t last_unsubscribed_address;
 
     // Command history
     SpeedCommand last_speed_command;

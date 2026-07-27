@@ -21,6 +21,7 @@
 #define UTILS_MEMORY_H
 
 #include <cstdint>
+#include <cstdlib>
 #include <Arduino.h>
 
 // ============================================================================
@@ -286,13 +287,18 @@ inline void* testAllocateMemory(size_t size_bytes) {
 
 // ============================================================================
 // MEMORY GUARD - Detect stack overflow
+//
+// Xtensa (ESP8266) inline assembly and 32-bit pointer arithmetic - not
+// meaningful on a 64-bit native host, and not exercised by unit tests.
 // ============================================================================
+
+#ifdef ARDUINO
 
 /**
  * Get approximate stack pointer
  * Can be used to detect stack overflow
  * Lower address = closer to stack overflow (dangerous!)
- * 
+ *
  * @return Approximate current stack pointer value
  */
 inline uint32_t getStackPointer() {
@@ -304,7 +310,7 @@ inline uint32_t getStackPointer() {
 /**
  * Estimate stack space remaining
  * This is approximate - not guaranteed accurate
- * 
+ *
  * @return Estimated free stack space in bytes
  */
 inline uint32_t getStackFreeSpace() {
@@ -312,11 +318,16 @@ inline uint32_t getStackFreeSpace() {
     // This is very approximate
     uint32_t sp = getStackPointer();
     uint32_t heap_end = (uint32_t)malloc(0) + 4096;
-    
+
     if (sp > heap_end) {
         return sp - heap_end;
     }
     return 0;  // Stack collision detected
 }
+
+#else  // !ARDUINO (native/test environment)
+    inline uint32_t getStackPointer() { return 0; }
+    inline uint32_t getStackFreeSpace() { return 0; }
+#endif
 
 #endif  // UTILS_MEMORY_H

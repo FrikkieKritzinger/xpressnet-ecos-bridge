@@ -11,11 +11,9 @@
 
 #include <cstdint>
 #include <cstring>
+#include <unity.h>
 #include "fixtures/ecos_responses.h"
-#include "../xpressnet_ecos_bridge/protocols/ecos/ecos_message_parser.h"
-
-// TODO: Include Unity framework headers once configured
-// #include "unity.h"
+#include "protocols/ecos/ecos_message_parser.h"
 
 // ============================================================================
 // TEST SETUP / TEARDOWN
@@ -34,73 +32,81 @@ void tearDown(void) {
 // ============================================================================
 
 void test_ecos_parse_speed_query_reply(void) {
-    // Parse ECOS_REPLY_SPEED_QUERY: "<REPLY id 100 speed[64] dir[1] func[0,0]>"
+    // Parse ECOS_REPLY_SPEED_QUERY (3-line block: marker, property line, <END>)
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    // Feed bytes one by one
-    for (size_t i = 0; i < ECOS_REPLY_SPEED_QUERY_LEN; i++) {
-        if (parser.processByte(ECOS_REPLY_SPEED_QUERY[i], reply)) {
-            // Complete message parsed
-            if (reply.kind != EcosReply::REPLY) return;  // Should be REPLY
-            if (reply.object_id != 100) return;
-            if (!reply.has_speed) return;
-            if (reply.speed != 64) return;
-            if (!reply.has_direction) return;
-            if (reply.direction != 1) return;
-            return;  // Success
+    for (const char* c = ECOS_REPLY_SPEED_QUERY; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
         }
     }
-    // Message never completed
-    return;
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_INT(EcosReply::REPLY, reply.kind);
+    TEST_ASSERT_EQUAL_UINT16(100, reply.object_id);
+    TEST_ASSERT_TRUE(reply.has_speed);
+    TEST_ASSERT_EQUAL_UINT8(64, reply.speed);
+    TEST_ASSERT_TRUE(reply.has_direction);
+    TEST_ASSERT_EQUAL_UINT8(1, reply.direction);
 }
 
 void test_ecos_parse_speed_change_event(void) {
-    // Parse ECOS_EVENT_SPEED_CHANGE: "<EVENT id 101 speed[90] dir[1] func[1,0]>"
+    // Parse ECOS_EVENT_SPEED_CHANGE (3-line block: marker, property line, <END>)
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    for (size_t i = 0; i < ECOS_EVENT_SPEED_CHANGE_LEN; i++) {
-        if (parser.processByte(ECOS_EVENT_SPEED_CHANGE[i], reply)) {
-            // Complete message parsed
-            if (reply.kind != EcosReply::EVENT) return;  // Should be EVENT (unsolicited)
-            if (reply.object_id != 101) return;
-            if (reply.speed != 90) return;
-            return;  // Success
+    for (const char* c = ECOS_EVENT_SPEED_CHANGE; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
         }
     }
-    return;  // Failed to parse
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_INT(EcosReply::EVENT, reply.kind);  // Unsolicited
+    TEST_ASSERT_EQUAL_UINT16(101, reply.object_id);
+    TEST_ASSERT_EQUAL_UINT8(90, reply.speed);
 }
 
 void test_ecos_parse_reply_extracts_id(void) {
     // Simple test: just verify ID extraction
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    const char* msg = "<REPLY id 50>";
+    const char* msg = "<REPLY get(50, view)>\n50\n<END 0 (OK)>\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
-            if (reply.object_id != 50) return;
-            return;  // Success
+            completed = true;
+            break;
         }
     }
-    return;
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT16(50, reply.object_id);
 }
 
 void test_ecos_parse_event_extracts_id(void) {
     // Event should also extract ID
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    const char* msg = "<EVENT id 75>";
+    const char* msg = "<EVENT 75>\n<END 0 (OK)>\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
-            if (reply.kind != EcosReply::EVENT) return;
-            if (reply.object_id != 75) return;
-            return;  // Success
+            completed = true;
+            break;
         }
     }
-    return;
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_INT(EcosReply::EVENT, reply.kind);
+    TEST_ASSERT_EQUAL_UINT16(75, reply.object_id);
 }
 
 // ============================================================================
@@ -120,38 +126,43 @@ void test_ecos_accumulate_byte_by_byte(void) {
         }
     }
 
-    // Should complete after last character
-    if (!complete) return;  // Should have parsed by end
+    TEST_ASSERT_TRUE(complete);  // Should have parsed by end
 }
 
 void test_ecos_accumulate_with_newline(void) {
     // Message with \n should be handled
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    const char* msg = "<REPLY id 100>\n";
+    const char* msg = "<REPLY get(100, view)>\n100\n<END 0 (OK)>\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
-            if (reply.object_id != 100) return;
-            return;  // Success
+            completed = true;
+            break;
         }
     }
-    return;
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT16(100, reply.object_id);
 }
 
 void test_ecos_accumulate_with_crlf(void) {
     // Message with \r\n should be handled
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    const char* msg = "<REPLY id 200>\r\n";
+    const char* msg = "<REPLY get(200, view)>\r\n200\r\n<END 0 (OK)>\r\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
-            if (reply.object_id != 200) return;
-            return;  // Success
+            completed = true;
+            break;
         }
     }
-    return;
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT16(200, reply.object_id);
 }
 
 // ============================================================================
@@ -159,12 +170,13 @@ void test_ecos_accumulate_with_crlf(void) {
 // ============================================================================
 
 void test_ecos_parse_empty_response(void) {
-    // Empty string should not cause issues
+    // A freshly constructed parser that's fed nothing should stay idle -
+    // no crash, no spurious completion, buffers empty.
     EcosMessageParser parser;
     EcosReply reply;
 
-    // Processing empty string should do nothing
-    // Should not crash or return invalid data
+    TEST_ASSERT_EQUAL_INT(0, parser.getLineBufferLength());
+    TEST_ASSERT_EQUAL_INT(0, parser.getBlockBufferLength());
 }
 
 void test_ecos_reset_clears_state(void) {
@@ -181,10 +193,8 @@ void test_ecos_reset_clears_state(void) {
     parser.reset();
 
     // Buffer lengths should be 0
-    if (parser.getLineBufferLength() != 0) return;
-    if (parser.getBlockBufferLength() != 0) return;
-
-    return;  // Success
+    TEST_ASSERT_EQUAL_INT(0, parser.getLineBufferLength());
+    TEST_ASSERT_EQUAL_INT(0, parser.getBlockBufferLength());
 }
 
 void test_ecos_parse_missing_closing_bracket(void) {
@@ -201,9 +211,7 @@ void test_ecos_parse_missing_closing_bracket(void) {
         }
     }
 
-    // Should not complete without closing bracket
-    if (completed) return;  // Should fail
-    return;
+    TEST_ASSERT_FALSE(completed);  // Should not complete without closing bracket
 }
 
 void test_ecos_parse_only_whitespace(void) {
@@ -220,9 +228,7 @@ void test_ecos_parse_only_whitespace(void) {
         }
     }
 
-    // Should not complete (no valid reply/event tag)
-    if (completed) return;
-    return;
+    TEST_ASSERT_FALSE(completed);  // No valid reply/event tag
 }
 
 // ============================================================================
@@ -233,48 +239,57 @@ void test_ecos_parse_speed_value(void) {
     // Extract speed[64] from message
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    const char* msg = "<REPLY id 100 speed[64]>";
+    const char* msg = "<REPLY get(100, view)>\n100 speed[64]\n<END 0 (OK)>\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
-            if (!reply.has_speed) return;
-            if (reply.speed != 64) return;
-            return;  // Success
+            completed = true;
+            break;
         }
     }
-    return;
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_TRUE(reply.has_speed);
+    TEST_ASSERT_EQUAL_UINT8(64, reply.speed);
 }
 
 void test_ecos_parse_direction_value(void) {
-    // Extract dir[1] from message
+    // Extract direction[1] from message
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    const char* msg = "<REPLY id 100 dir[1]>";
+    const char* msg = "<REPLY get(100, view)>\n100 direction[1]\n<END 0 (OK)>\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
-            if (!reply.has_direction) return;
-            if (reply.direction != 1) return;
-            return;  // Success
+            completed = true;
+            break;
         }
     }
-    return;
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_TRUE(reply.has_direction);
+    TEST_ASSERT_EQUAL_UINT8(1, reply.direction);
 }
 
 void test_ecos_parse_multiple_values(void) {
     // Parse message with multiple key[value] pairs
     EcosMessageParser parser;
     EcosReply reply;
+    bool completed = false;
 
-    const char* msg = "<REPLY id 100 speed[80] dir[0]>";
+    const char* msg = "<REPLY get(100, view)>\n100 speed[80] direction[0]\n<END 0 (OK)>\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
-            if (reply.speed != 80) return;
-            if (reply.direction != 0) return;  // Reverse
-            return;  // Success
+            completed = true;
+            break;
         }
     }
-    return;
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT8(80, reply.speed);
+    TEST_ASSERT_EQUAL_UINT8(0, reply.direction);  // Reverse
 }
 
 // ============================================================================
@@ -282,28 +297,25 @@ void test_ecos_parse_multiple_values(void) {
 // ============================================================================
 
 int main(void) {
-    // Run all tests
-    setUp();
+    UNITY_BEGIN();
 
-    test_ecos_parse_speed_query_reply();
-    test_ecos_parse_speed_change_event();
-    test_ecos_parse_reply_extracts_id();
-    test_ecos_parse_event_extracts_id();
+    RUN_TEST(test_ecos_parse_speed_query_reply);
+    RUN_TEST(test_ecos_parse_speed_change_event);
+    RUN_TEST(test_ecos_parse_reply_extracts_id);
+    RUN_TEST(test_ecos_parse_event_extracts_id);
 
-    test_ecos_accumulate_byte_by_byte();
-    test_ecos_accumulate_with_newline();
-    test_ecos_accumulate_with_crlf();
+    RUN_TEST(test_ecos_accumulate_byte_by_byte);
+    RUN_TEST(test_ecos_accumulate_with_newline);
+    RUN_TEST(test_ecos_accumulate_with_crlf);
 
-    test_ecos_parse_empty_response();
-    test_ecos_reset_clears_state();
-    test_ecos_parse_missing_closing_bracket();
-    test_ecos_parse_only_whitespace();
+    RUN_TEST(test_ecos_parse_empty_response);
+    RUN_TEST(test_ecos_reset_clears_state);
+    RUN_TEST(test_ecos_parse_missing_closing_bracket);
+    RUN_TEST(test_ecos_parse_only_whitespace);
 
-    test_ecos_parse_speed_value();
-    test_ecos_parse_direction_value();
-    test_ecos_parse_multiple_values();
+    RUN_TEST(test_ecos_parse_speed_value);
+    RUN_TEST(test_ecos_parse_direction_value);
+    RUN_TEST(test_ecos_parse_multiple_values);
 
-    tearDown();
-
-    return 0;  // TODO: Return UNITY_END() result
+    return UNITY_END();
 }
