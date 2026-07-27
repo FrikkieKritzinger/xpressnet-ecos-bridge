@@ -26,7 +26,6 @@
 
 XpressNetInterface::XpressNetInterface()
     : current_status(ComponentStatus::DISCONNECTED),
-      device_count(0),
       last_message_time(0),
       bus_connect_time(0),
       serial(&Serial1),
@@ -202,7 +201,6 @@ void XpressNetInterface::updateBusStatus() {
         // Connected - watch for timeout
         if (time_since_message > BUS_TIMEOUT) {
             current_status = ComponentStatus::DISCONNECTED;
-            device_count = 0;
             bus_connect_time = 0;
             DEBUG_XNET_PRINTF("XpressNet: Bus timeout (no messages for %lu ms)\n", BUS_TIMEOUT);
         }
@@ -257,11 +255,6 @@ void XpressNetInterface::handleCommand(const XNetCommand& cmd) {
                             cmd.address, cmd.functions);
             // Route function command
             router->handleXpressNetFunctionCommand(cmd.address, cmd.functions);
-            break;
-
-        case XNetCommand::STATUS:
-            // Status message (e.g., device list)
-            updateDeviceCount(cmd);
             break;
 
         default:
@@ -400,15 +393,4 @@ void XpressNetInterface::sendPacket(const uint8_t* buffer, uint8_t length) {
     // Small delay to ensure we're in receive mode before next data arrives
     // (XpressNet throttles may respond quickly)
     delayMicroseconds(100);
-}
-
-// ============================================================================
-// STATUS UPDATES
-// ============================================================================
-
-void XpressNetInterface::updateDeviceCount(const XNetCommand& cmd) {
-    // Extract device count from status message if available
-    // For now, just note that we received a status message
-    // (Detailed parsing of status format depends on XpressNet implementation)
-    (void)cmd;  // Placeholder
 }

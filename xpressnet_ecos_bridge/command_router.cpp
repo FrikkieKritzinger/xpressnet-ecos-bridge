@@ -476,10 +476,7 @@ SystemStatus CommandRouter::getSystemStatus() const {
     
     // State engine
     status.active_locos = state_engine.getLocoCount();
-    
-    // Device count (XpressNet specific - would need to get from interface)
-    status.xnet_device_count = 0;  // TODO: Get from XpressNet interface
-    
+
     // WiFi (would need WiFi interface - for now, just 0)
     status.wifi_rssi = 0;  // TODO: Get from WiFi
     

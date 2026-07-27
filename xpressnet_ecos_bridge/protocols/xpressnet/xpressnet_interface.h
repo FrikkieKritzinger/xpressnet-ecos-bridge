@@ -90,19 +90,9 @@ public:
         this->router = router;
     }
 
-    /**
-     * Get number of throttles currently connected to XpressNet bus
-     * Updated from bus status messages
-     * @return device count (0-30)
-     */
-    uint8_t getDeviceCount() const {
-        return device_count;
-    }
-
 private:
     // Hardware state
     ComponentStatus current_status;         // CONNECTED, DISCONNECTED, ERROR
-    uint8_t device_count;                   // Number of throttles on bus (0-30)
     unsigned long last_message_time;        // Timestamp of last received message
     unsigned long bus_connect_time;         // When we first detected bus activity
 
@@ -171,12 +161,6 @@ private:
      * @param length Packet length
      */
     void sendPacket(const uint8_t* buffer, uint8_t length);
-
-    /**
-     * Extract device count from bus status message (if applicable)
-     * @param cmd Parsed command (if it's a status message)
-     */
-    void updateDeviceCount(const XNetCommand& cmd);
 };
 
 #endif  // XPRESSNET_INTERFACE_H

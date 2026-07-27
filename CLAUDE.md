@@ -9,6 +9,32 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-27 — Design decision: XpressNet device-count/status tracking removed**
+- **Decision**: The bridge's design premise is deliberately simple - forward any
+  XpressNet command to Ecos (and LocoNet/Z21 once live); forward any Ecos update for a
+  subscribed loco (or an E-stop) to all XpressNet/LocoNet/Z21 devices. The bridge never
+  needs to know *how many* XpressNet throttles exist or track their presence - it just
+  assumes any could be there. Only Ecos is a required, known device (the command
+  station; boosters connect to it, not to this bridge). Device-count tracking was
+  therefore decided to serve no purpose and was removed rather than fixed.
+- **Investigation before removing**: confirmed `XNetCommand::STATUS`'s only consumer,
+  `XpressNetInterface::updateDeviceCount()`, was a no-op placeholder
+  (`(void)cmd; // Placeholder`) that never populated `device_count`, and
+  `getDeviceCount()` had zero callers anywhere (not even the OLED display). This
+  wasn't a working feature broken by the Phase 4.5-flagged dead-code bug - it was
+  unfinished scaffolding end-to-end, on both the producer and consumer sides.
+- **Removed**: `XNetCommand::STATUS` enum value; the dead STATUS branch in
+  `determineCommandType()` and the STATUS case in `parse()`
+  (`xpressnet_message_parser.h/cpp`); `XpressNetInterface::getDeviceCount()`,
+  `updateDeviceCount()`, and the `device_count` member (`xpressnet_interface.h/cpp`);
+  `SystemStatus::xnet_device_count` (`definitions.h`) and its assignment in
+  `CommandRouter::getSystemStatus()`.
+- **Result**: 111/111 tests still passing (no test referenced any of this). Coverage
+  improved further as a side effect: 88.3%→**89.3%** line, 58.1%→**59.0%** branch
+  (removing unreachable code raises the percentage of what remains). ESP8266 firmware
+  build confirmed unaffected, with a small binary-size reduction (35588→35580 bytes RAM,
+  313215→313183 bytes Flash) from the deleted dead code.
+
 **2026-07-27 — Phase 4.5: Test Coverage Analysis ✅ COMPLETE**
 - ✅ **Coverage measurement set up**: `--coverage` + `-lgcov` added to `env:native` build
   flags (gcov instrumentation), `gcovr` installed via pip for reporting (lcov isn't
@@ -34,15 +60,12 @@
     `xpressnet->getStatus()` branch in `getSystemStatus()`, `debugPrintEchoState()` smoke test
 - ✅ **Result**: 88.3% line / 96.6% function / 58.1% branch coverage (up from the
   baseline), **111/111 tests passing**
-- 📝 **Known limitation flagged (not fixed - out of scope for this pass)**: in
-  `xpressnet_message_parser.cpp`, `determineCommandType()`'s STATUS message classification
-  is currently unreachable dead code - the SPEED check (`data_byte & 0x7F <= 126`) and
-  E-stop check together partition the *entire* possible byte range, so no data_byte value
-  can ever fall through to the STATUS/INVALID checks below them for length>=4 messages.
-  STATUS message support was seemingly never fully wired up (comment says "minimal
-  parsing for now"). Needs a real design decision on how STATUS messages should be
-  distinguished on the wire before it can be fixed - same category of issue as the
-  FUNCTION/SPEED disambiguation fixed in Phase 4.4.
+- 📝 **Known limitation flagged (resolved later this session by removal, not a fix -
+  see the entry above)**: in `xpressnet_message_parser.cpp`, `determineCommandType()`'s
+  STATUS message classification was unreachable dead code - the SPEED check
+  (`data_byte & 0x7F <= 126`) and E-stop check together partition the *entire* possible
+  byte range, so no data_byte value could ever fall through to the STATUS/INVALID checks
+  below them for length>=4 messages.
 - Remaining uncovered lines are narrow boundary conditions (e.g. a line landing exactly
   at MAX_LINE_LENGTH-1 when '\n' arrives) or genuinely unreachable defensive code
   (e.g. `processLine()`'s own empty-line guard, which `processByte()` already filters
@@ -627,8 +650,8 @@ All disabled features = zero compiled code overhead.
   `extractAddress()`, buffer-overflow/line-too-long/block-too-many-lines paths in
   `EcosMessageParser`, invalid-input validation on 3 of 4 CommandRouter handlers that
   only had it tested on the 4th, reverse-direction echo suppression
-- Flagged (not fixed): `determineCommandType()`'s STATUS message path is unreachable
-  dead code - needs a real design decision, out of scope for this pass
+- Flagged `determineCommandType()`'s unreachable STATUS dead code - resolved by
+  removal (see "Design decision" entry above), not by fixing it
 - Integration tests (multi-component round trips) not yet added - deferred, current
   unit-level coverage was the higher-value target
 - **Status**: 111/111 tests passing, wemos firmware build re-verified unaffected
@@ -954,4 +977,4 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
-**Last Updated**: 2026-07-27 (Phase 4.5 complete: coverage measured and improved to 88.3% line / 96.6% function / 58.1% branch, 111/111 tests passing, ready for Phase 4.6 hardware procedures)
+**Last Updated**: 2026-07-27 (Phase 4.5 complete + device-count tracking feature removed per design decision: coverage now 89.3% line / 96.6% function / 59.0% branch, 111/111 tests passing, ready for Phase 4.6 hardware procedures)

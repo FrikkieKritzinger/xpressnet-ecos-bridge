@@ -51,8 +51,7 @@ struct XNetCommand {
         SPEED = 1,           // Speed and direction change
         EMERGENCY_STOP = 2,  // E-stop (speed 127)
         FUNCTION = 3,        // Function F0-F31 toggle
-        STATUS = 4,          // Device status message
-        INVALID = 5          // Malformed message
+        INVALID = 4          // Malformed message
     };
 
     Type type;              // What type of command

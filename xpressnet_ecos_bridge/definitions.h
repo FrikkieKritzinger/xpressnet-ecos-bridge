@@ -108,8 +108,7 @@ struct SystemStatus {
     
     // Session info
     int active_locos;               // Number of locos in state engine
-    uint8_t xnet_device_count;      // Number of XpressNet devices seen
-    
+
     // Network info
     int wifi_rssi;                  // WiFi signal strength (-100 to 0 dBm)
     unsigned long uptime_ms;        // Time since boot

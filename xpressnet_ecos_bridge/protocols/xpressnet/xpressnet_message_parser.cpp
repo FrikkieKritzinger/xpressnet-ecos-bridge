@@ -78,14 +78,6 @@ bool XNetMessageParser::parse(const uint8_t* buffer, uint8_t length, XNetCommand
             return true;
         }
 
-        case XNetCommand::STATUS:
-            // Status message - minimal parsing for now
-            if (length >= 4) {
-                cmd.functions = buffer[2];  // Device info in this byte
-                return true;
-            }
-            return false;
-
         default:
             return false;
     }
@@ -231,12 +223,6 @@ XNetCommand::Type XNetMessageParser::determineCommandType(const uint8_t* buffer,
     // (data & 0x7F) is the speed value
     if ((data_byte & 0x7F) <= 126) {
         return XNetCommand::SPEED;
-    }
-
-    // Status message: specific address patterns or length markers
-    if (length >= 5 && (buffer[0] & 0x0F) == 0x00 && (buffer[1] & 0x0F) == 0x00) {
-        // Broadcast/status message
-        return XNetCommand::STATUS;
     }
 
     return XNetCommand::INVALID;
