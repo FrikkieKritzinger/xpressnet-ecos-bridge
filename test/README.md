@@ -9,7 +9,6 @@ Comprehensive unit test suite for the XpressNet-Ecos Bridge project. Tests are d
 ```
 tests/
 ├── README.md                              This file
-├── test_xpressnet_parser.cpp              XpressNet binary message parsing tests
 ├── test_ecos_parser.cpp                   Ecos text protocol parsing tests
 ├── test_ecos_command_builder.cpp          Ecos command generation tests
 ├── test_state_engine.cpp                  Loco state management tests
@@ -19,9 +18,14 @@ tests/
 │   ├── mock_now_ms.h                      Mock time control header
 │   └── mock_now_ms.cpp                    Mock time implementation
 └── fixtures/
-    ├── xpressnet_messages.h               Valid/invalid XpressNet binary messages
     └── ecos_responses.h                   Valid/invalid Ecos text protocol responses
 ```
+
+XpressNet parsing is no longer unit-tested here - it's owned by the real
+XpressNetMaster library (`libraries/XpressNetMaster`), which `xpressnet_interface.cpp`
+wraps. That interface talks to real hardware (SoftwareSerial) so, like
+`ecos_interface.cpp`, it's excluded from the native test build; it can only be
+validated on the physical bus (Phase 4.6).
 
 ## Test Framework
 
@@ -52,7 +56,7 @@ platformio run -e native --target clean
 platformio test -e native
 
 # Specific test file
-platformio test -e native --filter test_xpressnet_parser
+platformio test -e native --filter test_command_router
 ```
 
 ## Test Structure
@@ -88,15 +92,7 @@ int main(void) {
 
 ## Test Categories
 
-### 1. XpressNet Parser Tests (`test_xpressnet_parser.cpp`)
-- Valid binary messages (speed, function, emergency stop)
-- Checksum validation
-- Address formats (short and long)
-- Error handling (corrupted, incomplete)
-
-**Key Fixtures**: `xpressnet_messages.h`
-
-### 2. Ecos Parser Tests (`test_ecos_parser.cpp`)
+### 1. Ecos Parser Tests (`test_ecos_parser.cpp`)
 - Text protocol parsing (key[value] extraction)
 - Line accumulation (byte-by-byte input)
 - Reply/Event framing
@@ -105,14 +101,14 @@ int main(void) {
 
 **Key Fixtures**: `ecos_responses.h`
 
-### 3. Ecos Command Builder Tests (`test_ecos_command_builder.cpp`)
+### 2. Ecos Command Builder Tests (`test_ecos_command_builder.cpp`)
 - Speed command generation
 - Function command generation
 - Query command generation
 - Subscribe/unsubscribe commands
 - Input validation and bounds checking
 
-### 4. State Engine Tests (`test_state_engine.cpp`)
+### 3. State Engine Tests (`test_state_engine.cpp`)
 - Loco addition and updates
 - Loco expiry (5-minute timeout)
 - Address lookup
@@ -121,7 +117,7 @@ int main(void) {
 
 **Key Mock**: `mock_now_ms.h/cpp`
 
-### 5. Command Router Tests (`test_command_router.cpp`)
+### 4. Command Router Tests (`test_command_router.cpp`)
 - Protocol bridging (XpressNet ↔ Ecos)
 - Echo prevention (500ms window, circular queue)
 - Subscription lifecycle
@@ -163,12 +159,6 @@ engine.expungeInactiveLocos();  // Loco 100 should be removed
 ### Fixtures
 Pre-defined test data:
 
-- **XpressNet Messages** (`xpressnet_messages.h`)
-  - Speed commands (forward, reverse, emergency stop)
-  - Function commands
-  - Valid and invalid checksums
-  - Incomplete messages
-
 - **Ecos Responses** (`ecos_responses.h`)
   - Speed queries and events
   - Address map discovery
@@ -194,18 +184,6 @@ RUN_TEST(test_important_case);
 ```
 
 ## Common Test Patterns
-
-### Verify protocol message parsing
-```cpp
-void test_parse_message(void) {
-    const uint8_t msg[] = XNET_SPEED_100_MID_FORWARD;
-    XNetMessage parsed = parser.parse(msg, sizeof(msg));
-    
-    TEST_ASSERT_EQUAL_UINT16(parsed.address, 100);
-    TEST_ASSERT_EQUAL_UINT8(parsed.speed, 64);
-    TEST_ASSERT_EQUAL_UINT8(parsed.direction, 1);
-}
-```
 
 ### Verify time-dependent behavior
 ```cpp

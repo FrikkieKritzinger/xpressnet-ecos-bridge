@@ -5,15 +5,81 @@
 **Language**: C++ (Arduino IDE 1.8+)  
 **Target**: ESP8266 microcontroller (160MHz, 4MB Flash, 160KB RAM)
 
-> ⏸️ **PAUSED (2026-07-27) — waiting for hardware to arrive.** All software work through
-> Phase 4.5 is complete and pushed (`main` @ `c27e33d`): 111/111 tests passing, 89.3%
-> line coverage, ESP8266 firmware builds clean. Next step is **Phase 4.6: Hardware
-> Procedures** — see that section below for full resumption details, environment setup
-> reference, and what to do once the ESP8266 + XpressNet bus hardware is in hand.
+> 🔧 **Phase 4.6 IN PROGRESS (2026-07-27) — hardware has arrived.** The board is
+> assembled (Wemos D1 Mini + MAX485, half-duplex single-wire per Philipp Gahtow's Z21
+> wiring pattern: D6=data, D0=DE/RE) and the firmware now integrates Gahtow's real
+> XpressNetMaster library instead of the old hand-rolled parser — see the "Design
+> correction" entry below for why. No OLED is wired yet (non-fatal, firmware runs
+> without it). Native tests and the ESP8266 build have been re-verified; real hardware
+> validation against a physical throttle + Ecos is the next manual step. See Phase 4.6
+> below for the checklist.
 
 ---
 
 ## 📝 Recent Updates (This Session)
+
+**2026-07-27 — Hardware arrived; XpressNet interface rewritten around Gahtow's real library**
+- **Trigger**: user assembled the physical board (Wemos D1 Mini + MAX485) per Philipp
+  Gahtow's Z21-command-station wiring: a single half-duplex data pin (**D6**, MAX485
+  DI+RO tied together) and a single DE/RE control pin (**D0**, tied together). No OLED
+  wired yet (non-fatal - `OledDisplay::begin()` already fails gracefully without one).
+- **Discovery**: that wiring didn't match anything in the repo, and digging into why
+  surfaced that the existing XpressNet code had never been validated against real
+  hardware or the real protocol, despite its own header comment claiming otherwise:
+  * [xpressnet_interface.h](xpressnet_ecos_bridge/protocols/xpressnet/xpressnet_interface.h)
+    said *"Uses Gahtow's XpressNetMaster library for hardware abstraction"* - but the
+    `.cpp` never used it. It hand-rolled everything on `Serial1` with separate
+    RX(D7)/TX(D8)/DE(D5) pins, and the library wasn't present anywhere in the repo.
+  * Real XpressNet's physical layer is **62500 baud, 8 data bits + a parity bit used
+    as a 9th "call byte" marker, single half-duplex wire** - not the 9600 baud
+    full-duplex scheme `config.h` had (previously commented "DO NOT CHANGE...
+    hardware-level limitation", which was simply wrong). Verified directly against
+    Gahtow's library source (`XNetSwSerial.begin(62500, SWSERIAL_8S1, ...)`) and its
+    ESP8266 example, which calls `XpressNet.setup(Loco128, D6, D0)` - an exact match
+    for this board's wiring.
+  * The hand-rolled parser modeled "emergency stop" as speed=127 on a per-locomotive
+    basis. Real XpressNet has no such thing: per-loco stop is just speed=0, and the
+    only emergency stop the reference library implements is a **bus-wide track-power
+    broadcast** (`notifyXNetPower(csEmergencyStop)`) - deliberately **not wired up
+    yet** (see Future Improvements), to keep this change focused on validating the
+    new hardware.
+- **Fixed**: integrated the user's local copy of Gahtow's XpressNetMaster library
+  (v3.1.1) into `libraries/XpressNetMaster/`. Rewrote
+  `xpressnet_interface.h/cpp` as a thin wrapper: `begin()`/`update()` call the
+  library's `setup()`/`update()`; incoming commands arrive via the library's
+  weak-symbol `notifyXNetLocoDrive128`/`notifyXNetLocoFunc1/2/3/X` callbacks (which
+  can't be class methods, so they're file-scope free functions dispatching through a
+  single active-instance pointer); outgoing commands call `xnet.setSpeed()`/
+  `setFuncNtoM()`. Function-state updates required extra care: XpressNet fragments
+  F0-F31 across up to 5 separate messages with a real Lenz bit-ordering quirk (F0
+  lives at bit4 of the first group, not bit0), and `CommandRouter::handleXpressNetFunctionCommand`
+  does a full bitmap overwrite rather than a merge - so the new interface reads the
+  loco's current bitmap via the already-public `router->getStateEngine().getLoco()`,
+  merges in just the arrived group's bits, then forwards the full bitmap.
+- **Removed**: `xpressnet_message_parser.h/cpp` and `test/test_xpressnet_parser/`
+  (16 tests) - fully superseded now that the real library owns parsing, and confirmed
+  to have zero other consumers. Consistent with this project's established practice
+  of deleting confirmed-dead scaffolding (see the device-count-tracking removal
+  below) rather than leaving it in place.
+- **`config.h`**: `XPRESSNET_RX_PIN`/`TX_PIN`/`DE_PIN`/`RE_PIN` replaced with
+  `XPRESSNET_DATA_PIN` (12/D6) and `XPRESSNET_CONTROL_PIN` (16/D0);
+  `XPRESSNET_BAUD` corrected from 9600 to 62500.
+- **Result**: native test suite now 91/91 passing (down from 111 - `test_xpressnet_parser`
+  had grown from 16 to ~20 tests by the end of Phase 4.5's coverage push, which
+  accounts for the removed 20; the other 4 suites - state_engine, command_router,
+  ecos_parser, ecos_command_builder - are unaffected, verified by rerunning them
+  directly). `env:wemos` firmware build re-verified clean against the new library
+  dependency: 44.1% RAM (36144/81920 bytes), 31.0% Flash (324115/1044464 bytes) -
+  up slightly from 43.4%/30.0% pre-integration, as expected from pulling in a real
+  third-party library instead of hand-rolled code. Also fixed a `platformio.ini` bug
+  surfaced by this build: `lib_extra_dirs` was set under `[platformio]`, which
+  PlatformIO 6.1.19 silently ignores - moved to `env:wemos` (the only environment
+  that needs it; `env:native` never touches `libraries/XpressNetMaster`). Real
+  hardware validation (throttle -> bridge -> Ecos over the physical bus) is the next
+  manual step, not yet done in this session.
+- **Known gap, deliberately deferred**: the bus-wide emergency-stop/track-power
+  broadcast (`notifyXNetPower`) is not wired to anything yet - see Future
+  Improvements.
 
 **2026-07-27 — Design decision: XpressNet device-count/status tracking removed**
 - **Decision**: The bridge's design premise is deliberately simple - forward any
@@ -243,19 +309,23 @@ integration, the FUNCTION/SPEED and E-stop bugs found and fixed, etc.). Commits:
 
 ---
 
-## 🎯 Phase 4.6: Hardware Procedures 🚀 READY TO START — PAUSED, WAITING FOR HARDWARE
+## 🎯 Phase 4.6: Hardware Procedures 🔧 IN PROGRESS
 
-**Session paused on 2026-07-27**: all software-side work through Phase 4.5 is done and
-pushed to `main` (commit `c27e33d`). Nothing further can happen on this phase until the
-physical ESP8266 + XpressNet bus hardware arrives. When it does, resume here.
+**Hardware arrived 2026-07-27**: board assembled (Wemos D1 Mini + MAX485, D6 data / D0
+control per Gahtow's Z21 wiring pattern, no OLED yet). The XpressNet interface has
+been rewritten around Gahtow's real XpressNetMaster library to match - see the
+"Hardware arrived" entry in Recent Updates for the full story. Native tests and the
+`wemos` build have been re-verified since that change (see "Verification" below for
+the actual numbers). Real hardware validation (flash + test against a live throttle
+and Ecos) has not happened yet - that's the remaining work in this phase.
 
-### Current State (everything below is true as of commit `c27e33d`)
+### Current State
 
-- Phases 1-4.5 complete. 111/111 native unit tests passing.
-- Coverage: 89.3% line / 96.6% function / 59.0% branch (5 core modules)
-- ESP8266 (`env:wemos`) firmware builds clean: 43.4% RAM, 30.0% Flash
-- Native test environment fully working (first time in project history - previously
-  no C++ compiler existed on this machine)
+- Phases 1-4.5 complete, plus the XpressNetMaster library integration above.
+- Native unit test suite and coverage numbers: see the "Hardware arrived" entry in
+  Recent Updates for the latest counts (parser-specific tests were removed since that
+  logic now lives in the real library).
+- ESP8266 (`env:wemos`) firmware build re-verified after the library integration.
 - Device-count/status tracking removed per design decision (bridge doesn't need to
   know if/how many XpressNet devices exist - see Recent Updates)
 - Design premise confirmed by user: forward any XpressNet command to Ecos (and
@@ -282,7 +352,6 @@ if that happens, run `.pio/build/native/program.exe` directly for the ground tru
   --root xpressnet_ecos_bridge \
   --filter "xpressnet_ecos_bridge/state_engine.*" \
   --filter "xpressnet_ecos_bridge/command_router.*" \
-  --filter "xpressnet_ecos_bridge/protocols/xpressnet/xpressnet_message_parser.*" \
   --filter "xpressnet_ecos_bridge/protocols/ecos/ecos_message_parser.*" \
   --filter "xpressnet_ecos_bridge/protocols/ecos/ecos_protocol.*" \
   --object-directory .pio/build/native --print-summary -r .
@@ -295,18 +364,21 @@ if that happens, run `.pio/build/native/program.exe` directly for the ground tru
 
 1. **A manual test checklist** for verifying the bridge against a real ESP8266 +
    physical XpressNet bus + real ESU Ecos (or Ecos-compatible command station). This
-   validates things native unit tests structurally cannot: actual RS485 serial timing,
-   real WiFi/TCP behavior against a live Ecos, and real XpressNet throttle behavior
-   (including the FUNCTION-marker-bit convention introduced in Phase 4.4 - **this is
-   the first time that convention will see real hardware bytes**, so it's the highest-
-   priority thing to verify early).
+   validates things native unit tests structurally cannot: actual RS485/half-duplex
+   serial timing, real WiFi/TCP behavior against a live Ecos, and real XpressNet
+   throttle behavior. Highest priority: this is the first time the new
+   XpressNetMaster-based interface (and its function-fragment merge logic in
+   `xpressnet_interface.cpp`) will see real hardware bytes at all - verify basic
+   speed/direction/function commands from a real throttle before anything else.
 2. Flash the firmware (`env:wemos` target) to the physical Wemos D1 Mini.
 3. Confirm `config.h`'s WiFi credentials and Ecos IP match the real network before
    testing (currently hardcoded placeholders - see "Hardware Configuration" below).
-4. Work through the checklist: XpressNet speed/direction/function/E-stop commands from
-   a real throttle, verify they reach Ecos correctly; Ecos-side changes verify they
+4. Work through the checklist: XpressNet speed/direction/function commands from a
+   real throttle, verify they reach Ecos correctly; Ecos-side changes verify they
    propagate back to XpressNet; subscription lifecycle (new loco -> subscribe, 5-minute
-   inactivity -> unsubscribe) against real timing, not mocked time.
+   inactivity -> unsubscribe) against real timing, not mocked time. (Bus-wide
+   emergency stop is not implemented yet - see Future Improvements - so it's not
+   part of this checklist.)
 
 ### After Phase 4.6
 
@@ -485,8 +557,10 @@ All disabled features = zero compiled code overhead.
   unit-level coverage was the higher-value target
 - **Status**: 111/111 tests passing, wemos firmware build re-verified unaffected
 
-**Phase 4.6: Hardware Procedures** 🚀 READY TO START (Next)
-- Manual test checklist for real ESP8266 + XpressNet bus
+**Phase 4.6: Hardware Procedures** 🔧 IN PROGRESS
+- Hardware assembled; XpressNet interface rewritten around Gahtow's real
+  XpressNetMaster library to match the physical wiring (see Recent Updates)
+- Remaining: manual test checklist against a real ESP8266 + XpressNet bus + Ecos
 
 ---
 
@@ -541,12 +615,15 @@ All disabled features = zero compiled code overhead.
 
 ### XpressNet (RS485 half-duplex)
 ```
-RX: D7 (pin 13, Serial1 RX)
-TX: D8 (pin 15, Serial1 TX)
-DE: D5 (pin 14) - Driver Enable (HIGH=transmit, LOW=receive)
-RE: D6 (pin 12) - Receiver Enable (tied to ground = always enabled)
-Baud: 9600 (DO NOT CHANGE - XpressNet standard)
+Data:    D6 (pin 12, GPIO12) - half-duplex data line (MAX485 DI+RO tied together)
+Control: D0 (pin 16, GPIO16) - MAX485 DE+RE tied together (HIGH=transmit, LOW=receive)
+Baud:    62500, 8 data bits + parity-as-9th-bit, 1 stop (SWSERIAL_8S1) - real Lenz
+         XpressNet wire rate, DO NOT CHANGE (protocol standard, not arbitrary)
 ```
+Wiring follows Philipp Gahtow's Z21-command-station pattern exactly (single half-duplex
+data pin + single combined DE/RE control pin) - the same pattern his XpressNetMaster
+library (`libraries/XpressNetMaster/`) is built for. `xpressnet_interface.cpp` wraps
+that library rather than talking to the pins directly.
 
 ### Ecos (WiFi TCP)
 ```
@@ -576,30 +653,35 @@ Use Arduino IDE Serial Monitor or compatible
 
 ### XpressNet (Master Device, Receiver)
 
-**Message Format** (4 bytes minimum):
-```
-[Address High] [Address Low] [Data] [Checksum]
-```
+Real message framing, checksums, and call-byte arbitration are owned entirely by
+Gahtow's XpressNetMaster library (`libraries/XpressNetMaster/`) - `xpressnet_interface.cpp`
+only translates its callback API to/from `CommandRouter`. The physical layer is
+62500 baud, 8N1 + a parity bit used as a 9th "call byte" marker, over a single
+half-duplex wire (see Hardware Configuration above).
 
-**Speed Command**:
-- Bit 7 of Data byte: Direction (0=forward, 1=reverse) [inverted from our convention]
-- Bits 6-0: Speed (0-126, 127=E-stop)
+**Speed Command** (128-speed-step mode, `notifyXNetLocoDrive128`):
+- Raw byte is `RVVVVVVV`: bit 7 = direction (0=forward, 1=reverse on the wire,
+  inverted from our internal convention), bits 6-0 = speed (0-126)
 
-**Function Command**:
-- Separate packet per 8 functions (F0-F7, F8-F15, F16-F23, F24-F31)
-- Each bit = one function state (1=on, 0=off)
-
-**Checksum**:
-- XOR of all bytes except checksum
-- Must validate before accepting message
+**Function Commands**:
+- Fragmented across up to 5 messages: F0-F4 (F0 sits at bit4, not bit0 - a real Lenz
+  quirk), F5-F8, F9-F12, F13-F20, F21-F28. Each fragment only carries its own bits;
+  `xpressnet_interface.cpp` merges each arriving fragment into the loco's full
+  F0-F31 bitmap (read via `router->getStateEngine().getLoco()`) before forwarding to
+  `CommandRouter`, since `handleXpressNetFunctionCommand` expects a full snapshot,
+  not a partial update.
 
 **Throttle Addressing**:
 - Short address (1-99): bit 6 of high byte set
 - Long address (100-9999): 14-bit field
 
-**Emergency Stop**:
-- Speed value = 127 (parsed as EMERGENCY_STOP command type)
-- Router converts to speed=0
+**Emergency Stop** (not yet wired up - see Future Improvements):
+- Per-locomotive stop is just an ordinary speed=0 command, nothing special.
+- Real bus-wide emergency stop (Notaus/track power) is a separate broadcast message
+  the library surfaces via a `notifyXNetPower(csEmergencyStop)` callback, not a
+  per-loco speed value. (The previous "speed=127 means E-stop" model documented here
+  was incorrect - discovered while integrating the real library; see the 2026-07-27
+  "Hardware arrived" entry in Recent Updates.)
 
 ### Ecos (Phase 3.2 - To be implemented)
 
@@ -704,9 +786,8 @@ xpressnet_ecos_bridge/
 │
 ├── protocols/
 │   ├── xpressnet/
-│   │   ├── xpressnet_interface.h/.cpp  Master device implementation
-│   │   ├── xpressnet_message_parser.h/.cpp  Binary protocol parsing
-│   │   └── [future: Gahtow XpressNetMaster lib integration]
+│   │   └── xpressnet_interface.h/.cpp  Wraps libraries/XpressNetMaster (real
+│   │                                    parsing/framing lives in the library)
 │   │
 │   ├── ecos/
 │   │   └── ecos_interface.h            TCP/XML protocol (Phase 3.2 stub)
@@ -735,7 +816,8 @@ xpressnet_ecos_bridge/
 │   └── 05_COMPILATION_FIX_COMPLETE.md Final verification (reference)
 │
 ├── tests/                              [Placeholder for Phase 4 unit tests]
-├── libraries/                          [External libs via Arduino IDE]
+├── libraries/                          External libs (PlatformIO lib_extra_dirs)
+│   └── XpressNetMaster/                 Gahtow's real XpressNet master library
 └── README.md                           User-facing overview
 ```
 
@@ -752,8 +834,12 @@ Features not enabled = zero compiled code overhead. A disabled protocol costs no
 ### Why Echo Prevention at Router Level?
 All protocols route through router, so a single check prevents loops. Simpler than implementing per-protocol. 500ms window works for all tested scenarios.
 
-### Why Fixed 9600 Baud XpressNet?
-XpressNet standard, hardware-level limitation. Cannot be changed without breaking protocol compatibility.
+### Why Fixed 62500 Baud XpressNet?
+This is the real Lenz XpressNet wire rate (8 data bits + a parity bit used as the 9th
+"call byte" marker bit, half-duplex), confirmed against Gahtow's reference
+XpressNetMaster library. Cannot be changed without breaking protocol compatibility.
+(A previous version of this doc said 9600 baud - that was never validated against
+real hardware and was wrong; corrected 2026-07-27 when integrating the real library.)
 
 ### Why Non-Blocking Everything?
 XpressNet message windows are ~20-50ms. Blocking for 100ms on Ecos TCP would miss commands. Cooperative multitasking with yield() balances responsiveness.
@@ -801,9 +887,18 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 - LocoNet support (parallel to XpressNet)
 - Z21 LAN protocol support
 - Accessory decoder (turnout) control
-- Speed step 128 (currently 14-step, DCC standard)
 - Advanced function mapping (e.g., F5=headlight, but only on steam engines)
+- **Bus-wide emergency stop / track power** (Notaus): XpressNetMaster surfaces this
+  via a `notifyXNetPower(csEmergencyStop)` callback, but nothing consumes it yet.
+  Likely needs a new CommandRouter path (e.g. iterate all known locos in StateEngine
+  and force speed=0) rather than the single-address `handleXpressNetCommand` path.
+  Deliberately deferred out of the 2026-07-27 XpressNetMaster integration to keep
+  that change focused on validating the new hardware.
 
 ---
 
-**Last Updated**: 2026-07-27 (Phase 4.5 complete + device-count tracking feature removed per design decision: coverage now 89.3% line / 96.6% function / 59.0% branch, 111/111 tests passing. **Session paused, waiting for hardware to arrive before starting Phase 4.6** — see the banner at the top of this file and the "Phase 4.6" section for resumption details.)
+**Last Updated**: 2026-07-27 (Hardware arrived; XpressNet interface rewritten around
+Gahtow's real XpressNetMaster library to match the physical D6/D0 half-duplex wiring
+and the real 62500-baud protocol - see the top-of-file banner and the "Hardware
+arrived" entry in Recent Updates for full details. Native test suite and ESP8266
+build re-verified after the change; real hardware validation is the next step.)

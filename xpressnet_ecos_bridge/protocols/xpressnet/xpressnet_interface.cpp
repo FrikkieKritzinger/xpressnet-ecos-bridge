@@ -1,24 +1,62 @@
 /*
  * XpressNet Interface Implementation - Master Device
  *
- * Handles all XpressNet protocol communication:
- * - Receives commands from throttles via RS485 serial
- * - Parses binary XpressNet messages
- * - Routes commands through state engine and command router
- * - Sends speed/direction and function updates to bus
- * - Manages connection status and timeouts
+ * Thin wrapper around Philipp Gahtow's XpressNetMaster library
+ * (libraries/XpressNetMaster). The library owns the half-duplex single-wire
+ * serial framing (62500 baud, 8N1+parity call-byte marker) and XpressNet
+ * message/checksum handling; this file only translates between its
+ * weak-symbol callback API and CommandRouter.
  *
  * Non-blocking, cooperative multitasking design.
- * Update must be fast enough to not miss message windows (~20-50ms).
  */
 
 #include "xpressnet_interface.h"
-#include "xpressnet_message_parser.h"
 #include "../../command_router.h"
 #include "../../config.h"
 #include "../../definitions.h"
 #include "../../utils/debug.h"
 #include <Arduino.h>
+
+// ============================================================================
+// CALLBACK DISPATCH
+// ============================================================================
+// XpressNetMasterClass calls these as weak-symbol free functions - they can't
+// be member functions. Only one XpressNetInterface exists (one physical bus),
+// so a single file-scope pointer is enough to route callbacks back into it.
+
+static XpressNetInterface* g_xnet_instance = nullptr;
+
+void notifyXNetLocoDrive128(uint16_t Address, uint8_t Speed) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onLocoDrive128(Address, Speed);
+    }
+}
+
+void notifyXNetLocoFunc1(uint16_t Address, uint8_t Func1) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onLocoFunctionGroup(Address, 1, Func1);
+    }
+}
+
+void notifyXNetLocoFunc2(uint16_t Address, uint8_t Func2) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onLocoFunctionGroup(Address, 2, Func2);
+    }
+}
+
+void notifyXNetLocoFunc3(uint16_t Address, uint8_t Func3) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onLocoFunctionGroup(Address, 3, Func3);
+    }
+}
+
+void notifyXNetLocoFuncX(uint16_t Address, uint8_t group, uint8_t Func) {
+    // group 0x04 = F13-F20, 0x05 = F21-F28. Groups 0x06+ (F29 and beyond)
+    // fall outside our uint32_t F0-F31 bitmap - ignore them.
+    if (g_xnet_instance && (group == 0x04 || group == 0x05)) {
+        g_xnet_instance->onLocoFunctionGroup(Address, group, Func);
+    }
+}
 
 // ============================================================================
 // CONSTRUCTOR & INITIALIZATION
@@ -28,15 +66,14 @@ XpressNetInterface::XpressNetInterface()
     : current_status(ComponentStatus::DISCONNECTED),
       last_message_time(0),
       bus_connect_time(0),
-      serial(&Serial1),
-      buffer_index(0),
       router(nullptr) {
-    memset(message_buffer, 0, sizeof(message_buffer));
-    memset(&current_command, 0, sizeof(current_command));
+    g_xnet_instance = this;
 }
 
 XpressNetInterface::~XpressNetInterface() {
-    // Cleanup if needed
+    if (g_xnet_instance == this) {
+        g_xnet_instance = nullptr;
+    }
 }
 
 // ============================================================================
@@ -45,34 +82,19 @@ XpressNetInterface::~XpressNetInterface() {
 
 bool XpressNetInterface::begin() {
     #if ENABLE_XPRESSNET
-        DEBUG_XNET_PRINTF("Initializing XpressNet interface...\n");
+        DEBUG_XNET_PRINTF("Initializing XpressNet interface (data=D%u control=D%u baud=%u)...\n",
+                         XPRESSNET_DATA_PIN, XPRESSNET_CONTROL_PIN, XPRESSNET_BAUD);
 
-        // Configure RS485 control pins
-        pinMode(XPRESSNET_DE_PIN, OUTPUT);  // Driver Enable
-        pinMode(XPRESSNET_RX_PIN, INPUT);   // RX
-        pinMode(XPRESSNET_TX_PIN, OUTPUT);  // TX
+        // Note: XpressNetMasterClass::setup() hangs forever (its own infinite
+        // loop) if the SoftwareSerial pin configuration is invalid - there is
+        // no recoverable failure path for that case.
+        xnet.setup(Loco128, XPRESSNET_DATA_PIN, XPRESSNET_CONTROL_PIN);
 
-        // Start in receiver mode (DE=LOW, no explicit RE needed if tied to ground)
-        digitalWrite(XPRESSNET_DE_PIN, LOW);
-
-        // Initialize Serial1 for XpressNet (9600 baud, 8N1)
-        // XpressNet uses 9-bit protocol, but Arduino handles it at 8-bit level
-        // ESP8266 Serial1: RX fixed to D7 (GPIO13), TX configurable (default D8/GPIO15)
-        Serial1.begin(XPRESSNET_BAUD, SERIAL_8N1, SERIAL_FULL, XPRESSNET_TX_PIN);
-
-        if (!Serial1) {
-            DEBUG_XNET_PRINTF("ERROR: Serial1 initialization failed!\n");
-            current_status = ComponentStatus::ERROR;
-            return false;
-        }
-
-        // Set status to CONNECTING and reset timer
         current_status = ComponentStatus::CONNECTING;
         last_message_time = millis();
         bus_connect_time = 0;
 
-        DEBUG_XNET_PRINTF("XpressNet interface initialized (baud=%u, pins RX=%u TX=%u)\n",
-                         XPRESSNET_BAUD, XPRESSNET_RX_PIN, XPRESSNET_TX_PIN);
+        DEBUG_XNET_PRINTF("XpressNet interface initialized\n");
 
         return true;
 
@@ -91,95 +113,11 @@ void XpressNetInterface::update() {
         return;  // If disabled, do nothing
     #endif
 
-    // Update bus status (check for timeouts, etc.)
     updateBusStatus();
 
-    // Process all available incoming messages (non-blocking)
-    // XpressNet has tight message timing (~20-50ms windows)
-    // So we must process quickly and not block
-    while (processIncomingMessage()) {
-        // Continue processing while messages available
-        // Each iteration handles one complete message
-        yield();  // Let ESP8266 handle background tasks
-    }
-}
-
-// ============================================================================
-// INCOMING MESSAGE PROCESSING
-// ============================================================================
-
-bool XpressNetInterface::processIncomingMessage() {
-    // Non-blocking serial read - check if data available
-    if (!Serial1.available()) {
-        return false;  // No data available
-    }
-
-    // Read one byte
-    int byte_value = Serial1.read();
-    if (byte_value < 0) {
-        return false;  // Read failed
-    }
-
-    uint8_t byte = (uint8_t)byte_value;
-
-    // XpressNet message format:
-    // Typical: [Addr_High][Addr_Low][Data][Checksum]
-    // Length: 3-6 bytes depending on message type
-
-    // Simple state machine to accumulate bytes
-    if (buffer_index >= MAX_XNET_MESSAGE_LENGTH) {
-        // Buffer full - reset (message too long)
-        buffer_index = 0;
-        return false;
-    }
-
-    message_buffer[buffer_index++] = byte;
-
-    // Try to parse complete message
-    // Minimum message is 4 bytes (address high/low + data + checksum)
-    if (buffer_index < 4) {
-        return false;  // Incomplete message
-    }
-
-    // Check if message appears complete
-    // For now, assume 4-byte messages are most common
-    // (Speed commands: addr_hi, addr_lo, speed_dir, checksum)
-    if (buffer_index >= 4) {
-        // Attempt to parse
-        if (XNetMessageParser::parse(message_buffer, buffer_index, current_command)) {
-            // Valid message parsed!
-            buffer_index = 0;  // Reset for next message
-
-            // Update timing
-            last_message_time = millis();
-            if (bus_connect_time == 0) {
-                bus_connect_time = last_message_time;
-            }
-
-            // Route the command through router
-            handleCommand(current_command);
-
-            return true;  // Successfully processed one message
-        } else if (buffer_index >= 6) {
-            // Could be longer message - try parsing as 6 bytes
-            if (XNetMessageParser::parse(message_buffer, buffer_index, current_command)) {
-                buffer_index = 0;
-                last_message_time = millis();
-                handleCommand(current_command);
-                return true;
-            } else {
-                // Message doesn't parse - skip first byte and try again
-                // (resynchronize to message boundary)
-                for (int i = 0; i < buffer_index - 1; i++) {
-                    message_buffer[i] = message_buffer[i + 1];
-                }
-                buffer_index--;
-                return false;
-            }
-        }
-    }
-
-    return false;  // Message still being accumulated
+    // Pumps the library's SoftwareSerial read/parse state machine; fires
+    // notifyXNet* callbacks synchronously for any complete message found.
+    xnet.update();
 }
 
 // ============================================================================
@@ -191,14 +129,11 @@ void XpressNetInterface::updateBusStatus() {
     unsigned long time_since_message = now - last_message_time;
 
     if (current_status == ComponentStatus::CONNECTING) {
-        // Still waiting for first message
         if (time_since_message > 3000) {
-            // 3 seconds without any message while connecting
             current_status = ComponentStatus::DISCONNECTED;
             DEBUG_XNET_PRINTF("XpressNet: Bus disconnected (no initial activity)\n");
         }
     } else if (current_status == ComponentStatus::CONNECTED) {
-        // Connected - watch for timeout
         if (time_since_message > BUS_TIMEOUT) {
             current_status = ComponentStatus::DISCONNECTED;
             bus_connect_time = 0;
@@ -207,59 +142,109 @@ void XpressNetInterface::updateBusStatus() {
     }
 }
 
-// ============================================================================
-// COMMAND HANDLING
-// ============================================================================
-
-void XpressNetInterface::handleCommand(const XNetCommand& cmd) {
-    // Validate command
-    if (cmd.type == XNetCommand::INVALID || cmd.type == XNetCommand::UNKNOWN) {
-        DEBUG_XNET_PRINTF("XpressNet: Ignoring invalid command\n");
-        return;
+void XpressNetInterface::markBusActivity() {
+    last_message_time = millis();
+    if (bus_connect_time == 0) {
+        bus_connect_time = last_message_time;
     }
-
-    // Validate address
-    if (!isValidDccAddress(cmd.address)) {
-        DEBUG_XNET_PRINTF("XpressNet: Invalid address %u\n", cmd.address);
-        return;
-    }
-
-    // Update connection status on first valid message
     if (current_status == ComponentStatus::CONNECTING) {
         current_status = ComponentStatus::CONNECTED;
         DEBUG_XNET_PRINTF("XpressNet: Bus connected! First message from device\n");
     }
+}
 
-    // Route based on command type
+// ============================================================================
+// INCOMING COMMAND HANDLING (called from the notifyXNet* callbacks)
+// ============================================================================
+
+void XpressNetInterface::onLocoDrive128(uint16_t address, uint8_t speed_byte) {
+    if (!isValidDccAddress(address)) {
+        DEBUG_XNET_PRINTF("XpressNet: Invalid address %u\n", address);
+        return;
+    }
+
+    markBusActivity();
+
     if (!router) {
         DEBUG_XNET_PRINTF("XpressNet: WARNING - router not set, dropping command\n");
         return;
     }
 
-    switch (cmd.type) {
-        case XNetCommand::SPEED:
-            DEBUG_XNET_PRINTF("XpressNet RX: Speed - Addr=%u Speed=%u Dir=%u\n",
-                            cmd.address, cmd.speed, cmd.direction);
-            // Route to command router (updates state and broadcasts to Ecos)
-            router->handleXpressNetCommand(cmd.address, cmd.speed, cmd.direction);
-            break;
+    // RVVVVVVV: bit7=direction (0=forward,1=reverse on the wire), bits6-0=speed.
+    // Our internal convention is inverted (direction: 0=reverse, 1=forward).
+    uint8_t speed = speed_byte & 0x7F;
+    uint8_t direction = (speed_byte & 0x80) ? 0 : 1;
 
-        case XNetCommand::EMERGENCY_STOP:
-            DEBUG_XNET_PRINTF("XpressNet RX: E-STOP - Addr=%u\n", cmd.address);
-            // E-stop: set speed to 0
-            router->handleXpressNetCommand(cmd.address, 0, cmd.direction);
-            break;
-
-        case XNetCommand::FUNCTION:
-            DEBUG_XNET_PRINTF("XpressNet RX: Function - Addr=%u Fn=0x%08x\n",
-                            cmd.address, cmd.functions);
-            // Route function command
-            router->handleXpressNetFunctionCommand(cmd.address, cmd.functions);
-            break;
-
-        default:
-            break;
+    if (!isValidSpeed(speed) || !isValidDirection(direction)) {
+        // Rejects the reserved V=127 step steps (real Lenz "V=1 is emergency
+        // stop, V=2-127 are speed steps 1-126" nuance is not modeled yet -
+        // see CLAUDE.md Future Improvements).
+        DEBUG_XNET_PRINTF("XpressNet: Invalid speed byte 0x%02x for addr %u\n", speed_byte, address);
+        return;
     }
+
+    DEBUG_XNET_PRINTF("XpressNet RX: Speed - Addr=%u Speed=%u Dir=%u\n", address, speed, direction);
+    router->handleXpressNetCommand(address, speed, direction);
+}
+
+void XpressNetInterface::onLocoFunctionGroup(uint16_t address, uint8_t group, uint8_t bits) {
+    if (!isValidDccAddress(address)) {
+        DEBUG_XNET_PRINTF("XpressNet: Invalid address %u\n", address);
+        return;
+    }
+
+    markBusActivity();
+
+    if (!router) {
+        DEBUG_XNET_PRINTF("XpressNet: WARNING - router not set, dropping command\n");
+        return;
+    }
+
+    // CommandRouter::handleXpressNetFunctionCommand overwrites the full
+    // bitmap, but XpressNet fragments F0-F31 across up to 5 separate
+    // messages - start from the loco's current known state and merge in
+    // only the bits this group covers.
+    LocoState existing;
+    uint32_t functions = 0;
+    if (router->getStateEngine().getLoco(address, existing)) {
+        functions = existing.functions;
+    }
+
+    switch (group) {
+        case 1: {
+            // Byte layout: 0 0 0 F0 F4 F3 F2 F1 (F0 sits at bit4, a real
+            // Lenz XpressNet quirk from the original 5-function message).
+            static const uint8_t func_bit[5] = {0, 1, 2, 3, 4};
+            static const uint8_t byte_bit[5] = {4, 0, 1, 2, 3};
+            for (uint8_t i = 0; i < 5; i++) {
+                uint32_t mask = (1UL << func_bit[i]);
+                functions &= ~mask;
+                if (bits & (1 << byte_bit[i])) functions |= mask;
+            }
+            break;
+        }
+        case 2:  // F5-F8, bit0=F5..bit3=F8
+            functions &= ~(0x0FUL << 5);
+            functions |= (uint32_t)(bits & 0x0F) << 5;
+            break;
+        case 3:  // F9-F12, bit0=F9..bit3=F12
+            functions &= ~(0x0FUL << 9);
+            functions |= (uint32_t)(bits & 0x0F) << 9;
+            break;
+        case 0x04:  // F13-F20, bit0=F13..bit7=F20
+            functions &= ~(0xFFUL << 13);
+            functions |= (uint32_t)bits << 13;
+            break;
+        case 0x05:  // F21-F28, bit0=F21..bit7=F28
+            functions &= ~(0xFFUL << 21);
+            functions |= (uint32_t)bits << 21;
+            break;
+        default:
+            return;  // Unknown/out-of-range group - shouldn't happen, notifyXNetLocoFuncX already filters
+    }
+
+    DEBUG_XNET_PRINTF("XpressNet RX: Function group %u - Addr=%u Fn=0x%08lx\n", group, address, (unsigned long)functions);
+    router->handleXpressNetFunctionCommand(address, functions);
 }
 
 // ============================================================================
@@ -268,7 +253,6 @@ void XpressNetInterface::handleCommand(const XNetCommand& cmd) {
 
 void XpressNetInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) {
     if (current_status != ComponentStatus::CONNECTED) {
-        // Not connected - queue or drop
         return;
     }
 
@@ -278,13 +262,14 @@ void XpressNetInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8
         return;
     }
 
-    uint8_t packet[MAX_XNET_MESSAGE_LENGTH];
-    uint8_t len = buildSpeedPacket(packet, address, speed, direction);
+    uint8_t speed_byte = speed & 0x7F;
+    if (direction == 0) {
+        speed_byte |= 0x80;  // reverse
+    }
 
-    sendPacket(packet, len);
+    xnet.setSpeed(address, Loco128, speed_byte);
 
-    DEBUG_XNET_PRINTF("XpressNet TX: Speed - Addr=%u Speed=%u Dir=%u\n",
-                     address, speed, direction);
+    DEBUG_XNET_PRINTF("XpressNet TX: Speed - Addr=%u Speed=%u Dir=%u\n", address, speed, direction);
 }
 
 void XpressNetInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
@@ -296,101 +281,39 @@ void XpressNetInterface::sendFunctionCommand(uint16_t address, uint32_t function
         return;
     }
 
-    // XpressNet sends functions in groups (F0-F7, F8-F15, etc.)
-    // Send all function ranges that have changes
-    uint8_t packet[MAX_XNET_MESSAGE_LENGTH];
+    xnet.setFunc0to4(address, buildFunctionGroupByte(functions, 1));
+    xnet.setFunc5to8(address, buildFunctionGroupByte(functions, 2));
+    xnet.setFunc9to12(address, buildFunctionGroupByte(functions, 3));
+    xnet.setFunc13to20(address, buildFunctionGroupByte(functions, 0x04));
+    xnet.setFunc21to28(address, buildFunctionGroupByte(functions, 0x05));
 
-    for (uint8_t range = 0; range < 4; range++) {
-        uint8_t len = buildFunctionPacket(packet, address, functions, range);
-        if (len > 0) {
-            sendPacket(packet, len);
+    DEBUG_XNET_PRINTF("XpressNet TX: Functions - Addr=%u Fn=0x%08lx\n", address, (unsigned long)functions);
+}
+
+// ============================================================================
+// OUTGOING FUNCTION GROUP ENCODING (mirrors onLocoFunctionGroup's decode)
+// ============================================================================
+
+uint8_t XpressNetInterface::buildFunctionGroupByte(uint32_t functions, uint8_t group) {
+    switch (group) {
+        case 1: {
+            uint8_t b = 0;
+            if (functions & (1UL << 0)) b |= (1 << 4);  // F0 -> bit4
+            if (functions & (1UL << 1)) b |= (1 << 0);  // F1 -> bit0
+            if (functions & (1UL << 2)) b |= (1 << 1);  // F2 -> bit1
+            if (functions & (1UL << 3)) b |= (1 << 2);  // F3 -> bit2
+            if (functions & (1UL << 4)) b |= (1 << 3);  // F4 -> bit3
+            return b;
         }
+        case 2:
+            return (uint8_t)((functions >> 5) & 0x0F);   // F5-F8
+        case 3:
+            return (uint8_t)((functions >> 9) & 0x0F);   // F9-F12
+        case 0x04:
+            return (uint8_t)((functions >> 13) & 0xFF);  // F13-F20
+        case 0x05:
+            return (uint8_t)((functions >> 21) & 0xFF);  // F21-F28
+        default:
+            return 0;
     }
-
-    DEBUG_XNET_PRINTF("XpressNet TX: Functions - Addr=%u Fn=0x%08x\n",
-                     address, functions);
-}
-
-// ============================================================================
-// PACKET BUILDING
-// ============================================================================
-
-uint8_t XpressNetInterface::buildSpeedPacket(uint8_t* buffer, uint16_t address,
-                                            uint8_t speed, uint8_t direction) {
-    // XpressNet speed packet format:
-    // [Addr_High][Addr_Low][Speed_Dir][Checksum]
-
-    if (!buffer) return 0;
-
-    // Split address into high and low bytes
-    uint8_t addr_high = (address >> 8) & 0xFF;
-    uint8_t addr_low = address & 0xFF;
-
-    // Encode speed and direction
-    // Bit 7: direction (0=forward, 1=reverse)
-    // Bits 6-0: speed (0-126)
-    uint8_t speed_byte = speed;
-    if (direction == 0) {
-        // Forward - clear bit 7
-        speed_byte &= 0x7F;
-    } else {
-        // Reverse - set bit 7
-        speed_byte |= 0x80;
-    }
-
-    buffer[0] = addr_high;
-    buffer[1] = addr_low;
-    buffer[2] = speed_byte;
-    buffer[3] = XNetMessageParser::calculateChecksum(buffer, 3);
-
-    return 4;  // 4-byte message
-}
-
-uint8_t XpressNetInterface::buildFunctionPacket(uint8_t* buffer, uint16_t address,
-                                               uint32_t functions, uint8_t function_range) {
-    // XpressNet function packets - one per 8 functions (F0-F7, F8-F15, etc.)
-    // Format: [Addr_High][Addr_Low][Fn_Bits][Checksum]
-
-    if (!buffer || function_range > 3) return 0;
-
-    uint8_t addr_high = (address >> 8) & 0xFF;
-    uint8_t addr_low = address & 0xFF;
-
-    // Extract the relevant function bits for this range
-    // F0-F7: bits 0-7
-    // F8-F15: bits 8-15
-    // F16-F23: bits 16-23
-    // F24-F31: bits 24-31
-    uint8_t fn_byte = (functions >> (function_range * 8)) & 0xFF;
-
-    buffer[0] = addr_high;
-    buffer[1] = addr_low;
-    buffer[2] = fn_byte;
-    buffer[3] = XNetMessageParser::calculateChecksum(buffer, 3);
-
-    return 4;  // 4-byte message
-}
-
-void XpressNetInterface::sendPacket(const uint8_t* buffer, uint8_t length) {
-    if (!buffer || length == 0 || length > MAX_XNET_MESSAGE_LENGTH) {
-        return;
-    }
-
-    // Switch to transmit mode (DE=HIGH)
-    digitalWrite(XPRESSNET_DE_PIN, HIGH);
-
-    // Send packet
-    for (uint8_t i = 0; i < length; i++) {
-        Serial1.write(buffer[i]);
-    }
-
-    // Flush transmission queue
-    Serial1.flush();
-
-    // Switch back to receive mode (DE=LOW)
-    digitalWrite(XPRESSNET_DE_PIN, LOW);
-
-    // Small delay to ensure we're in receive mode before next data arrives
-    // (XpressNet throttles may respond quickly)
-    delayMicroseconds(100);
 }

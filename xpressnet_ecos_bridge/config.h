@@ -30,13 +30,18 @@
 
 #if ENABLE_XPRESSNET
     // Pin assignments (Wemos D1 Mini pin names)
-    #define XPRESSNET_RX_PIN        13   // D7 - Serial1 RX input
-    #define XPRESSNET_TX_PIN        15   // D8 - Serial1 TX output
-    #define XPRESSNET_DE_PIN        14   // D5 - Driver Enable (HIGH=TX, LOW=RX)
-    #define XPRESSNET_RE_PIN        12   // D6 - Receiver Enable (LOW=enabled)
-    
+    // Hardware: MAX485 module, half-duplex single-wire (DI+RO tied together on the
+    // module), DE+RE also tied together. Matches Philipp Gahtow's XpressNetMaster
+    // library wiring pattern exactly (its ESP8266 example calls setup(Loco128, D6, D0)).
+    #define XPRESSNET_DATA_PIN      12   // D6 - half-duplex data (SoftwareSerial RX+TX, same pin)
+    #define XPRESSNET_CONTROL_PIN   16   // D0 - MAX485 DE+RE tied together (HIGH=TX, LOW=RX)
+
     // Serial configuration
-    #define XPRESSNET_BAUD          9600 // XpressNet standard baudrate (DO NOT CHANGE)
+    // 62500 baud, 8 data bits + parity-as-9th-bit (SWSERIAL_8S1), 1 stop bit -
+    // this is the real Lenz XpressNet wire rate (confirmed against XpressNetMaster's
+    // own SoftwareSerial.begin() call), NOT the 9600 baud previously assumed here.
+    // The parity bit distinguishes a "call byte" from a data byte for bus arbitration.
+    #define XPRESSNET_BAUD          62500
     
     // Timing and lifecycle
     #define XPRESSNET_TIMEOUT       300000  // 5 minutes - remove inactive locos from state engine

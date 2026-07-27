@@ -3,21 +3,22 @@
  *
  * Implements XpressNet master device functionality on ESP8266.
  * - Receives commands from slave devices (throttles) via RS485
- * - Parses binary XpressNet protocol messages
  * - Routes commands to command router for state update and broadcast to Ecos
  * - Sends speed/direction and function commands back to bus
  *
- * Non-blocking serial I/O for cooperative multitasking.
- * Uses Gahtow's XpressNetMaster library for hardware abstraction.
+ * Wraps Philipp Gahtow's XpressNetMaster library (libraries/XpressNetMaster), which
+ * owns the real half-duplex single-wire serial framing (62500 baud, 8N1+parity) and
+ * XpressNet call-byte/checksum handling. This class only translates between that
+ * library's callback API and CommandRouter.
  */
 
 #ifndef XPRESSNET_INTERFACE_H
 #define XPRESSNET_INTERFACE_H
 
 #include <cstdint>
+#include <XpressNetMaster.h>
 #include "../../interfaces/interface_base.h"
 #include "../../definitions.h"
-#include "xpressnet_message_parser.h"
 
 // Forward declaration
 class CommandRouter;
@@ -28,38 +29,32 @@ public:
     ~XpressNetInterface();
 
     /**
-     * Initialize XpressNet hardware
-     * - Configure RS485 pins (DE, RE)
-     * - Initialize Serial1 at 9600 baud
-     * - Start message processing
+     * Initialize XpressNet hardware via XpressNetMasterClass::setup()
+     * Note: the library itself hangs (infinite loop, blinks nothing) if the
+     * data/control pin configuration is invalid - this is a hard fault baked
+     * into the library, not something this wrapper can recover from.
      * @return true if initialization successful
      */
     bool begin() override;
 
     /**
-     * Non-blocking update - process incoming messages
+     * Non-blocking update - pumps XpressNetMasterClass::update()
      * Called every main loop iteration (HIGHEST priority)
-     * - Reads available serial data
-     * - Parses complete messages
-     * - Routes commands to command router
-     * - Handles bus status updates
-     * - Tracks connection status (timeout detection)
      * Must NEVER block
      */
     void update() override;
 
     /**
      * Send speed/direction command to XpressNet bus
-     * Broadcasts to all throttles for this address
      * @param address DCC locomotive address
-     * @param speed 0-126 (0=stop, 127=reserved)
+     * @param speed 0-126 (0=stop)
      * @param direction 0=reverse, 1=forward
      */
     void sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) override;
 
     /**
      * Send function states to XpressNet bus
-     * May send multiple packets (F0-F7, F8-F15, etc.)
+     * Sends one packet per group that has changed (F0-F4, F5-F8, F9-F12, F13-F20, F21-F28)
      * @param address DCC locomotive address
      * @param functions 32-bit bitmap (bit 0=F0, bit 1=F1, ..., bit 31=F31)
      */
@@ -90,32 +85,42 @@ public:
         this->router = router;
     }
 
+    // ------------------------------------------------------------------
+    // Called only by the file-scope notifyXNet* callbacks (weak symbols
+    // required by XpressNetMasterClass - they can't be member functions).
+    // Public only for that purpose, not part of the ProtocolInterface API.
+    // ------------------------------------------------------------------
+
+    /**
+     * Handle a 128-speed-step drive notification
+     * @param address DCC address
+     * @param speed_byte Raw RVVVVVVV byte: bit7=direction, bits6-0=speed 0-126
+     */
+    void onLocoDrive128(uint16_t address, uint8_t speed_byte);
+
+    /**
+     * Handle one fragment of a function-state notification and merge it
+     * into the loco's full F0-F31 bitmap before forwarding to the router.
+     * @param address DCC address
+     * @param group Which fragment: 1=F0-F4, 2=F5-F8, 3=F9-F12, 4=F13-F20, 5=F21-F28
+     * @param bits Raw group byte from the library callback
+     */
+    void onLocoFunctionGroup(uint16_t address, uint8_t group, uint8_t bits);
+
 private:
     // Hardware state
     ComponentStatus current_status;         // CONNECTED, DISCONNECTED, ERROR
     unsigned long last_message_time;        // Timestamp of last received message
     unsigned long bus_connect_time;         // When we first detected bus activity
-
-    // Serial communication
-    HardwareSerial* serial;                 // Serial1 for XpressNet
-    uint8_t message_buffer[MAX_XNET_MESSAGE_LENGTH];
-    uint8_t buffer_index;
     static const unsigned long BUS_TIMEOUT = 5000;  // 5 seconds = no bus
+
+    // Library instance - owns the half-duplex SoftwareSerial and XpressNet framing
+    XpressNetMasterClass xnet;
 
     // Command routing
     CommandRouter* router;                  // Reference to main router
 
-    // Message parsing
-    XNetCommand current_command;            // Last parsed command
-
     // Helper methods
-
-    /**
-     * Check for incoming serial data and parse complete messages
-     * Non-blocking - process one message per call
-     * @return true if a complete message was parsed and routed
-     */
-    bool processIncomingMessage();
 
     /**
      * Update connection status based on activity
@@ -124,43 +129,21 @@ private:
     void updateBusStatus();
 
     /**
-     * Handle a successfully parsed XpressNet command
-     * Routes to command_router for state update and broadcast
-     * @param cmd Parsed command
+     * Record that a message was received from the bus (called from the
+     * notify callbacks) - flips CONNECTING -> CONNECTED on first activity
+     * and resets the timeout clock.
      */
-    void handleCommand(const XNetCommand& cmd);
+    void markBusActivity();
 
     /**
-     * Build XpressNet speed packet for sending
-     * Formats binary message for transmission
-     * @param buffer Output: constructed packet
-     * @param address DCC address
-     * @param speed 0-126
-     * @param direction 0=reverse, 1=forward
-     * @return packet length in bytes
+     * Build the outbound byte for one function group from the full 32-bit
+     * bitmap, applying the group-1 bit remap (F0 lives at bit4, not bit0 -
+     * a real Lenz XpressNet quirk, not a bug).
+     * @param functions Full F0-F31 bitmap
+     * @param group 1=F0-F4, 2=F5-F8, 3=F9-F12, 4=F13-F20, 5=F21-F28
+     * @return Raw group byte ready for xnet.setFuncNtoM()
      */
-    uint8_t buildSpeedPacket(uint8_t* buffer, uint16_t address,
-                            uint8_t speed, uint8_t direction);
-
-    /**
-     * Build XpressNet function packet for sending
-     * May need multiple packets for F0-F31
-     * @param buffer Output: constructed packet
-     * @param address DCC address
-     * @param functions 32-bit bitmap
-     * @param function_range 0=F0-F7, 1=F8-F15, etc.
-     * @return packet length in bytes
-     */
-    uint8_t buildFunctionPacket(uint8_t* buffer, uint16_t address,
-                               uint32_t functions, uint8_t function_range);
-
-    /**
-     * Send raw packet to XpressNet bus
-     * Handles RS485 control (DE/RE pins)
-     * @param buffer Packet data
-     * @param length Packet length
-     */
-    void sendPacket(const uint8_t* buffer, uint8_t length);
+    static uint8_t buildFunctionGroupByte(uint32_t functions, uint8_t group);
 };
 
 #endif  // XPRESSNET_INTERFACE_H
