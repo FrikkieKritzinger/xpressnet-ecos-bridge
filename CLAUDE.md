@@ -5,6 +5,12 @@
 **Language**: C++ (Arduino IDE 1.8+)  
 **Target**: ESP8266 microcontroller (160MHz, 4MB Flash, 160KB RAM)
 
+> ⏸️ **PAUSED (2026-07-27) — waiting for hardware to arrive.** All software work through
+> Phase 4.5 is complete and pushed (`main` @ `c27e33d`): 111/111 tests passing, 89.3%
+> line coverage, ESP8266 firmware builds clean. Next step is **Phase 4.6: Hardware
+> Procedures** — see that section below for full resumption details, environment setup
+> reference, and what to do once the ESP8266 + XpressNet bus hardware is in hand.
+
 ---
 
 ## 📝 Recent Updates (This Session)
@@ -227,262 +233,85 @@
 
 ---
 
-## 🎯 Phase 4.3: Unit Test Implementation ✅ COMPLETE
+## 🎯 Phase 4.3 & 4.4: Test Implementation + Unity Integration ✅ COMPLETE (historical)
 
-**All 80+ test cases implemented across 5 core test files.**
-
-**Test Coverage Summary**:
-- **test_xpressnet_parser.cpp** (16 tests): Binary protocol parsing, checksums, error handling
-- **test_ecos_parser.cpp** (14 tests): Text protocol parsing, line accumulation, key-value extraction
-- **test_state_engine.cpp** (15 tests): Loco management, time-dependent expiry (with mock time)
-- **test_ecos_command_builder.cpp** (21 tests): Command generation (speed, function, query, subscribe)
-- **test_command_router.cpp** (12 tests): Protocol bridging, echo prevention, state integration
-
-**Implementation Approach**:
-- All tests follow Arrange-Act-Assert pattern
-- Inline assertions ready for Unity TEST_ASSERT macro replacement
-- Early exit on first failure (clear debugging)
-- No dependencies on external libraries (can run standalone for now)
-- Mock interfaces track calls for verification
-- Mock time enables deterministic testing of timeouts/expiry
-
-**Commit 73b6c60**: Phase 4.3 all test implementations
+Both phases are done. The detailed step-by-step plan that used to live here has been
+superseded by what actually happened - see the **2026-07-27** entries at the top of
+"Recent Updates" for the real implementation notes (native build environment, Unity
+integration, the FUNCTION/SPEED and E-stop bugs found and fixed, etc.). Commits:
+`73b6c60` (Phase 4.3), `37c17d2` (Phase 4.4).
 
 ---
 
-## 🎯 Phase 4.4: Framework Integration & Test Execution (READY TO START)
+## 🎯 Phase 4.6: Hardware Procedures 🚀 READY TO START — PAUSED, WAITING FOR HARDWARE
 
-### When Resuming Phase 4.4
+**Session paused on 2026-07-27**: all software-side work through Phase 4.5 is done and
+pushed to `main` (commit `c27e33d`). Nothing further can happen on this phase until the
+physical ESP8266 + XpressNet bus hardware arrives. When it does, resume here.
 
-**Current State**:
-- ✅ 80+ test cases written and committed (5 core test files)
-- ✅ Mock infrastructure in place (MockProtocolInterface, mock_now_ms)
-- ✅ Test fixtures ready (xpressnet_messages.h, ecos_responses.h)
-- ✅ All code compiles cleanly for ESP8266 (wemos) target
+### Current State (everything below is true as of commit `c27e33d`)
 
-**Prerequisites for Phase 4.4**:
-- PlatformIO installed (verify: `python -m platformio --version`)
-- Python 3.10+ available (verify: `python --version`)
-- Working directory: `E:\Claude\Bridge\files`
+- Phases 1-4.5 complete. 111/111 native unit tests passing.
+- Coverage: 89.3% line / 96.6% function / 59.0% branch (5 core modules)
+- ESP8266 (`env:wemos`) firmware builds clean: 43.4% RAM, 30.0% Flash
+- Native test environment fully working (first time in project history - previously
+  no C++ compiler existed on this machine)
+- Device-count/status tracking removed per design decision (bridge doesn't need to
+  know if/how many XpressNet devices exist - see Recent Updates)
+- Design premise confirmed by user: forward any XpressNet command to Ecos (and
+  LocoNet/Z21 once live); forward any Ecos update for a subscribed loco (or E-stop) to
+  all XpressNet/LocoNet/Z21 devices. Only Ecos is a required, known device.
 
-### Phase 4.4 Step-by-Step
+### Environment Setup Reference (for a fresh session/machine)
 
-#### Step 1: Add Unity Framework to platformio.ini
+- **Compiler**: MinGW-w64 (GCC 16.1.0), installed via winget as
+  `BrechtSanders.WinLibs.POSIX.UCRT`. Add to PATH:
+  `C:\Users\Francois\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin`
+- **PlatformIO**: `pip install platformio` (already installed)
+- **Coverage tooling**: `pip install gcovr` (lcov isn't available on Windows/MinGW)
 
-**File**: `platformio.ini`
+**Run native tests**: `python -m platformio test -e native` (run from
+`E:\Claude\Bridge\files`, with MinGW on PATH). Note: PlatformIO's own pass/fail summary
+line has occasionally shown a spurious SIGFPE/miscount artifact on this Windows setup -
+if that happens, run `.pio/build/native/program.exe` directly for the ground truth
+(it prints a clean Unity `X Tests Y Failures` summary and exits with the failure count).
 
-**Modify `[env:native]` section** to add Unity framework:
-
-```ini
-[env:native]
-platform = native
-build_flags = -std=c++11 -DENABLE_TESTING=1
-lib_deps = 
-    throwtheswitch/Unity@2.5.2
-test_build_project_src = true
-src_filter = +<*> -<*.ino>
-```
-
-**Verify**: Section should have `lib_deps = throwtheswitch/Unity@2.5.2`
-
-#### Step 2: Update Test Files with Unity Macros
-
-**Approach**: Replace inline assertions with Unity TEST_ASSERT macros in all 5 test files
-
-**Pattern to Replace**:
-```cpp
-// OLD (inline early exit):
-if (value != expected) return;
-
-// NEW (Unity assertion):
-TEST_ASSERT_EQUAL_INT(value, expected);
-```
-
-**Replace in these files**:
-1. `tests/test_xpressnet_parser.cpp`
-2. `tests/test_ecos_parser.cpp`
-3. `tests/test_state_engine.cpp`
-4. `tests/test_ecos_command_builder.cpp`
-5. `tests/test_command_router.cpp`
-
-**Common Unity Macros**:
-- `TEST_ASSERT_TRUE(condition)` — Assert boolean true
-- `TEST_ASSERT_FALSE(condition)` — Assert boolean false
-- `TEST_ASSERT_EQUAL_INT(actual, expected)` — Assert int equality
-- `TEST_ASSERT_EQUAL_UINT16(actual, expected)` — Assert uint16_t equality
-- `TEST_ASSERT_EQUAL_UINT32(actual, expected)` — Assert uint32_t equality
-- `TEST_ASSERT_EQUAL_STRING(actual, expected)` — Assert string equality
-- `TEST_ASSERT_NULL(pointer)` — Assert pointer is null
-- `TEST_ASSERT_NOT_NULL(pointer)` — Assert pointer is not null
-
-**Include header in all test files**:
-```cpp
-#include "unity.h"
-```
-
-**Update main() function pattern**:
-```cpp
-int main(void) {
-    UNITY_BEGIN();
-    
-    RUN_TEST(test_function_1);
-    RUN_TEST(test_function_2);
-    // ... etc
-    
-    return UNITY_END();
-}
-```
-
-#### Step 3: Compile Tests for Native Platform
-
-**Command**:
+**Generate coverage report**:
 ```bash
-python -m platformio run -e native --verbose
+"C:\Users\Francois\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\Scripts\gcovr.exe" \
+  --root xpressnet_ecos_bridge \
+  --filter "xpressnet_ecos_bridge/state_engine.*" \
+  --filter "xpressnet_ecos_bridge/command_router.*" \
+  --filter "xpressnet_ecos_bridge/protocols/xpressnet/xpressnet_message_parser.*" \
+  --filter "xpressnet_ecos_bridge/protocols/ecos/ecos_message_parser.*" \
+  --filter "xpressnet_ecos_bridge/protocols/ecos/ecos_protocol.*" \
+  --object-directory .pio/build/native --print-summary -r .
 ```
+(requires a fresh `pio test -e native` run first, so `.gcda` files exist)
 
-**Expected Output**:
-- Downloads/installs Unity framework
-- Compiles all test files for native (host) platform
-- Should produce `build/native/program` or similar executable
+**Build real firmware**: `python -m platformio run -e wemos`
 
-**If Errors**:
-- Check platformio.ini syntax
-- Verify Unity framework is listed in lib_deps
-- Check for missing #include statements
+### What Phase 4.6 Actually Needs
 
-#### Step 4: Run Tests
+1. **A manual test checklist** for verifying the bridge against a real ESP8266 +
+   physical XpressNet bus + real ESU Ecos (or Ecos-compatible command station). This
+   validates things native unit tests structurally cannot: actual RS485 serial timing,
+   real WiFi/TCP behavior against a live Ecos, and real XpressNet throttle behavior
+   (including the FUNCTION-marker-bit convention introduced in Phase 4.4 - **this is
+   the first time that convention will see real hardware bytes**, so it's the highest-
+   priority thing to verify early).
+2. Flash the firmware (`env:wemos` target) to the physical Wemos D1 Mini.
+3. Confirm `config.h`'s WiFi credentials and Ecos IP match the real network before
+   testing (currently hardcoded placeholders - see "Hardware Configuration" below).
+4. Work through the checklist: XpressNet speed/direction/function/E-stop commands from
+   a real throttle, verify they reach Ecos correctly; Ecos-side changes verify they
+   propagate back to XpressNet; subscription lifecycle (new loco -> subscribe, 5-minute
+   inactivity -> unsubscribe) against real timing, not mocked time.
 
-**Command**:
-```bash
-python -m platformio test -e native
-```
+### After Phase 4.6
 
-**Expected Output**:
-- Unity framework runs all tests
-- Shows PASS/FAIL for each test
-- Reports summary (X tests passed, Y tests failed)
-
-**Example Output**:
-```
-test_xpressnet_parse_speed_command_forward ... PASS
-test_xpressnet_parse_speed_command_reverse ... PASS
-test_xpressnet_parse_emergency_stop ... PASS
-...
------------------------
-80 Tests 75 Failures 5 Skipped
-```
-
-#### Step 5: Debug and Fix Failures
-
-**For Each Failing Test**:
-1. Read the error message (Unity shows line number and assertion)
-2. Identify why assertion failed
-3. Check:
-   - Parser implementation matches expected behavior
-   - Mock objects are initialized correctly
-   - Test fixture data is correct
-   - Mock time is being used correctly (state engine tests)
-4. Fix the test or the code being tested
-5. Re-run: `platformio test -e native`
-
-**Common Issues**:
-- **Parser returning wrong values**: Check parser implementation, not test
-- **Mock interface not receiving calls**: Check if interface is set on router
-- **Expiry tests failing**: Verify mock time is advancing correctly, check timeout constant
-- **Buffer overrun**: Verify command lengths, array sizes
-
-#### Step 6: Iterate Until >90% Pass Rate
-
-**Target**: Minimum 72 of 80 tests passing (90%)
-
-**Repeat**:
-1. Run tests
-2. Identify failing tests
-3. Debug (usually in production code, not tests)
-4. Fix and re-run
-5. Continue until target reached
-
-### Important Notes
-
-**Mock Time Behavior**:
-- Tests using `mock_now_ms` (state engine tests, echo prevention tests)
-- Must call `resetMockNowMs()` in `setUp()`
-- Use `setMockNowMs()` and `advanceMockNowMs()` to control virtual time
-- No real delays (tests run in milliseconds)
-
-**MockProtocolInterface**:
-- Tracks all `sendSpeedCommand` and `sendFunctionCommand` calls
-- Query via `getSpeedCommandCount()`, `getLastSpeedCommand()`, etc.
-- Reset via `mock.reset()` between tests if needed
-
-**Test File Includes**:
-- Must include actual parser/engine headers (e.g., `xpressnet_message_parser.h`)
-- Must include mocks and fixtures (e.g., `mock_protocol_interface.h`)
-- Must include `unity.h` for TEST_ASSERT macros
-
-### Files to Modify
-
-```
-platformio.ini                          ← Add Unity to [env:native] lib_deps
-tests/test_xpressnet_parser.cpp         ← Replace inline assertions
-tests/test_ecos_parser.cpp              ← Replace inline assertions
-tests/test_state_engine.cpp             ← Replace inline assertions
-tests/test_ecos_command_builder.cpp     ← Replace inline assertions
-tests/test_command_router.cpp           ← Replace inline assertions
-```
-
-### Success Criteria
-
-- ✅ All 5 test files compile with `platformio run -e native`
-- ✅ Tests execute with `platformio test -e native`
-- ✅ >90% of test cases pass (≥72 of 80)
-- ✅ Clear error messages for any remaining failures
-- ✅ Test execution completes in <10 seconds
-
-### After Phase 4.4
-
-**Phase 4.5: Coverage Analysis**
-- Measure code coverage (which functions/lines are tested)
-- Add tests for uncovered edge cases
-- Integration tests (multiple components together)
-
-**Phase 4.6: Hardware Procedures**
-- Manual test checklist for real ESP8266 + XpressNet bus
-- End-to-end verification before production use
-
-### Git Workflow
-
-When Phase 4.4 is complete:
-1. Commit Unity macro changes: `git add tests/ platformio.ini && git commit -m "Phase 4.4: Integrate Unity framework and run tests"`
-2. Tag: `git tag v0.4.4-tests-passing`
-3. Push: `git push origin main && git push origin v0.4.4-tests-passing`
-
----
-
-**Next Steps for Phase 4.3-4.5**:
-
-1. Implement actual test cases in each template file:
-   - Fill in TODO sections with assertions and test logic
-   - Use Unity testing macros (TEST_ASSERT_EQUAL, etc)
-   - Follow Arrange-Act-Assert pattern
-
-2. Configure Unity framework in `platformio.ini`
-   - Add test dependencies
-   - Configure test build environment
-
-3. Compile and run tests:
-   - `platformio run -e native` (compile)
-   - `platformio test -e native` (run)
-
-4. Iterate: Fix failures, add more test cases, achieve >90% coverage
-
-**Files to reference**:
-- Design: `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`
-- Test guide: `tests/README.md` (patterns, examples, debugging)
-- Fixtures: `tests/fixtures/` (valid/invalid test data)
-- Mocks: `tests/mocks/` (mock interfaces for testing)
-
----
+See "Future Improvements (Post-Phase 4)" near the end of this file for the backlog
+(LocoNet, Z21, EEPROM config storage, OTA updates, etc.) - nothing there is started.
 
 ---
 
@@ -977,4 +806,4 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
-**Last Updated**: 2026-07-27 (Phase 4.5 complete + device-count tracking feature removed per design decision: coverage now 89.3% line / 96.6% function / 59.0% branch, 111/111 tests passing, ready for Phase 4.6 hardware procedures)
+**Last Updated**: 2026-07-27 (Phase 4.5 complete + device-count tracking feature removed per design decision: coverage now 89.3% line / 96.6% function / 59.0% branch, 111/111 tests passing. **Session paused, waiting for hardware to arrive before starting Phase 4.6** — see the banner at the top of this file and the "Phase 4.6" section for resumption details.)
