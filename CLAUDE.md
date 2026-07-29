@@ -18,6 +18,34 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-29 — Master-mode tripwire added to XpressNetInterface**
+- **Trigger**: before starting real hardware validation, user asked for explicit
+  confirmation that this bridge will always run as XpressNet MASTER, since the
+  design assumes it's the sole command-station-role device on the bus (throttles
+  are slaves, Ecos is off-bus over WiFi).
+- **Investigation**: traced the actual library behavior rather than trusting the
+  header comment. `xnet.setup(Loco128, XPRESSNET_DATA_PIN, XPRESSNET_CONTROL_PIN)`
+  in `xpressnet_interface.cpp` uses the 3-arg overload, defaulting `XnModeAuto` to
+  `true` - the only correct choice for a master-role device (`false` would force
+  permanent SLAVE mode, i.e. a throttle, not a command station). The library starts
+  `XNetSlaveMode = 0` (master) and only demotes to slave if it receives a call byte
+  addressed to the legacy fixed slave address `0x5F`/`0x5A` (`MY_ADDRESS` in
+  XpressNetMaster.h) - real other-master traffic that can't occur in this topology.
+  Also checked a specific self-echo hazard: the master's own address-31 poll byte is
+  numerically `0x5F`, same as `MY_ADDRESS`, on a single half-duplex wire where TX
+  loops back to RX - but `XNetSwSerial.enableIntTx(false)` disables RX interrupt
+  handling during transmission, so the device never hears its own call bytes. No
+  live code path exists that would demote this bridge from master.
+- **Added**: a cheap, edge-triggered tripwire in `updateBusStatus()` (already called
+  every `update()` cycle, non-blocking) - compares `xnet.getOperationModeMaster()`
+  against a new `was_master_mode` member and logs via `DEBUG_XNET_PRINTF` only on
+  transition, so an unexpected demotion (e.g. a wiring mistake introducing a second
+  master) becomes visible instead of silently breaking throttle response.
+- **Result**: native suite still 91/91 passing (this file isn't part of the native
+  build - Arduino-only). `env:wemos` firmware re-verified: 44.3% RAM (36292/81920
+  bytes), 31.1% Flash (324335/1044464 bytes) - negligible increase from one bool
+  member and a few lines of comparison/logging.
+
 **2026-07-27 — Hardware arrived; XpressNet interface rewritten around Gahtow's real library**
 - **Trigger**: user assembled the physical board (Wemos D1 Mini + MAX485) per Philipp
   Gahtow's Z21-command-station wiring: a single half-duplex data pin (**D6**, MAX485

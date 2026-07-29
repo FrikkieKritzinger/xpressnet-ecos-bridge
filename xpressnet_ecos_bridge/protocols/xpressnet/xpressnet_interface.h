@@ -113,6 +113,7 @@ private:
     unsigned long last_message_time;        // Timestamp of last received message
     unsigned long bus_connect_time;         // When we first detected bus activity
     static const unsigned long BUS_TIMEOUT = 5000;  // 5 seconds = no bus
+    bool was_master_mode;                   // Last known xnet.getOperationModeMaster() - edge-triggered tripwire
 
     // Library instance - owns the half-duplex SoftwareSerial and XpressNet framing
     XpressNetMasterClass xnet;

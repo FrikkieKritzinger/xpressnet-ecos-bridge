@@ -66,6 +66,7 @@ XpressNetInterface::XpressNetInterface()
     : current_status(ComponentStatus::DISCONNECTED),
       last_message_time(0),
       bus_connect_time(0),
+      was_master_mode(true),
       router(nullptr) {
     g_xnet_instance = this;
 }
@@ -140,6 +141,21 @@ void XpressNetInterface::updateBusStatus() {
             DEBUG_XNET_PRINTF("XpressNet: Bus timeout (no messages for %lu ms)\n", BUS_TIMEOUT);
         }
     }
+
+    // Tripwire: this bridge is designed to be the sole XpressNet master on
+    // its bus (throttles are slaves, Ecos is off-bus over WiFi). The library
+    // can only demote itself to slave mode if it sees a call byte addressed
+    // to the legacy slave address - i.e. a second real master on the bus,
+    // which should never happen here. Edge-triggered so it logs once per
+    // transition rather than spamming every loop iteration.
+    bool is_master_mode = xnet.getOperationModeMaster();
+    if (was_master_mode && !is_master_mode) {
+        DEBUG_XNET_PRINTF("XpressNet: WARNING - demoted from MASTER to SLAVE mode! "
+                           "Check for a second XpressNet master on the bus.\n");
+    } else if (!was_master_mode && is_master_mode) {
+        DEBUG_XNET_PRINTF("XpressNet: Returned to MASTER mode\n");
+    }
+    was_master_mode = is_master_mode;
 }
 
 void XpressNetInterface::markBusActivity() {
