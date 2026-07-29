@@ -18,6 +18,28 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-29 — First real hardware flash: XpressNet interface up, Ecos/OLED as expected**
+- Flashed `env:debug` (env:wemos + debug output) to the physical Wemos D1 Mini via
+  esptool over COM4 (921600 baud). Chip confirmed genuine ESP8266EX (MAC
+  ec:fa:bc:b3:14:00), not just an assumed serial port.
+- **Boot log confirmed**: XpressNet interface initializes on D12/D16 at 62500 baud as
+  configured; WiFi connects to `HOMER`, gets `192.168.0.113`; Ecos TCP connect to
+  `192.168.0.50:15471` fails and retries with backoff - **expected**, Ecos wasn't
+  powered on for this test. `XpressNet: Bus disconnected (no initial activity)` is
+  also expected - no throttle plugged in yet, D1 completely isolated for this boot.
+- **Investigated one surprising log line**: `OLED display initialized successfully`
+  despite no OLED being wired (user confirmed board is fully isolated right now).
+  Root cause identified in the vendored `Adafruit_SSD1306` library, not this
+  project's code: `Adafruit_SSD1306::begin()` only returns `false` on its internal
+  framebuffer `malloc()` failure - it never checks for an I2C ACK from the display,
+  so with nothing connected it just silently no-ops rather than failing. Confirmed
+  harmless (no crash, no side effects - draws to a buffer nobody reads). Corrected
+  the slightly-inaccurate "fails gracefully" phrasing in Hardware Configuration
+  above; left the code as-is since an actual I2C presence probe isn't worth adding
+  for a cosmetic log line.
+- **Next**: real XpressNet throttle test (speed/direction/function commands) per the
+  Phase 4.6 checklist - Ecos side deferred until Ecos is powered on.
+
 **2026-07-29 — WiFi credentials removed from git (were already public on GitHub)**
 - **Trigger**: user asked to stop committing the real WiFi SSID/password to git and
   keep them local-only. Checking history before acting revealed this wasn't a
@@ -98,7 +120,11 @@
 - **Trigger**: user assembled the physical board (Wemos D1 Mini + MAX485) per Philipp
   Gahtow's Z21-command-station wiring: a single half-duplex data pin (**D6**, MAX485
   DI+RO tied together) and a single DE/RE control pin (**D0**, tied together). No OLED
-  wired yet (non-fatal - `OledDisplay::begin()` already fails gracefully without one).
+  wired yet (non-fatal - confirmed on first real flash 2026-07-29: with nothing on
+  D1/D2, `Adafruit_SSD1306::begin()` still logs "initialized successfully" and
+  returns true, since that library only ever returns false on its internal malloc
+  failure, never on missing-device I2C NACK - so it silently no-ops rather than
+  failing. Cosmetic only, not fixed - see Recent Updates).
 - **Discovery**: that wiring didn't match anything in the repo, and digging into why
   surfaced that the existing XpressNet code had never been validated against real
   hardware or the real protocol, despite its own header comment claiming otherwise:
