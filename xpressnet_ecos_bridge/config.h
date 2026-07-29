@@ -57,7 +57,7 @@
 
 #if ENABLE_ECOS_LAN
     // Network configuration
-    #define ECOS_IP                 "192.168.1.100"  // IP address of your Ecos
+    #define ECOS_IP                 "192.168.0.50"   // IP address of your Ecos (hostname ECOS)
     #define ECOS_PORT               15471            // Standard Ecos port (do not change)
     
     // WiFi configuration (if not already configured)

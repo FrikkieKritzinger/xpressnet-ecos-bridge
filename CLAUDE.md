@@ -18,6 +18,24 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-29 — Real WiFi/Ecos credentials confirmed before first flash**
+- **Trigger**: about to attempt the first real hardware flash for Phase 4.6; `config.h`
+  had never been validated against the user's actual network (flagged as placeholders
+  since the "Hardware arrived" entry).
+- **Confirmed with user**: `WIFI_SSID`/`WIFI_PASSWORD` (`HOMER`/existing password) were
+  already correct - no change needed. `ECOS_IP` was wrong: the real Ecos (hostname
+  `ECOS`) is at `192.168.0.50`, not the placeholder `192.168.1.100` (which happens to be
+  ESU's factory-default fixed IP - this Ecos is evidently not at its factory default).
+  `ECOS_PORT` (15471) confirmed correct as the fixed ESU protocol port.
+- **Changed**: `config.h`'s `ECOS_IP` updated to `"192.168.0.50"`.
+- **Result**: `env:wemos` rebuilt clean: 44.3% RAM (36296/81920 bytes), 31.1% Flash
+  (324339/1044464 bytes) - unchanged from the master-mode-tripwire build modulo the
+  shorter IP string literal. Native tests not affected (config.h's ECOS_IP isn't
+  exercised by the native suite). Ready for first real flash attempt.
+- **Also decided this session (not yet started)**: WiFi/Ecos web configuration
+  (EEPROM-backed, WiFiManager captive portal) is deliberately deferred until after
+  Phase 4.6 hardware validation completes - see Future Improvements.
+
 **2026-07-29 — Master-mode tripwire added to XpressNetInterface**
 - **Trigger**: before starting real hardware validation, user asked for explicit
   confirmation that this bridge will always run as XpressNet MASTER, since the
@@ -655,9 +673,9 @@ that library rather than talking to the pins directly.
 
 ### Ecos (WiFi TCP)
 ```
-SSID: "HOMER" (config.h, currently hardcoded)
-Password: "REDACTED-WIFI-PASSWORD" (config.h, currently hardcoded)
-Ecos IP: 192.168.1.100 (config.h)
+SSID: "HOMER" (config.h, currently hardcoded, confirmed correct 2026-07-29)
+Password: confirmed correct 2026-07-29 (config.h, currently hardcoded)
+Ecos IP: 192.168.0.50 (config.h, hostname ECOS, confirmed against real hardware 2026-07-29)
 Ecos Port: 15471 (standard, do not change)
 ```
 
