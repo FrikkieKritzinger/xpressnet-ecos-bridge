@@ -18,6 +18,36 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-29 — WiFi credentials removed from git (were already public on GitHub)**
+- **Trigger**: user asked to stop committing the real WiFi SSID/password to git and
+  keep them local-only. Checking history before acting revealed this wasn't a
+  hypothetical risk: `WIFI_SSID`/`WIFI_PASSWORD` were hardcoded in `config.h` since
+  commit `4c3e0d6` (Phase 3.2, 2026-07-22), which was already merged into
+  `origin/main` - and `gh repo view` confirmed this GitHub repo is **public**. The
+  real WiFi password had been publicly visible for about a week before this fix.
+- **Fixed going forward**: `config.h` no longer hardcodes `WIFI_SSID`/`WIFI_PASSWORD`
+  - it now does `#if __has_include("wifi_credentials.local.h") #include ... #else
+  #error ...` ([config.h](xpressnet_ecos_bridge/config.h)). Real values live in
+  `xpressnet_ecos_bridge/wifi_credentials.local.h`, added to `.gitignore` (fixing a
+  stale, wrong-path `src/config.local.h` entry left over from an earlier unrealized
+  plan for this same idea). A committed `wifi_credentials.local.h.example` template
+  tells future checkouts what to create. Verified the `#error` guard actually fires
+  with a clear message when the local file is absent (temporarily removed it to
+  confirm, then restored).
+- **Not done (flagged to user, needs explicit decision)**: this only stops *future*
+  commits from containing the secret. The password is still present in
+  `origin/main`'s history at `4c3e0d6` right now. Actually removing it requires
+  rewriting git history (e.g. `git filter-repo`) and force-pushing over
+  `origin/main` - destructive to shared history, and even then doesn't guarantee
+  removal from any existing forks/clones/caches. Recommended the user also treat
+  the real WiFi password as compromised and rotate it on the router regardless of
+  what happens with git history (not something achievable from this repo).
+- **Result**: `env:wemos` rebuilds identically (44.3% RAM / 31.1% Flash - same
+  string values, just relocated). Native suite unaffected: 91/91 passing (config.h's
+  WiFi defines aren't exercised by the native build).
+- **Scope note**: only `WIFI_SSID`/`WIFI_PASSWORD` were moved - `ECOS_IP`/`ECOS_PORT`
+  remain in `config.h` (not secrets, just internal network topology).
+
 **2026-07-29 — Real WiFi/Ecos credentials confirmed before first flash**
 - **Trigger**: about to attempt the first real hardware flash for Phase 4.6; `config.h`
   had never been validated against the user's actual network (flagged as placeholders
@@ -673,8 +703,9 @@ that library rather than talking to the pins directly.
 
 ### Ecos (WiFi TCP)
 ```
-SSID: "HOMER" (config.h, currently hardcoded, confirmed correct 2026-07-29)
-Password: confirmed correct 2026-07-29 (config.h, currently hardcoded)
+SSID/Password: in xpressnet_ecos_bridge/wifi_credentials.local.h (gitignored, NOT in
+  git - see wifi_credentials.local.h.example for the template). Confirmed correct
+  against the real network 2026-07-29.
 Ecos IP: 192.168.0.50 (config.h, hostname ECOS, confirmed against real hardware 2026-07-29)
 Ecos Port: 15471 (standard, do not change)
 ```

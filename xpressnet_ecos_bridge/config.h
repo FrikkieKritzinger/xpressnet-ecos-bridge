@@ -60,10 +60,14 @@
     #define ECOS_IP                 "192.168.0.50"   // IP address of your Ecos (hostname ECOS)
     #define ECOS_PORT               15471            // Standard Ecos port (do not change)
     
-    // WiFi configuration (if not already configured)
-    // Note: Could also be loaded from EEPROM, but for now hardcoded
-    #define WIFI_SSID               "HOMER"
-    #define WIFI_PASSWORD           "REDACTED-WIFI-PASSWORD"
+    // WiFi configuration - real SSID/password live in wifi_credentials.local.h,
+    // a gitignored file (never committed - see wifi_credentials.local.h.example
+    // for the template). Note: Could also be loaded from EEPROM in the future.
+    #if __has_include("wifi_credentials.local.h")
+        #include "wifi_credentials.local.h"
+    #else
+        #error "Missing wifi_credentials.local.h - copy wifi_credentials.local.h.example to wifi_credentials.local.h and fill in your real WiFi SSID/password."
+    #endif
     
     // Timeouts and intervals
     #define ECOS_TIMEOUT                5000            // TCP connection timeout (ms)

@@ -66,6 +66,6 @@ docs/_build/
 site/
 
 # Configuration backups (local only, don't commit)
-src/config.local.h
+xpressnet_ecos_bridge/wifi_credentials.local.h
 .env
 .env.local
