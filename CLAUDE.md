@@ -18,6 +18,45 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-29 — XpressNet bus connection established: real MultiMaus talking to the bridge**
+- **Trigger**: first live test with a physical throttle (Roco MultiMaus) connected to the
+  RS485 bus - MultiMaus displayed `Err 13 - no XpressNet master`, and the bridge's own
+  debug log showed `XpressNet: Bus disconnected (no initial activity)` with zero
+  received bytes in either direction.
+- **Root cause was three stacked hardware faults**, found via systematic oscilloscope
+  probing (DE/RE control signal → DI data signal → A/B differential output, at each
+  stage moving the probe progressively closer to the physical MAX485 chip pins to
+  localize the break):
+  1. **MAX485 undervoltage**: a silicon 1N4004 diode was deliberately placed in the
+     5V rail feeding the MAX485, to protect the ESP8266's 3.3V-only GPIOs from the
+     module's 5V logic levels (specifically RO, which shares the same D6 half-duplex
+     pin as DI). That diode's ~0.7V drop left the MAX485 running at 4.28V VCC -
+     enough for its logic-level DE/DI inputs to still work, but below the ~4.75V
+     minimum needed for its RS485 driver output stage to produce a valid differential
+     signal. Fixed by removing the diode and instead adding a 1kΩ series resistor
+     between D6 and the MAX485's DI/RO pin, relying on the ESP8266 GPIO's internal
+     clamp diodes (current-limited by the resistor to ~1mA) for the same protection
+     without starving the MAX485's own supply.
+  2. **Resistor initially added in parallel, not series**: the original direct D6-to-DI/RO
+     trace wasn't severed when the protective resistor was added, so the resistor had
+     no effect and the ESP8266 GPIO remained exposed to unprotected 5V. Fixed by
+     cutting the direct trace so the resistor is genuinely in series.
+  3. **Two separate faulty MAX485 modules** discovered in the parts bin during
+     substitution testing (both now clearly marked and set aside) - these made the
+     wiring fixes above look ineffective until a third, genuinely good module was
+     tried and finally showed correct differential A/B output.
+- **Diagnostic technique worth remembering**: when a signal looks wrong, move the
+  probe progressively closer to the actual component pins rather than trusting nearby
+  test points/headers - this caught both a bad ground reference (giving false flat
+  -4V readings across unrelated pins) and confirmed the DE/DI signals were correct
+  at the chip before concluding the fault was in the A/B driver stage specifically.
+- **Result**: `XpressNet: Bus connected!` - real MultiMaus now recognizes the bridge
+  as XpressNet master (Err 13 cleared), throttle in active mode. This is the first
+  confirmed real-hardware validation of the XpressNetMaster-library-based interface
+  from the 2026-07-27 rewrite. Next: verify actual speed/direction/function commands
+  from the throttle are parsed and routed correctly (watch for
+  `XpressNet RX: Speed - Addr=... Speed=... Dir=...` in the debug log).
+
 **2026-07-29 — First real hardware flash: XpressNet interface up, Ecos/OLED as expected**
 - Flashed `env:debug` (env:wemos + debug output) to the physical Wemos D1 Mini via
   esptool over COM4 (921600 baud). Chip confirmed genuine ESP8266EX (MAC
@@ -418,8 +457,17 @@ control per Gahtow's Z21 wiring pattern, no OLED yet). The XpressNet interface h
 been rewritten around Gahtow's real XpressNetMaster library to match - see the
 "Hardware arrived" entry in Recent Updates for the full story. Native tests and the
 `wemos` build have been re-verified since that change (see "Verification" below for
-the actual numbers). Real hardware validation (flash + test against a live throttle
-and Ecos) has not happened yet - that's the remaining work in this phase.
+the actual numbers).
+
+**2026-07-29 - XpressNet bus connection confirmed on real hardware**: after a real
+hardware debugging session (MAX485 undervoltage from a protective diode, a resistor
+wired in parallel instead of series, and two faulty MAX485 modules - see the Recent
+Updates entry for the full root-cause story), the bridge is now confirmed as
+XpressNet master against a real Roco MultiMaus throttle - `Err 13` cleared,
+`XpressNet: Bus connected!` in the debug log. Ecos-side validation is still pending
+(Ecos wasn't powered on for this test). Remaining for this phase: verify actual
+speed/direction/function commands from the throttle parse and route correctly, then
+move to Ecos-side validation.
 
 ### Current State
 
