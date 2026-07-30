@@ -99,6 +99,19 @@ public:
     void onLocoDrive128(uint16_t address, uint8_t speed_byte);
 
     /**
+     * Handle a 14/27/28-speed-step drive notification. Throttles/locos not
+     * configured for 128-step mode send a smaller, differently-encoded speed
+     * value (27/28-step interleaves the 5-bit value across the wire byte -
+     * see XpressNetMasterClass::setSpeed() for the matching encode side);
+     * this rescales it into our internal 128-step-based 0-126 range so the
+     * rest of the bridge never needs to know which mode the throttle used.
+     * @param address DCC address
+     * @param speed_byte Raw wire byte (layout depends on max_steps)
+     * @param max_steps 14, 27, or 28 - the throttle's configured step count
+     */
+    void onLocoDriveStepped(uint16_t address, uint8_t speed_byte, uint8_t max_steps);
+
+    /**
      * Handle one fragment of a function-state notification and merge it
      * into the loco's full F0-F31 bitmap before forwarding to the router.
      * @param address DCC address

@@ -5,18 +5,75 @@
 **Language**: C++ (Arduino IDE 1.8+)  
 **Target**: ESP8266 microcontroller (160MHz, 4MB Flash, 160KB RAM)
 
-> 🔧 **Phase 4.6 IN PROGRESS (2026-07-27) — hardware has arrived.** The board is
-> assembled (Wemos D1 Mini + MAX485, half-duplex single-wire per Philipp Gahtow's Z21
-> wiring pattern: D6=data, D0=DE/RE) and the firmware now integrates Gahtow's real
-> XpressNetMaster library instead of the old hand-rolled parser — see the "Design
-> correction" entry below for why. No OLED is wired yet (non-fatal, firmware runs
-> without it). Native tests and the ESP8266 build have been re-verified; real hardware
-> validation against a physical throttle + Ecos is the next manual step. See Phase 4.6
-> below for the checklist.
+> ✅ **Phase 4.6 XpressNet RX confirmed working end-to-end (2026-07-30).** Real
+> MultiMaus speed commands now decode, route through CommandRouter/StateEngine, and
+> trigger Ecos subscription requests exactly as designed. Root cause of the earlier
+> silence: the throttle's loco was configured for 28-speed-step mode, and the
+> firmware only implemented the 128-speed-step callback - see the dated entry below
+> for the full diagnosis and fix. Ecos-side validation (real TCP connection, not the
+> temporary `TEMP_SKIP_ECOS_CONNECT` stub) is the next step - see Phase 4.6 below.
 
 ---
 
 ## 📝 Recent Updates (This Session)
+
+**2026-07-30 — XpressNet drive commands confirmed working end-to-end (root cause: missing 14/27/28-speed-step handlers)**
+- **Trigger**: continuing the 2026-07-29 RX-path investigation, enabled the
+  XpressNetMaster library's built-in `XNetDEBUG` raw-byte logging
+  (`libraries/XpressNetMaster/XpressNetMaster.h`) to get firmware-level ground
+  truth instead of continuing to interpret analog oscilloscope traces. First
+  capture immediately showed real, checksum-valid XpressNet traffic arriving
+  every time the MultiMaus throttle was touched - proving the RX electrical
+  path (MAX485 receiver, D6, resistor) was never actually broken. The multi-day
+  hardware debugging (diode/resistor/bad-modules root causes, TX/RX signal
+  tracing) was real and necessary work, but this final layer of silence was a
+  software gap, not a hardware one.
+- **Root cause**: decoded the raw capture (`1-E4 2-12 3-D5 4-4C 5-xx 6-xx MRX:
+  0x1C3 0xE4 0x12 0xD5 0x4C 0x8x 0xEx`) against
+  `XpressNetMaster.cpp`'s dispatch table (`case 0xE4`, ~line 454): `data1=0x12`
+  selects **28-speed-step mode**, which the library routes to
+  `notifyXNetLocoDrive28` - a different callback from the `notifyXNetLocoDrive128`
+  that `xpressnet_interface.cpp` implemented. Since `notifyXNetLocoDrive14/27/28`
+  are weak, undefined externs with no implementation anywhere in this project,
+  their linked address resolves to null, so the library's
+  `if (notifyXNetLocoDrive28) notifyXNetLocoDrive28(...)` guard silently dropped
+  every single drive command from the throttle. The MultiMaus's loco (DCC
+  address 5452, decoded from the constant `0xD5 0x4C` address bytes) was
+  configured for 28 steps, not 128 - confirmed by testing: changing the
+  MultiMaus's per-loco step setting to 128 did *not* change the wire traffic
+  (still `data1=0x12` after reselecting the loco), so the fix had to be on the
+  firmware side regardless of throttle configuration.
+- **Fixed**: added `XpressNetInterface::onLocoDriveStepped()` 
+  (`xpressnet_interface.h/.cpp`) plus `notifyXNetLocoDrive14/27/28` free-function
+  callbacks, mirroring the existing `onLocoDrive128` pattern. 14-step uses the
+  same plain `RVVVVVVV` byte layout as 128-step (just a smaller meaningful
+  range); 27/28-step reverses the bit-interleaved 5-bit speed encoding that
+  `XpressNetMasterClass::setSpeed()` uses on the *send* side
+  (`v = ((s&0x0F)<<1) | ((s>>4)&0x01) | dir`). All three rescale their raw
+  step-count-relative speed linearly into this bridge's internal 128-step-based
+  0-126 range (`speed = raw_speed * DCC_MAX_SPEED / max_steps`), so
+  `CommandRouter`/`StateEngine` never need to know which step mode the throttle
+  used. Reserved/emergency-stop codes for each mode are not specially modeled -
+  same simplification already accepted for 128-step's `V=127` case.
+- **Result**: real hardware confirmed - example from serial log:
+  `XpressNet RX: Speed (28-step) - Addr=5452 RawSpeed=18 Speed=81 Dir=0` followed
+  by `CommandRouter` creating the loco, requesting Ecos subscription, and
+  broadcasting the command - the full intended pipeline, for the first time,
+  driven by a real physical throttle. `env:debug` rebuilt clean (44.5% RAM /
+  31.2% Flash, up slightly from the new handlers) and reflashed successfully.
+- **Known side-effect, not yet investigated**: "New loco from XpressNet:
+  requesting Ecos subscription" logs on *every* speed update instead of once -
+  very likely because Ecos is still disconnected
+  (`TEMP_SKIP_ECOS_CONNECT` from the 2026-07-29 entry is still active), so the
+  subscription never completes and the loco never leaves pending state. Needs
+  re-checking once real Ecos connectivity is restored, before treating it as a
+  bug.
+- **Not yet reverted**: `XNetDEBUG`/`XNetSerial` in
+  `libraries/XpressNetMaster/XpressNetMaster.h` and `TEMP_SKIP_ECOS_CONNECT` in
+  `ecos_interface.cpp` are both still active for continued hardware testing
+  (function commands, other speed/direction values, then Ecos-side validation).
+  Revert both once XpressNet is fully validated and Ecos testing resumes, per
+  the 2026-07-29 entries.
 
 **2026-07-29 — XpressNet TX path confirmed working, RX path (MultiMaus→bridge) now suspect**
 - **Trigger**: after the bus-connection fix (see entry below), unplugging the MultiMaus

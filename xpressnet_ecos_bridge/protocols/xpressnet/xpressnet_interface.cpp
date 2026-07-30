@@ -32,6 +32,24 @@ void notifyXNetLocoDrive128(uint16_t Address, uint8_t Speed) {
     }
 }
 
+void notifyXNetLocoDrive14(uint16_t Address, uint8_t Speed) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onLocoDriveStepped(Address, Speed, 14);
+    }
+}
+
+void notifyXNetLocoDrive27(uint16_t Address, uint8_t Speed) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onLocoDriveStepped(Address, Speed, 27);
+    }
+}
+
+void notifyXNetLocoDrive28(uint16_t Address, uint8_t Speed) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onLocoDriveStepped(Address, Speed, 28);
+    }
+}
+
 void notifyXNetLocoFunc1(uint16_t Address, uint8_t Func1) {
     if (g_xnet_instance) {
         g_xnet_instance->onLocoFunctionGroup(Address, 1, Func1);
@@ -90,6 +108,12 @@ bool XpressNetInterface::begin() {
         // loop) if the SoftwareSerial pin configuration is invalid - there is
         // no recoverable failure path for that case.
         xnet.setup(Loco128, XPRESSNET_DATA_PIN, XPRESSNET_CONTROL_PIN);
+
+        // Broadcast track-power-on ("Alles An") - without this, throttles may
+        // show themselves as active (they hear a valid master) while still
+        // withholding real drive/response commands, since they've never been
+        // told the track is actually powered.
+        xnet.setPower(csNormal);
 
         current_status = ComponentStatus::CONNECTING;
         last_message_time = millis();
@@ -200,6 +224,48 @@ void XpressNetInterface::onLocoDrive128(uint16_t address, uint8_t speed_byte) {
     }
 
     DEBUG_XNET_PRINTF("XpressNet RX: Speed - Addr=%u Speed=%u Dir=%u\n", address, speed, direction);
+    router->handleXpressNetCommand(address, speed, direction);
+}
+
+void XpressNetInterface::onLocoDriveStepped(uint16_t address, uint8_t speed_byte, uint8_t max_steps) {
+    if (!isValidDccAddress(address)) {
+        DEBUG_XNET_PRINTF("XpressNet: Invalid address %u\n", address);
+        return;
+    }
+
+    markBusActivity();
+
+    if (!router) {
+        DEBUG_XNET_PRINTF("XpressNet: WARNING - router not set, dropping command\n");
+        return;
+    }
+
+    uint8_t direction = (speed_byte & 0x80) ? 0 : 1;
+    uint8_t raw_speed;
+
+    if (max_steps == 14) {
+        // Same RVVVVVVV layout as 128-step, just a smaller meaningful range.
+        raw_speed = speed_byte & 0x7F;
+    } else {
+        // 27/28-step wire format bit-interleaves the 5-bit speed value -
+        // reverses the scramble XpressNetMasterClass::setSpeed() applies:
+        // v = ((s&0x0F)<<1) | ((s>>4)&0x01) | dir
+        raw_speed = ((speed_byte >> 1) & 0x0F) | ((speed_byte & 0x01) << 4);
+    }
+
+    if (raw_speed > max_steps) {
+        // Reserved/emergency-stop code for this step mode - not modeled,
+        // same simplification as onLocoDrive128's V=127 rejection.
+        DEBUG_XNET_PRINTF("XpressNet: Invalid %u-step speed byte 0x%02x for addr %u\n",
+                           max_steps, speed_byte, address);
+        return;
+    }
+
+    // Rescale into our internal 128-step-based 0-126 range.
+    uint8_t speed = (uint8_t)(((uint16_t)raw_speed * DCC_MAX_SPEED) / max_steps);
+
+    DEBUG_XNET_PRINTF("XpressNet RX: Speed (%u-step) - Addr=%u RawSpeed=%u Speed=%u Dir=%u\n",
+                       max_steps, address, raw_speed, speed, direction);
     router->handleXpressNetCommand(address, speed, direction);
 }
 
