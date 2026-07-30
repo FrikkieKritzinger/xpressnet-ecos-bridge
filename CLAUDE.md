@@ -5,13 +5,28 @@
 **Language**: C++ (Arduino IDE 1.8+)  
 **Target**: ESP8266 microcontroller (160MHz, 4MB Flash, 160KB RAM)
 
-> ✅ **Phase 4.6 XpressNet RX confirmed working end-to-end (2026-07-30).** Real
-> MultiMaus speed commands now decode, route through CommandRouter/StateEngine, and
-> trigger Ecos subscription requests exactly as designed. Root cause of the earlier
-> silence: the throttle's loco was configured for 28-speed-step mode, and the
-> firmware only implemented the 128-speed-step callback - see the dated entry below
-> for the full diagnosis and fix. Ecos-side validation (real TCP connection, not the
-> temporary `TEMP_SKIP_ECOS_CONNECT` stub) is the next step - see Phase 4.6 below.
+> ✅ **Phase 4.6 checkpoint (2026-07-30): XpressNet fully validated on real hardware.**
+> A real MultiMaus now works end-to-end against this bridge - speed, direction,
+> functions (F0-F31), the master correctly declaring 128-speed-step mode to the
+> throttle, and the STOP button's track-power acknowledgment all confirmed working
+> live. Three real bugs found and fixed today, all documented in detail in the dated
+> entries below:
+> 1. Drive commands were silently dropped for any throttle/loco not in 128-step mode
+>    (the MultiMaus defaults to 28-step) - added handlers for 14/27/28-step modes.
+> 2. The master never answered a throttle's loco-info request at all, so it had no
+>    way to declare a step count in the first place - implemented both the generic
+>    Lenz reply and the Roco MultiMaus's proprietary variant, always declaring
+>    128-step. Confirmed this needs no Ecos involvement - it's a pure
+>    master↔throttle wire contract.
+> 3. The MultiMaus's STOP button froze its display (required physical unplug) because
+>    the master never acknowledged track-power/emergency-stop requests on the bus -
+>    fixed with a minimal wire-protocol echo (does not yet force locos to actually
+>    stop - see Future Improvements).
+>
+> **Still active, not yet reverted**: `XNetDEBUG` raw-byte logging and
+> `TEMP_SKIP_ECOS_CONNECT` (Ecos deliberately disconnected throughout today's testing).
+> **Next**: revert both and validate against a real, connected Ecos - see Phase 4.6
+> below.
 
 ---
 
@@ -635,14 +650,31 @@ hardware debugging session (MAX485 undervoltage from a protective diode, a resis
 wired in parallel instead of series, and two faulty MAX485 modules - see the Recent
 Updates entry for the full root-cause story), the bridge is now confirmed as
 XpressNet master against a real Roco MultiMaus throttle - `Err 13` cleared,
-`XpressNet: Bus connected!` in the debug log. Ecos-side validation is still pending
-(Ecos wasn't powered on for this test). Remaining for this phase: verify actual
-speed/direction/function commands from the throttle parse and route correctly, then
-move to Ecos-side validation.
+`XpressNet: Bus connected!` in the debug log.
+
+**2026-07-30 - XpressNet fully validated end-to-end against the real MultiMaus**:
+speed, direction, and function (F0-F31) commands all confirmed decoding and routing
+correctly; the master now correctly declares 128-speed-step mode to the throttle
+(fixing a real MultiMaus quirk where it otherwise stays at 28 steps); the STOP
+button's track-power acknowledgment is fixed (no more display freeze/unplug). Three
+real bugs found and fixed - see the dated Recent Updates entries for full diagnosis.
+Ecos-side validation (real TCP connection, not the temporary `TEMP_SKIP_ECOS_CONNECT`
+stub still active) is the only remaining item for this phase.
 
 ### Current State
 
 - Phases 1-4.5 complete, plus the XpressNetMaster library integration above.
+- **XpressNet RX/TX fully validated on real hardware (2026-07-30)**: speed,
+  direction, all function groups, 128-step declaration to the throttle, and
+  STOP-button track-power acknowledgment all confirmed working against a real
+  Roco MultiMaus. See Recent Updates for the three bugs found and fixed to get here.
+- **Not yet done**: Ecos-side validation against a real, connected Ecos.
+  `TEMP_SKIP_ECOS_CONNECT` (in `ecos_interface.cpp`) and `XNetDEBUG` (in
+  `libraries/XpressNetMaster/XpressNetMaster.h`) are both still active from
+  today's isolated XpressNet testing and need reverting first.
+- **Deliberately deferred**: bus-wide emergency stop only acknowledges on the
+  wire now - it does not yet force any locomotives to actually stop moving
+  (see Future Improvements).
 - Native unit test suite and coverage numbers: see the "Hardware arrived" entry in
   Recent Updates for the latest counts (parser-specific tests were removed since that
   logic now lives in the real library).
@@ -683,23 +715,21 @@ if that happens, run `.pio/build/native/program.exe` directly for the ground tru
 
 ### What Phase 4.6 Actually Needs
 
-1. **A manual test checklist** for verifying the bridge against a real ESP8266 +
-   physical XpressNet bus + real ESU Ecos (or Ecos-compatible command station). This
-   validates things native unit tests structurally cannot: actual RS485/half-duplex
-   serial timing, real WiFi/TCP behavior against a live Ecos, and real XpressNet
-   throttle behavior. Highest priority: this is the first time the new
-   XpressNetMaster-based interface (and its function-fragment merge logic in
-   `xpressnet_interface.cpp`) will see real hardware bytes at all - verify basic
-   speed/direction/function commands from a real throttle before anything else.
-2. Flash the firmware (`env:wemos` target) to the physical Wemos D1 Mini.
-3. Confirm `config.h`'s WiFi credentials and Ecos IP match the real network before
-   testing (currently hardcoded placeholders - see "Hardware Configuration" below).
-4. Work through the checklist: XpressNet speed/direction/function commands from a
-   real throttle, verify they reach Ecos correctly; Ecos-side changes verify they
-   propagate back to XpressNet; subscription lifecycle (new loco -> subscribe, 5-minute
-   inactivity -> unsubscribe) against real timing, not mocked time. (Bus-wide
-   emergency stop is not implemented yet - see Future Improvements - so it's not
-   part of this checklist.)
+1. ~~A manual test checklist for verifying XpressNet speed/direction/function
+   commands from a real throttle.~~ **Done (2026-07-30)** - fully validated against
+   a real Roco MultiMaus, including 128-step declaration and STOP-button
+   acknowledgment. See Recent Updates for the three bugs found and fixed.
+2. ~~Flash the firmware (`env:wemos`/`env:debug` target) to the physical Wemos D1
+   Mini.~~ **Done** - reflashed repeatedly throughout today's session.
+3. ~~Confirm `config.h`'s WiFi credentials and Ecos IP match the real network.~~
+   **Done** (2026-07-29).
+4. **Remaining**: revert `TEMP_SKIP_ECOS_CONNECT` (`ecos_interface.cpp`) and
+   `XNetDEBUG` (`XpressNetMaster.h`), then validate against a real, connected Ecos:
+   confirm XpressNet commands reach Ecos correctly, Ecos-side changes propagate
+   back to XpressNet, and subscription lifecycle (new loco -> subscribe, 5-minute
+   inactivity -> unsubscribe) works against real timing, not mocked time. (Bus-wide
+   emergency stop still only acknowledges on the wire, not actually stopping locos -
+   see Future Improvements - so it's not part of this checklist.)
 
 ### After Phase 4.6
 
@@ -1222,8 +1252,10 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 
 ---
 
-**Last Updated**: 2026-07-27 (Hardware arrived; XpressNet interface rewritten around
-Gahtow's real XpressNetMaster library to match the physical D6/D0 half-duplex wiring
-and the real 62500-baud protocol - see the top-of-file banner and the "Hardware
-arrived" entry in Recent Updates for full details. Native test suite and ESP8266
-build re-verified after the change; real hardware validation is the next step.)
+**Last Updated**: 2026-07-30 (Phase 4.6 checkpoint - XpressNet fully validated
+end-to-end against a real Roco MultiMaus: speed, direction, functions, 128-step
+declaration, and STOP-button track-power acknowledgment all confirmed working.
+Three real bugs found and fixed today - see the top-of-file banner and the dated
+Recent Updates entries for full diagnosis. Ecos-side validation, with the
+temporary `TEMP_SKIP_ECOS_CONNECT`/`XNetDEBUG` diagnostic aids reverted, is the
+next step.)
