@@ -50,6 +50,18 @@ void notifyXNetLocoDrive28(uint16_t Address, uint8_t Speed) {
     }
 }
 
+void notifyXNetgiveLocoInfo(uint8_t UserOps, uint16_t Address) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onGiveLocoInfo(UserOps, Address);
+    }
+}
+
+void notifyXNetgiveLocoMM(uint8_t UserOps, uint16_t Address) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onGiveLocoMM(UserOps, Address);
+    }
+}
+
 void notifyXNetLocoFunc1(uint16_t Address, uint8_t Func1) {
     if (g_xnet_instance) {
         g_xnet_instance->onLocoFunctionGroup(Address, 1, Func1);
@@ -267,6 +279,58 @@ void XpressNetInterface::onLocoDriveStepped(uint16_t address, uint8_t speed_byte
     DEBUG_XNET_PRINTF("XpressNet RX: Speed (%u-step) - Addr=%u RawSpeed=%u Speed=%u Dir=%u\n",
                        max_steps, address, raw_speed, speed, direction);
     router->handleXpressNetCommand(address, speed, direction);
+}
+
+void XpressNetInterface::resolveLocoStateForReply(uint16_t address, uint8_t& speed_byte, uint32_t& functions) {
+    LocoState loco;
+    bool known = router && router->getStateEngine().getLoco(address, loco);
+
+    uint8_t speed = known ? loco.speed : 0;
+    uint8_t direction = known ? loco.direction : 1;
+    functions = known ? loco.functions : 0;
+
+    speed_byte = speed & 0x7F;
+    if (direction == 0) {
+        speed_byte |= 0x80;  // reverse
+    }
+}
+
+void XpressNetInterface::onGiveLocoInfo(uint8_t user_ops, uint16_t address) {
+    if (!isValidDccAddress(address)) {
+        return;
+    }
+
+    uint8_t speed_byte;
+    uint32_t functions;
+    resolveLocoStateForReply(address, speed_byte, functions);
+
+    // F5-F12 packed into one byte (low nibble F5-F8, high nibble F9-F12) -
+    // exact nibble order not independently verified against the Lenz spec;
+    // worst case this only affects the initial display until the next
+    // broadcast corrects it.
+    uint8_t func_5to12 = (buildFunctionGroupByte(functions, 3) << 4) | buildFunctionGroupByte(functions, 2);
+
+    xnet.SetLocoInfo(user_ops, Loco128, speed_byte, buildFunctionGroupByte(functions, 1), func_5to12);
+
+    DEBUG_XNET_PRINTF("XpressNet TX: LocoInfo reply - Addr=%u (declaring 128-step)\n", address);
+}
+
+void XpressNetInterface::onGiveLocoMM(uint8_t user_ops, uint16_t address) {
+    if (!isValidDccAddress(address)) {
+        return;
+    }
+
+    uint8_t speed_byte;
+    uint32_t functions;
+    resolveLocoStateForReply(address, speed_byte, functions);
+
+    xnet.SetLocoInfoMM(user_ops, Loco128, speed_byte,
+                        buildFunctionGroupByte(functions, 1),     // F0-F4
+                        buildFunctionGroupByte(functions, 2),     // F5-F8
+                        buildFunctionGroupByte(functions, 3),     // F9-F12
+                        buildFunctionGroupByte(functions, 0x04)); // F13-F20
+
+    DEBUG_XNET_PRINTF("XpressNet TX: LocoInfoMM reply - Addr=%u (declaring 128-step)\n", address);
 }
 
 void XpressNetInterface::onLocoFunctionGroup(uint16_t address, uint8_t group, uint8_t bits) {

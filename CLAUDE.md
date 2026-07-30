@@ -74,7 +74,48 @@
   (function commands, other speed/direction values, then Ecos-side validation).
   Revert both once XpressNet is fully validated and Ecos testing resumes, per
   the 2026-07-29 entries.
-- **Follow-up same day - function commands confirmed too**: with the fix flashed,
+- **Follow-up same day - MultiMaus stuck at 28 steps, resolved by implementing
+  the master's LocoInfo reply (no Ecos dependency needed)**: user reported the
+  MultiMaus's own menu doesn't let them change a loco's speed-step setting - it
+  stays at 28 regardless. Real XpressNet's actual contract is the reverse of
+  what a throttle-side menu implies: **the master declares the step count per
+  loco, and slave throttles obey** - not something the throttle unilaterally
+  decides. Reasoned through why this doesn't require the "wait for Ecos before
+  answering XpressNet" contract change the user raised: the step-count
+  declaration is a pure master<->throttle wire contract, decoupled from Ecos -
+  Ecos only ever sees this bridge's internal 0-126 speed value and never
+  needs to agree on what step count we told a throttle, so the master can
+  answer immediately from local `StateEngine` state (defaulting to
+  stopped/no-functions if the loco is unknown) with no Ecos dependency at all.
+  Implemented `onGiveLocoInfo()` (`notifyXNetgiveLocoInfo`, XpressNet header
+  0xE3/data1=0x00, the generic Lenz "request loco info" message) replying via
+  `xnet.SetLocoInfo()`, always declaring `Loco128`. First flash of this alone
+  didn't change the real MultiMaus's behavior - live serial monitoring caught
+  why: **the MultiMaus doesn't send the generic 0x00 request at all - it sends
+  a proprietary MultiMaus-specific request (header 0xE3/data1=0xF0, "Lok und
+  Funktionszustand MultiMaus anfordern")**, routed by the library to a
+  completely different callback (`notifyXNetgiveLocoMM`) expecting a different
+  reply format (`SetLocoInfoMM`, header 0xE7, covers F0-F20 in one message
+  instead of the generic reply's F0-F12). This lines up with a comment already
+  present in the vendored library (`SetLocoInfoMM`, ~line 939) about step
+  counts not sticking for addresses >99 - that comment turned out to describe
+  a real MultiMaus behavior, but specifically for the *unimplemented* MM reply
+  path, not an unfixable hardware limitation. Implemented `onGiveLocoMM()`
+  answering the real request the MultiMaus actually sends, also always
+  declaring `Loco128`, sharing a new `resolveLocoStateForReply()` helper with
+  `onGiveLocoInfo()` for the common StateEngine lookup + RVVVVVVV speed-byte
+  encoding.
+  **Result, confirmed on real hardware**: after reselecting loco 5452, all
+  subsequent drive commands arrived as genuine 128-step (`data1=0x13`,
+  `XpressNet RX: Speed - Addr=5452 Speed=...`, no longer the 28-step path) -
+  91 speed messages across both directions (40x Dir=1, 51x Dir=0), only 2
+  stray 28-step messages in the brief window before the first `LocoInfoMM`
+  reply landed. Function group 1 (F0/F3) also confirmed correct
+  (`Fn=0x00→0x01→0x09→0x01`). The bridge no longer needs its 14/27/28-step
+  fallback handlers for this throttle in practice, though they remain in place
+  as a safety net for any throttle/loco that doesn't obey the master's
+  declaration.
+- **Earlier same-day follow-up - function commands confirmed too**: with the fix flashed,
   ran a live serial monitor while the user manually toggled F0, F1, and F3 on the
   real MultiMaus and varied speed/direction. Confirmed correct end-to-end: speed
   spanned the full range with both directions (e.g. `RawSpeed=26 Speed=117 Dir=1`,

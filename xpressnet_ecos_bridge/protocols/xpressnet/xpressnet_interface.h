@@ -112,6 +112,34 @@ public:
     void onLocoDriveStepped(uint16_t address, uint8_t speed_byte, uint8_t max_steps);
 
     /**
+     * Handle a throttle's request for a locomotive's current info - fires
+     * when a loco is selected on the throttle (XpressNet header 0xE3,
+     * data1=0x00). Answers immediately from this bridge's own StateEngine
+     * (defaulting to stopped/no-functions if the loco is unknown), always
+     * declaring 128-speed-step mode. Step-count is a master->slave contract
+     * XpressNet makes on its own wire, independent of Ecos - Ecos never
+     * sees or needs to agree on which step count we told the throttle, so
+     * this never needs to wait on an Ecos connection/subscription.
+     * @param user_ops Requesting device's XpressNet slot - the reply is
+     *                 addressed back to this specific device
+     * @param address DCC address being queried
+     */
+    void onGiveLocoInfo(uint8_t user_ops, uint16_t address);
+
+    /**
+     * Handle a Roco MultiMaus-specific loco/function status request
+     * (XpressNet header 0xE3, data1=0xF0 - not the generic Lenz 0x00
+     * request that onGiveLocoInfo answers). Real MultiMaus hardware uses
+     * this proprietary variant instead of/alongside the standard one, and
+     * expects the "MM" reply format (SetLocoInfoMM, header 0xE7) covering
+     * F0-F20 in one message rather than the standard F0-F12 reply.
+     * @param user_ops Requesting device's XpressNet slot - the reply is
+     *                 addressed back to this specific device
+     * @param address DCC address being queried
+     */
+    void onGiveLocoMM(uint8_t user_ops, uint16_t address);
+
+    /**
      * Handle one fragment of a function-state notification and merge it
      * into the loco's full F0-F31 bitmap before forwarding to the router.
      * @param address DCC address
@@ -148,6 +176,14 @@ private:
      * and resets the timeout clock.
      */
     void markBusActivity();
+
+    /**
+     * Shared lookup for onGiveLocoInfo/onGiveLocoMM: resolves a loco's
+     * current speed/direction/functions from the StateEngine (defaulting
+     * to stopped/no-functions if unknown) and encodes the RVVVVVVV speed
+     * byte both reply formats need.
+     */
+    void resolveLocoStateForReply(uint16_t address, uint8_t& speed_byte, uint32_t& functions);
 
     /**
      * Build the outbound byte for one function group from the full 32-bit
