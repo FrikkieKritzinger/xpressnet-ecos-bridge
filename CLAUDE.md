@@ -115,6 +115,33 @@
   fallback handlers for this throttle in practice, though they remain in place
   as a safety net for any throttle/loco that doesn't obey the master's
   declaration.
+- **Follow-up same day - MultiMaus STOP button froze the display, requiring a
+  physical unplug/replug to recover**: this was a previously-deprioritized
+  finding from earlier in Phase 4.6, resurfaced by the user now that XpressNet
+  RX is otherwise fully working. Root cause: the library's three separate
+  incoming track-power/emergency-stop request paths (the MultiMaus's physical
+  STOP button most likely sends the simple `0x80`/data1=`0x80` "EmStop"
+  broadcast) all only update the library's own internal `Railpower` state and
+  fire `notifyXNetPower(state)` **if implemented** - none of them
+  automatically echo any acknowledgment back onto the bus. This callback was
+  never implemented in `xpressnet_interface.cpp`, so the master silently
+  absorbed every STOP/resume request with zero response - the MultiMaus was
+  very likely just waiting indefinitely for a confirmation broadcast that
+  never came, exactly matching the freeze/unplug-to-recover symptom. Matches
+  the already-documented "Future Improvements" backlog item (bus-wide
+  emergency stop "nothing consumes it yet").
+  **Fixed** (deliberately minimal scope, chosen over the fuller feature):
+  added `onPowerStateChange()` / `notifyXNetPower` calling
+  `xnet.setPower(state)`, which broadcasts the state back to all XpressNet
+  devices (`GENERAL_BROADCAST`, no per-device targeting needed) - purely a
+  wire-protocol acknowledgment fix. It does **not** force any locomotives to
+  actually stop moving - that remains the deferred "Future Improvements" item,
+  now with a concrete implementation path (iterate `StateEngine`, force
+  speed=0, propagate to other XpressNet devices and Ecos) whenever it's
+  wanted.
+  **Confirmed on real hardware**: pressing STOP now displays immediately
+  (`state=0x01`/`csEmergencyStop` logged) and un-stop resets cleanly
+  (`state=0x00`/`csNormal` logged) - no more unplug required.
 - **Earlier same-day follow-up - function commands confirmed too**: with the fix flashed,
   ran a live serial monitor while the user manually toggled F0, F1, and F3 on the
   real MultiMaus and varied speed/direction. Confirmed correct end-to-end: speed
@@ -1183,12 +1210,15 @@ XpressNet throttles are session-based. After 5 min inactivity, assume loco disco
 - Z21 LAN protocol support
 - Accessory decoder (turnout) control
 - Advanced function mapping (e.g., F5=headlight, but only on steam engines)
-- **Bus-wide emergency stop / track power** (Notaus): XpressNetMaster surfaces this
-  via a `notifyXNetPower(csEmergencyStop)` callback, but nothing consumes it yet.
-  Likely needs a new CommandRouter path (e.g. iterate all known locos in StateEngine
-  and force speed=0) rather than the single-address `handleXpressNetCommand` path.
-  Deliberately deferred out of the 2026-07-27 XpressNetMaster integration to keep
-  that change focused on validating the new hardware.
+- **Bus-wide emergency stop / track power** (Notaus) - actually stopping locos:
+  as of 2026-07-30, `notifyXNetPower` is implemented and echoes the
+  acknowledgment back onto the XpressNet bus (fixes the MultiMaus STOP-button
+  display freeze - see Recent Updates), but it still does not force any
+  locomotives to actually stop moving. Likely needs a new CommandRouter path
+  (e.g. iterate all known locos in StateEngine and force speed=0) rather than
+  the single-address `handleXpressNetCommand` path, plus a decision on how it
+  interacts with Ecos. Deliberately deferred - the minimal wire-protocol fix
+  was chosen first to unblock hardware testing.
 
 ---
 

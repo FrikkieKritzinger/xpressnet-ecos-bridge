@@ -62,6 +62,12 @@ void notifyXNetgiveLocoMM(uint8_t UserOps, uint16_t Address) {
     }
 }
 
+void notifyXNetPower(uint8_t State) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onPowerStateChange(State);
+    }
+}
+
 void notifyXNetLocoFunc1(uint16_t Address, uint8_t Func1) {
     if (g_xnet_instance) {
         g_xnet_instance->onLocoFunctionGroup(Address, 1, Func1);
@@ -331,6 +337,11 @@ void XpressNetInterface::onGiveLocoMM(uint8_t user_ops, uint16_t address) {
                         buildFunctionGroupByte(functions, 0x04)); // F13-F20
 
     DEBUG_XNET_PRINTF("XpressNet TX: LocoInfoMM reply - Addr=%u (declaring 128-step)\n", address);
+}
+
+void XpressNetInterface::onPowerStateChange(uint8_t state) {
+    DEBUG_XNET_PRINTF("XpressNet: Power state change request - state=0x%02x, echoing acknowledgment\n", state);
+    xnet.setPower(state);
 }
 
 void XpressNetInterface::onLocoFunctionGroup(uint16_t address, uint8_t group, uint8_t bits) {

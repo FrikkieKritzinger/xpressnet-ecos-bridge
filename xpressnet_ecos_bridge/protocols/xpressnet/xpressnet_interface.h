@@ -140,6 +140,21 @@ public:
     void onGiveLocoMM(uint8_t user_ops, uint16_t address);
 
     /**
+     * Handle a track-power/emergency-stop state change request (e.g. the
+     * MultiMaus's physical STOP button). The library only updates its own
+     * internal state and fires this callback - it never automatically
+     * echoes an acknowledgment onto the bus, so without this, throttles
+     * sit waiting for a confirmation that never comes (observed as the
+     * MultiMaus's display freezing until physically unplugged/replugged).
+     * This is the minimal wire-protocol fix only: it echoes the state back
+     * via xnet.setPower() so throttles get their acknowledgment. It does
+     * NOT force any locomotives to actually stop - see CLAUDE.md's Future
+     * Improvements for the fuller safety feature, deliberately deferred.
+     * @param state csNormal, csEmergencyStop, or csTrackVoltageOff
+     */
+    void onPowerStateChange(uint8_t state);
+
+    /**
      * Handle one fragment of a function-state notification and merge it
      * into the loco's full F0-F31 bitmap before forwarding to the router.
      * @param address DCC address
