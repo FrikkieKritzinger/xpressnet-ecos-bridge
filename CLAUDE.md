@@ -18,6 +18,39 @@
 
 ## 📝 Recent Updates (This Session)
 
+**2026-07-29 — XpressNet TX path confirmed working, RX path (MultiMaus→bridge) now suspect**
+- **Trigger**: after the bus-connection fix (see entry below), unplugging the MultiMaus
+  live (while powered) caused it to show `Err 13` again and required a manual reset of
+  the Wemos to recover - itself a real finding worth revisiting later (a master
+  shouldn't need resetting just because a slave disconnects; possibly a hot-plug
+  transient this simple setup has no protection against). After reboot + reconnecting
+  the MultiMaus, a deeper issue surfaced.
+- **Key finding**: the MultiMaus shows no `Err 13` and appears fully active (loco
+  selected, speed set, functions toggled) - but the bridge's debug log has *never*
+  printed `XpressNet: Bus connected!` or any `XpressNet RX:` message since that reboot,
+  staying permanently at `XNet=Disconnected`. Confirmed this isn't just a logging gap:
+  deliberately changing speed/direction/toggling a function live, while watching the
+  serial monitor, produces zero output.
+- **Diagnosis so far**: the MultiMaus clearing `Err 13` only proves it's receiving the
+  master's call-byte traffic (the TX path already validated via oscilloscope - see
+  entry below). It does NOT prove the master is receiving anything back. This points
+  to the **RX path** (MultiMaus → bus → MAX485 A/B input → MAX485 receiver → RO →
+  through the 1kΩ resistor → D6 → ESP8266) being broken, separate from the TX path
+  (ESP8266 → D6 → resistor → MAX485 DI → driver → A/B output) confirmed working
+  earlier with the same chip.
+- **Oscilloscope evidence**: widening the timebase to ~2ms after the master's own
+  DE-triggered transmit pulse (per the XpressNet spec, a slave must respond within
+  100us) shows only small, rounded, barely-above-baseline bumps - not the clean
+  square digital edges seen on the TX side. This looks like a heavily attenuated or
+  capacitively-coupled signal, not a properly driven response.
+- **Not yet determined - next step to resume with**: whether this weak signal is
+  already present at the MAX485's A/B pins (bus side, meaning the incoming signal
+  from the MultiMaus/cable is weak before reaching our chip) or only appears at
+  RO/D6 (meaning this specific chip's receiver stage is degraded, separate from its
+  driver stage which is confirmed fine - a chip can have one working and not the
+  other). Resume by checking A/B directly during that same widened window, then
+  compare to RO/D6.
+
 **2026-07-29 — XpressNet bus connection established: real MultiMaus talking to the bridge**
 - **Trigger**: first live test with a physical throttle (Roco MultiMaus) connected to the
   RS485 bus - MultiMaus displayed `Err 13 - no XpressNet master`, and the bridge's own
