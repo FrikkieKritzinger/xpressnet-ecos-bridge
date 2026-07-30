@@ -74,6 +74,19 @@
   (function commands, other speed/direction values, then Ecos-side validation).
   Revert both once XpressNet is fully validated and Ecos testing resumes, per
   the 2026-07-29 entries.
+- **Follow-up same day - function commands confirmed too**: with the fix flashed,
+  ran a live serial monitor while the user manually toggled F0, F1, and F3 on the
+  real MultiMaus and varied speed/direction. Confirmed correct end-to-end: speed
+  spanned the full range with both directions (e.g. `RawSpeed=26 Speed=117 Dir=1`,
+  `RawSpeed=2 Speed=9 Dir=0`), and function bitmap decode was exactly right
+  (`Fn=0x01`=F0 on, `Fn=0x03`=F0+F1, `Fn=0x0b`=F0+F1+F3, back down to `Fn=0x00`).
+  **XpressNet RX (speed, direction, all tested function groups) is now fully
+  validated on real hardware** - the "XpressNet working 100% before Ecos testing"
+  bar the user set is met. Also newly observed: `Ecos: Outgoing queue full,
+  dropping oldest` logs on every command now, alongside the already-known
+  repeating "New loco... requesting Ecos subscription" - both are expected
+  consequences of Ecos being deliberately disconnected (`TEMP_SKIP_ECOS_CONNECT`),
+  not new bugs; re-check once real Ecos connectivity is restored.
 
 **2026-07-29 — XpressNet TX path confirmed working, RX path (MultiMaus→bridge) now suspect**
 - **Trigger**: after the bus-connection fix (see entry below), unplugging the MultiMaus
