@@ -69,8 +69,11 @@
 
 //--------------------------------------------------------------------------------------------
 //only for Debug:
-//#define XNetSerial Serial	//Debugging Serial
-//#define XNetDEBUG		//Put out the messages
+// TEMP: enabled to see raw received bytes at the software level, bypassing
+// checksum/message-recognition entirely - confirms whether bytes are really
+// reaching the firmware at all. Revert to commented-out once RX diagnosis is done.
+#define XNetSerial Serial	//Debugging Serial
+#define XNetDEBUG		//Put out the messages
 //#define XNetDEBUGTime	//Put out the microseconds
 
 
@@ -132,7 +135,7 @@ next transmission window between 400 microseconds and 500 milliseconds after the
 
 typedef struct	//Msg Seicher
 {
-	uint8_t length;			//Speicher für Datenlänge
+	uint8_t length;			//Speicher fï¿½r Datenlï¿½nge
 	uint8_t data[XNetBufferMaxData];	//zu sendende Daten
 } XNetMessage;
 
@@ -157,10 +160,10 @@ class XpressNetMasterClass
 	#endif
 	bool update(void);  			//Set new Data on the Dataline
 	
-	bool getOperationModeMaster(void);	//gibt TRUE zurück wenn aktuelle Master Mode aktiv ist!
+	bool getOperationModeMaster(void);	//gibt TRUE zurï¿½ck wenn aktuelle Master Mode aktiv ist!
 
 	void setPower(byte Power);		//Zustand Gleisspannung Melden
-	void setBCFeedback(byte data1, byte data2);	//Rückmeldedaten an Clients verteilen
+	void setBCFeedback(byte data1, byte data2);	//Rï¿½ckmeldedaten an Clients verteilen
 
 	//Control Loco
 	void ReqLocoBusy(uint16_t Adr);	//Lok Adresse besetzt melden
@@ -175,7 +178,7 @@ class XpressNetMasterClass
 	void SetFktStatus(uint8_t UserOps, uint8_t F4, uint8_t F5);	//LokFkt an XNet Melden
 	void SetLocoInfoMM(uint8_t UserOps, uint8_t Steps, uint8_t Speed, uint8_t F0, uint8_t F1, uint8_t F2, uint8_t F3);
 	void SetTrntStatus(uint8_t UserOps, uint16_t Address, uint8_t Data); // data=0000 00AA	A=Weichenausgang1+2 (Aktive/Inaktive);
-	void SetTrntPos(uint16_t Address, uint8_t state, uint8_t active);	//Änderung der Weichenlage
+	void SetTrntPos(uint16_t Address, uint8_t state, uint8_t active);	//ï¿½nderung der Weichenlage
 
 	void setSpeed(uint16_t Adr, uint8_t Steps, uint8_t Speed);
 	void setFunc0to4(uint16_t Adr, uint8_t G1); //Gruppe 1: 0 0 0 F0 F4 F3 F2 F1
@@ -199,7 +202,7 @@ class XpressNetMasterClass
 	uint8_t XNetSlaveMode;	// > 0 then we are working in SLAVE MODE
 	uint8_t XNetSlaveInit;	//send initialize sequence
 	byte Railpower;		//Data of the actual Power State
-	byte Fahrstufe;	//Standard für Fahrstufe
+	byte Fahrstufe;	//Standard fï¿½r Fahrstufe
 	byte MAX485_CONTROL; //Port for send or receive control
 	uint8_t XNetAdr;	//Adresse des Abzufragenden XNet Device
 	unsigned long XSendCount;	//Zeit: Call Byte ausgesendet, data received
@@ -219,7 +222,7 @@ class XpressNetMasterClass
 
 		//Functions:
 	void unknown(void);		//unbekannte Anfrage
-	void getNextXNetAdr(void);	//NÄCHSTE Adr of XNet Device
+	void getNextXNetAdr(void);	//Nï¿½CHSTE Adr of XNet Device
 	bool XNetCheckXOR(void);	//Checks the XOR
 	void XNetAnalyseReceived(void);		//work on received data
 	
@@ -264,7 +267,7 @@ class XpressNetMasterClass
 	//Weichenbefehl:
 	extern void notifyXNetTrntInfo(uint8_t UserOps, uint16_t Address, uint8_t data) __attribute__((weak));// data=0000 000N	N=Nibble N0-(0,1); N1-(2,3);
 	extern void notifyXNetTrnt(uint16_t Address, uint8_t data) __attribute__((weak));// data=0000 000A	A=Weichenausgang (Aktive/Inaktive);
-	//Rückmeldung:
+	//Rï¿½ckmeldung:
 	extern void notifyXNetFeedback(uint16_t Address, uint8_t data) __attribute__((weak));// data=0000 000A	A=Weichenausgang (Aktive/Inaktive);
 	//CV:
 	extern void notifyXNetDirectCV(uint16_t CV, uint8_t data) __attribute__((weak));

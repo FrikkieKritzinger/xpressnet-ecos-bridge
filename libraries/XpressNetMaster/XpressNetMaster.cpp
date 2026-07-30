@@ -182,7 +182,7 @@ bool XpressNetMasterClass::update(void)
 				XNetAnalyseReceived();	//Auswerten der empfangenen Daten
 			}
 						
-			XNetRXclear(XNetRXBuffer.get);	//alte Nachricht löschen
+			XNetRXclear(XNetRXBuffer.get);	//alte Nachricht lï¿½schen
 			
 			XNetRXBuffer.get++;
 			if (XNetRXBuffer.get >= XNetBufferSize)	//overflow?
@@ -202,7 +202,7 @@ bool XpressNetMasterClass::update(void)
 	
 	if (XNetSlaveMode == 0x00) {		//MASTER MODE
 		if (  (micros() - XSendCount) > XNetTransmissionWindow) {
-			XNetRXclear(XNetRXBuffer.put);	//alte Nachricht löschen
+			XNetRXclear(XNetRXBuffer.put);	//alte Nachricht lï¿½schen
 			getNextXNetAdr();	//Send next CallByte
 			XNetSendData();	//start sending out by interrupt
 			XSendCount = micros(); //save time last Data on Bus!
@@ -259,7 +259,7 @@ bool XpressNetMasterClass::XNetCheckXOR(void) {
 	#endif
 	
 	
-	//Übertragungsfehler:
+	//ï¿½bertragungsfehler:
 	if (XNetSlaveMode == 0x00) {		//MASTER MODE
 		uint8_t ERR[] = {DirectedOps, 0x61, 0x80, 0xE1 };	
 		XNetsend(ERR, 4);
@@ -358,7 +358,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 					}
 					if (SlotLokUse[DirectedOps & 0x1F] == 0xFFFF)
 						SlotLokUse[DirectedOps & 0x1F] = 0;	//mark Slot as activ
-					//XNetclear();	//alte Nachricht löschen
+					//XNetclear();	//alte Nachricht lï¿½schen
 				}
 				break;
 			case 0x22: //Start Programming
@@ -374,7 +374,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 					break;
 				}
 				unknown(); //unbekannte Anfrage
-				//XNetclear();	//alte Nachricht löschen	
+				//XNetclear();	//alte Nachricht lï¿½schen	
 				break;
 			case 0x23:
 				if (XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetdata1] == 0x12) { //Register Mode write request (Register Mode) 
@@ -415,7 +415,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 					break;
 				}
 				unknown(); //unbekannte Anfrage
-				//XNetclear();	//alte Nachricht löschen
+				//XNetclear();	//alte Nachricht lï¿½schen
 				break;
 			case 0xE3: {			
 				if (XNetSlaveMode == 0x00)	{
@@ -448,7 +448,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 						default: unknown(); //unbekannte Anfrage
 					}
 				}
-				//XNetclear();	//alte Nachricht löschen
+				//XNetclear();	//alte Nachricht lï¿½schen
 				break;
 				}
 			case 0xE4: {	//Fahrbefehle
@@ -513,7 +513,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 				else unknown(); //unbekannte Anfrage
 				/*
 				if (XNetSlaveMode == 0x00)	{	//we are the MASTER
-					//für MultiMaus als Rückmeldung:
+					//fï¿½r MultiMaus als Rï¿½ckmeldung:
 					if (notifyXNetgiveLocoMM) 
 						notifyXNetgiveLocoMM(DirectedOps, word(XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetdata2] & 0x3F, XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetdata3]));
 				}
@@ -523,7 +523,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 			case 0x42:	//Accessory Decoder information request
 				if (notifyXNetTrntInfo && XNetSlaveMode == 0x00)
 					notifyXNetTrntInfo(DirectedOps, XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetdata1], XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetdata2]);
-				//XNetclear();	//alte Nachricht löschen
+				//XNetclear();	//alte Nachricht lï¿½schen
 				break;
 			case 0x43:	//Accessory Decoder >1024 information request
 				if (notifyXNetTrntInfo && XNetSlaveMode == 0x00)
@@ -536,7 +536,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 					//A = Weichenausgang(Spulenspannung EIN/AUS)
 					//BB = Adresse des Dekoderport 1..4
 					//P = Ausgang (Gerade = 0 / Abzweigen = 1)
-				//XNetclear();	//alte Nachricht löschen
+				//XNetclear();	//alte Nachricht lï¿½schen
 				break;
 			case 0x53:	//Accessory Decoder >1024 operation request ab Version 3.8
 				if (notifyXNetTrnt)
@@ -583,7 +583,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 				}
 			}
 			else if ((XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetheader] & 0xF0) == 0x40) {
-				//Rückmeldung Schaltinformation
+				//Rï¿½ckmeldung Schaltinformation
 				byte len = (XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetheader] & 0x0F) / 2;	//each Adr and Data
 				for (byte i = 1; i <= len; i++) {
 					notifyXNetFeedback((XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetheader+(i*2)-1] << 2) | ((XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetheader+(i*2)] & B110) >> 1), XNetRXBuffer.msg[XNetRXBuffer.get].data[XNetheader+(i*2)]);
@@ -706,7 +706,7 @@ void XpressNetMasterClass::XNetAnalyseReceived(void) {		//work on received data
 }
 
 //--------------------------------------------------------------------------------------------
-//Rückmeldung über Zustand Master-Mode:
+//Rï¿½ckmeldung ï¿½ber Zustand Master-Mode:
 bool XpressNetMasterClass::getOperationModeMaster(void) 
 {
 	if (XNetSlaveMode == 0x00) {
@@ -728,22 +728,22 @@ void XpressNetMasterClass::unknown(void)		//unbekannte Anfrage
 //--------------------------------------------------------------------------------------------
 void XpressNetMasterClass::getNextXNetAdr(void)
 {
-	XNetAdr++;		//nächste Adresse im XNet
+	XNetAdr++;		//nï¿½chste Adresse im XNet
 	if (XNetAdr == 0)
-		XNetAdr++;		//nächste Adresse im XNet 1..31 only!
+		XNetAdr++;		//nï¿½chste Adresse im XNet 1..31 only!
 	uint8_t TempAdr = XNetAdr % 32;
-		
+
 	if (XNetAdr > 31) {	//wenn letzte erreicht von Beginn!
 		//search for used slots to call them more then unused:
 		while((SlotLokUse[TempAdr % 32] == 0xFFFF) && (TempAdr <= 31)) {	//slot used an loco address?
 			TempAdr++;
-			XNetAdr++;		//nächste Adresse im XNet
+			XNetAdr++;		//nï¿½chste Adresse im XNet
 		}
 		if ((TempAdr % 32) == 0)
 			TempAdr = 1;	//start at the beginning
 
 	}
-	
+
 	/*
 	AAAAA = XNetAdr % 32 (Slot 1 to 31)
 	Call Byte Definitions: 
@@ -823,7 +823,7 @@ void XpressNetMasterClass::setPower(byte Power)
 }
 
 //--------------------------------------------------------------------------------------------
-//Rückmeldung verteilen
+//Rï¿½ckmeldung verteilen
 void XpressNetMasterClass::setBCFeedback(byte data1, byte data2) 
 {
 	uint8_t Feedback[] = { GENERAL_BROADCAST, 0x42, data1, data2, 0x00};
@@ -1120,7 +1120,7 @@ void XpressNetMasterClass::setCVReadValue(uint8_t cvAdr, uint8_t value) {
 void XpressNetMasterClass::setCVNack(void) {	
 	XNetCVAdr = 0;
 	XNetCVvalue = 0xFF;
-	uint8_t sendStatus[] = { DirectedOps, 0x61, 0x13, 0x72 };	//Programmierinfo „Daten nicht gefunden“
+	uint8_t sendStatus[] = { DirectedOps, 0x61, 0x13, 0x72 };	//Programmierinfo ï¿½Daten nicht gefundenï¿½
 	XNetsend(sendStatus, 4);
 }
 
@@ -1129,7 +1129,7 @@ void XpressNetMasterClass::setCVNack(void) {
 void XpressNetMasterClass::setCVNackSC(void) {	
 	XNetCVAdr = 0;
 	XNetCVvalue = 0xFF;
-	uint8_t sendStatus[] = { DirectedOps, 0x61, 0x12, 0x73 };	//Programmierinfo „Kurzschluss“
+	uint8_t sendStatus[] = { DirectedOps, 0x61, 0x12, 0x73 };	//Programmierinfo ï¿½Kurzschlussï¿½
 	XNetsend(sendStatus, 4);
 }
 
@@ -1223,7 +1223,7 @@ inline void XpressNetMasterClass::handle_TX_interrupt()
 {
   if (active_object)
   {
-    active_object->XNetSendNext();	//nächste Byte Senden
+    active_object->XNetSendNext();	//nï¿½chste Byte Senden
   }
 }
 #endif
@@ -1491,7 +1491,7 @@ void XpressNetMasterClass::XNetReceive(void)
 }
 
 //--------------------------------------------------------------------------------------------
-//Löschen des letzten gesendeten Befehls
+//Lï¿½schen des letzten gesendeten Befehls
 void XpressNetMasterClass::XNetRXclear(uint8_t b)
 {
 	

@@ -178,7 +178,21 @@ void EcosInterface::updateConnectionStatus() {
     }
 }
 
+// TEMP: wifi_client.connect() blocks for the full TCP connect timeout (~5s)
+// when Ecos is unreachable, starving xnet.update() of loop time for that
+// whole window - this was masking/disrupting XpressNet RX-path testing.
+// Skip the actual connect attempt while isolating that test. Remove this
+// guard (and the #define above it) once XpressNet is validated and Ecos
+// testing resumes.
+#define TEMP_SKIP_ECOS_CONNECT 1
+
 void EcosInterface::attemptTcpConnect() {
+#if TEMP_SKIP_ECOS_CONNECT
+    DEBUG_ECOS_PRINTF("Ecos TCP connect skipped (TEMP_SKIP_ECOS_CONNECT)\n");
+    current_status = ComponentStatus::DISCONNECTED;
+    return;
+#endif
+
     DEBUG_ECOS_PRINTF("Attempting TCP connect to %s:%u...\n", ECOS_IP, ECOS_PORT);
 
     if (wifi_client.connect(ECOS_IP, ECOS_PORT)) {
