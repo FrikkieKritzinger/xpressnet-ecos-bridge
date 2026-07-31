@@ -53,6 +53,118 @@ here. Newest entries first.
 
 ---
 
+**2026-07-31 — Address map only ever kept the last of many locomotives (two more real bugs, found by inspecting the log)**
+- **Trigger**: user asked what the "Address map: DCC 24" log line meant, and
+  pointed out they have loco 5452 selected on the MultiMaus while "definitely
+  many more locos defined in Ecos" - correctly suspecting the single entry
+  didn't match reality.
+- **Bug 1 - `EcosMessageParser` collapsed multi-line blocks down to one
+  entry**: added a temporary raw-line dump (`ecos_message_parser.cpp`, since
+  removed) right before block parsing, which proved Ecos's real
+  `queryObjects(10, addr, name)` reply carries **15 content lines, one per
+  locomotive** - including `1009 name["BN U28B #5452"] addr[5452]`, the exact
+  loco on the MultiMaus. Root cause: `EcosReply` models "one block = one
+  object's state" (correct for `request(id,view)`/`<EVENT id>`, which really
+  are single-line), but `parseBlock()` looped over every content line writing
+  into the *same shared* `EcosReply`, so each line overwrote the last -
+  only whichever locomotive Ecos listed last (`DCC 24`) survived into the
+  address map. All 14 others, including 5452, were parsed correctly and then
+  silently discarded.
+- **User pushback on the fix's first draft**: the initial plan sized the new
+  per-line buffer at the old arbitrary `MAX_BLOCK_LINES` (20). User pointed
+  out their own test setup already has 14-15 locos and real layouts can have
+  many more - correctly flagging that 20 would just move the silent-data-loss
+  bug to a slightly higher threshold instead of fixing it properly.
+- **Fixed**: reworked `EcosMessageParser` to parse each content line
+  immediately into its own `EcosReply` entry (instead of buffering raw text
+  for later batch-parsing), sized to `MAX_ECOS_OBJECTS` (config.h, 100) -
+  the same authoritative cap the address map itself already uses, rather than
+  inventing a second, independently-drifting constant. `processByte()` keeps
+  its existing two-arg signature and still writes the first entry into its
+  output param (so all ~14 pre-existing tests needed zero changes); a new
+  `getNextQueuedReply()` method lets the caller drain any additional entries
+  a multi-line block produced. `EcosInterface::update()`'s read loop now
+  drains the queue after every `handleReply()` call. Block-level fields
+  (kind/end_code/end_text) are stamped onto every queued entry at `<END>`
+  time; a block with zero content lines (bare acks/errors) still emits
+  exactly one reply, preserving the last-message-time watchdog reset from the
+  2026-07-31 heartbeat fix above.
+- **Bug 2 - address map only ever appended, never updated**: fixing bug 1
+  surfaced a second, latent bug it would have made visible almost
+  immediately: since the heartbeat now re-runs the same `queryObjects` query
+  every 30 seconds (per the fix above), `addAddressMapEntry()` being
+  append-only meant the map would gain 15 duplicate rows every cycle and hit
+  `MAX_ECOS_OBJECTS` (100) within about 3 minutes, silently refusing all
+  further entries ("Map full") from then on. This bug already existed before
+  today (the old 10-minute refresh timer would have hit it too, just over
+  ~67 minutes instead of ~3) but was never observed since Ecos had never
+  actually been connected long enough. **Fixed**: `addAddressMapEntry()` now
+  checks for an existing `dcc_address` and updates its `ecos_id` in place
+  before falling back to appending a genuinely new entry.
+- **Result, confirmed on real hardware**: all 15 real locomotives now appear
+  in the address map on connect (`DCC 17, 2655, 41, 72, 20, 3, 34, 1702, 5592,
+  5452, 1445, 9524, 1841, 1818, 24`), and two subsequent heartbeat cycles
+  (30s apart) reproduce the exact same 15 entries with no growth or
+  duplication. Added `test_ecos_parse_query_objects_multiple_locos` (drains
+  a 3-loco fixture and checks every entry) and reworked
+  `test_ecos_block_with_too_many_lines_discards_oldest` into
+  `test_ecos_block_with_too_many_lines_drops_excess` (now actually exercises
+  the real `MAX_ECOS_OBJECTS`-sized cap instead of a no-longer-existent
+  20-line one). Native suite: 92/92 passing. `env:debug` rebuilds clean,
+  memory essentially unchanged (44.7% RAM / 31.2% Flash - parsed-struct
+  storage turned out no more expensive than the raw-text buffer it replaced).
+- **Not yet done**: end-to-end command propagation (XpressNet throttle
+  command reaching Ecos and back) and real-timing subscription lifecycle are
+  still the remaining Phase 4.6 items.
+
+---
+
+**2026-07-31 — Ecos-side validation: two real connection bugs found and fixed against a live Ecos**
+- **Trigger**: reverted the two temporary diagnostic aids left active from Phase 4.6's
+  XpressNet-only testing (`TEMP_SKIP_ECOS_CONNECT` in `ecos_interface.cpp`,
+  `XNetDEBUG`/`XNetSerial` in `libraries/XpressNetMaster/XpressNetMaster.h`, both
+  restored to the vendored/pre-diagnostic state) and flashed against a real,
+  reachable Ecos (`192.168.0.50:15471`) for the first time - Ecos had never
+  actually been connected to during any earlier session.
+- **Bug 1 - connection dropped in a ~10-second loop**: first flash showed
+  `Ecos TCP connected!` and a correct address-map reply (`DCC 24 → Ecos ID 1004`),
+  but then `Ecos heartbeat timeout` and a reconnect within seconds, repeating
+  indefinitely. Root cause: `updateConnectionStatus()`
+  (`ecos_interface.cpp` ~line 160) had a hardcoded "no data for 10 sec = dead
+  connection" watchdog, but `sendHeartbeat()` is only scheduled every
+  `ECOS_HEARTBEAT_INTERVAL` (30 sec, `config.h`) - the watchdog always fired
+  first, so the heartbeat mechanism could never keep a connection alive in
+  practice. This could never have surfaced before now since Ecos was never
+  actually connected during any prior test (Phase 3.2 was mock-only; Phase 4.6
+  deliberately disconnected it via `TEMP_SKIP_ECOS_CONNECT`).
+  **Fixed**: added `ECOS_MESSAGE_TIMEOUT` to `config.h`, defined as
+  `ECOS_HEARTBEAT_INTERVAL + 15000` (a comment documents why it must exceed the
+  heartbeat interval with margin) instead of a bare magic number, and switched
+  the watchdog check to use it.
+- **Bug 2 - the heartbeat command itself was rejected by Ecos**: with bug 1 fixed,
+  the connection survived past 10 seconds but the first heartbeat produced
+  `Ecos error response: 18 (internal error at 9)`. Root cause: `sendHeartbeat()`
+  sent `get(10, name)` - `ECOS_OBJECT_LOCOMOTIVE_MANAGER` (10) is a query
+  *category* used with `queryObjects(10, addr, name)` for enumeration, not an
+  addressable object with its own `name` property, so Ecos correctly rejected it.
+  **Fixed**: `sendHeartbeat()` now just calls the already-proven-working
+  `queryAddressMap()` (the same `queryObjects(10, addr, name)` call used at
+  connect time) instead of building a separate, invalid `get()` command - this
+  also means the address map now effectively refreshes every 30 sec instead of
+  only every 10 min, a harmless side benefit.
+- **Result, confirmed on real hardware**: reflashed and monitored ~90 seconds
+  (three full heartbeat cycles at 15:22:18/15:22:48/15:23:18, each exactly 30s
+  apart) - `Ecos=Connected` held continuously the whole window, each heartbeat
+  got a clean address-map reply, zero disconnects or error responses. Native
+  suite still 91/91 passing; `env:debug` rebuilds clean (44.7% RAM / 31.2% Flash,
+  unchanged).
+- **Not yet done**: end-to-end command propagation (XpressNet throttle command
+  reaching Ecos and back, Ecos-side changes reaching XpressNet) and real-timing
+  subscription lifecycle (5-min inactivity expiry) are still unverified - next
+  steps for closing out Phase 4.6.
+
+---
+
 **2026-07-30 — XpressNet drive commands confirmed working end-to-end (root cause: missing 14/27/28-speed-step handlers)**
 - **Trigger**: continuing the 2026-07-29 RX-path investigation, enabled the
   XpressNetMaster library's built-in `XNetDEBUG` raw-byte logging

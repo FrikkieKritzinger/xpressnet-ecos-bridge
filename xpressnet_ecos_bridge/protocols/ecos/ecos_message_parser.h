@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include "../../definitions.h"
+#include "../../config.h"
 
 // ============================================================================
 // MESSAGE STRUCTURES
@@ -82,6 +83,16 @@ public:
     bool processByte(uint8_t byte, EcosReply& reply);
 
     /**
+     * After processByte() returns true, a block with more than one content
+     * line (e.g. a queryObjects reply enumerating several locomotives) has
+     * additional parsed entries queued beyond the one already written into
+     * processByte()'s `reply` output. Call this in a loop right after a true
+     * return to drain them - each call yields the next queued entry.
+     * @return true if an entry was written into `reply`, false once drained
+     */
+    bool getNextQueuedReply(EcosReply& reply);
+
+    /**
      * Reset the parser to initial state (useful after error or reconnect)
      */
     void reset();
@@ -90,7 +101,7 @@ public:
      * Get current buffer state (for debugging)
      */
     int getLineBufferLength() const { return line_buffer_index; }
-    int getBlockBufferLength() const { return block_line_count; }
+    int getBlockBufferLength() const { return block_reply_count; }
 
 private:
     // ========================================================================
@@ -98,7 +109,12 @@ private:
     // ========================================================================
 
     static const int MAX_LINE_LENGTH = 256;  // Max bytes per line
-    static const int MAX_BLOCK_LINES = 20;   // Max lines per <REPLY>/<EVENT> block
+
+    // One parsed entry per content line in a block. Sized to MAX_ECOS_OBJECTS
+    // (config.h) - the same cap the address map itself uses - since a
+    // queryObjects reply enumerates every locomotive Ecos knows about in one
+    // block, and an arbitrary smaller cap would silently drop real locos.
+    static const int MAX_BLOCK_REPLIES = MAX_ECOS_OBJECTS;
 
     char line_buffer[MAX_LINE_LENGTH];
     uint16_t line_buffer_index;
@@ -107,19 +123,16 @@ private:
     // BLOCK-LEVEL ACCUMULATION
     // ========================================================================
 
-    struct BlockLine {
-        char data[MAX_LINE_LENGTH];
-    };
-
-    BlockLine block_lines[MAX_BLOCK_LINES];  // Lines in current block
-    uint16_t block_line_count;               // Number of lines accumulated
-    bool block_in_progress;                  // True if <REPLY> or <EVENT> seen
-
-    enum BlockType {
-        BLOCK_NONE = 0,
-        BLOCK_REPLY = 1,
-        BLOCK_EVENT = 2
-    } block_type;
+    // Content lines are parsed immediately as they arrive (not stored as raw
+    // text) - each becomes its own EcosReply entry. At <END>, entry [0] is
+    // handed back via processByte()'s output param and any remaining entries
+    // stay here for getNextQueuedReply() to drain.
+    EcosReply block_replies[MAX_BLOCK_REPLIES];
+    uint16_t block_reply_count;        // Entries parsed so far in this block
+    uint16_t block_reply_read_index;   // Next entry getNextQueuedReply() will hand out
+    bool block_in_progress;            // True if <REPLY> or <EVENT> seen
+    uint16_t block_header_object_id;   // From "<EVENT NNN>" marker; fallback object_id
+                                        // for entries whose content line had none
 
     // ========================================================================
     // HELPER METHODS
@@ -130,11 +143,6 @@ private:
      * @return true if block is complete and ready to parse
      */
     bool processLine(const char* line, EcosReply& reply);
-
-    /**
-     * Parse all lines in the accumulated block into reply structure
-     */
-    void parseBlock(EcosReply& reply);
 
     /**
      * Parse a single object property line like "1000 speed[64] direction[1]"

@@ -34,11 +34,16 @@ static const char* ECOS_MULTILINE_RESPONSE =
     "<REPLY id 100 speed[64] direction[1] func[0,0]>\n"
     "<END>";
 
-// Query objects response (address map discovery)
+// Query objects response (address map discovery) - real wire shape: one
+// <REPLY> marker, then one content line per locomotive Ecos knows about,
+// then a single <END>. Confirmed against real hardware 2026-07-31: a block
+// like this can legitimately carry a dozen-plus entries.
 static const char* ECOS_REPLY_QUERY_OBJECTS =
-    "<REPLY id 10 name[Loco_100] addr[100]>\n"
-    "<REPLY id 11 name[Loco_50] addr[50]>\n"
-    "<END>";
+    "<REPLY queryObjects(10, addr, name)>\n"
+    "1000 addr[100] name[Loco_100]\n"
+    "1001 addr[50] name[Loco_50]\n"
+    "1002 addr[5452] name[Loco_5452]\n"
+    "<END 0 (OK)>\n";
 
 // Set speed response (acknowledge)
 static const char* ECOS_REPLY_SET_SPEED = "<REPLY id 100 speed[80]>";

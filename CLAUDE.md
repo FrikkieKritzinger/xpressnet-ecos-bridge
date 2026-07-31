@@ -58,6 +58,13 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   (heartbeat/watchdog timing mismatch, invalid heartbeat command) - see
   [docs/CHANGELOG.md](docs/CHANGELOG.md). Connection held stable across multiple
   30-second heartbeat cycles with no drops.
+- **Address map fixed for multi-locomotive layouts (2026-07-31)**: the real
+  Ecos test setup has 15 locomotives, and `queryObjects` was silently
+  collapsing all of them down to just the last one (`EcosMessageParser`
+  bug), compounded by `addAddressMapEntry()` never updating existing entries
+  (would have filled `MAX_ECOS_OBJECTS` within minutes once heartbeat started
+  re-querying every 30s). Both fixed and confirmed on hardware - all 15 locos
+  now populate the map correctly and stay stable across repeated heartbeats.
 - **Not yet done**: end-to-end command propagation (XpressNet throttle command
   reaching Ecos, Ecos-side changes reaching XpressNet) and subscription lifecycle
   (new loco → subscribe, 5-minute inactivity → unsubscribe) under real timing.

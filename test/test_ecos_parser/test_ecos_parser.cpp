@@ -307,22 +307,22 @@ void test_ecos_line_too_long_is_discarded(void) {
     TEST_ASSERT_EQUAL_UINT8(64, reply.speed);
 }
 
-void test_ecos_block_with_too_many_lines_discards_oldest(void) {
-    // MAX_BLOCK_LINES is 20; a block with more property lines than that
-    // must discard the oldest rather than overflow, and still complete
-    // cleanly on <END>.
+void test_ecos_block_with_too_many_lines_drops_excess(void) {
+    // MAX_BLOCK_REPLIES matches MAX_ECOS_OBJECTS (config.h) - a block with
+    // more content lines than that must drop the excess rather than
+    // overflow, and still complete cleanly on <END> with whatever fit.
     EcosMessageParser parser;
     EcosReply reply;
     bool completed = false;
 
-    const char* start = "<REPLY get(100, view)>\n";
+    const char* start = "<REPLY queryObjects(10, addr, name)>\n";
     for (const char* c = start; *c != '\0'; c++) {
         parser.processByte(*c, reply);
     }
 
-    for (int i = 0; i < 25; i++) {
+    for (int i = 0; i < MAX_ECOS_OBJECTS + 5; i++) {
         char line[32];
-        snprintf(line, sizeof(line), "100 func[%d,1]\n", i % 32);
+        snprintf(line, sizeof(line), "%d addr[%d]\n", 2000 + i, i);
         for (const char* c = line; *c != '\0'; c++) {
             parser.processByte(*c, reply);
         }
@@ -337,6 +337,47 @@ void test_ecos_block_with_too_many_lines_discards_oldest(void) {
     }
 
     TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT16(2000, reply.object_id);  // first entry kept, not dropped
+
+    int drained = 0;
+    while (parser.getNextQueuedReply(reply)) {
+        drained++;
+    }
+    TEST_ASSERT_EQUAL_INT(MAX_ECOS_OBJECTS - 1, drained);  // total entries == MAX_ECOS_OBJECTS
+}
+
+void test_ecos_parse_query_objects_multiple_locos(void) {
+    // Regression test for a real bug found against hardware (2026-07-31):
+    // queryObjects() returns one content line per locomotive in a single
+    // block. The parser must surface every one via getNextQueuedReply(),
+    // not silently collapse them down to just the last line.
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    for (const char* c = ECOS_REPLY_QUERY_OBJECTS; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT16(1000, reply.object_id);
+    TEST_ASSERT_EQUAL_UINT16(100, reply.dcc_address);
+
+    EcosReply second;
+    TEST_ASSERT_TRUE(parser.getNextQueuedReply(second));
+    TEST_ASSERT_EQUAL_UINT16(1001, second.object_id);
+    TEST_ASSERT_EQUAL_UINT16(50, second.dcc_address);
+
+    EcosReply third;
+    TEST_ASSERT_TRUE(parser.getNextQueuedReply(third));
+    TEST_ASSERT_EQUAL_UINT16(1002, third.object_id);
+    TEST_ASSERT_EQUAL_UINT16(5452, third.dcc_address);
+
+    EcosReply none;
+    TEST_ASSERT_FALSE(parser.getNextQueuedReply(none));  // fully drained
 }
 
 // ============================================================================
@@ -444,7 +485,8 @@ int main(void) {
     RUN_TEST(test_ecos_stray_content_line_before_block_ignored);
     RUN_TEST(test_ecos_bare_newline_ignored);
     RUN_TEST(test_ecos_line_too_long_is_discarded);
-    RUN_TEST(test_ecos_block_with_too_many_lines_discards_oldest);
+    RUN_TEST(test_ecos_block_with_too_many_lines_drops_excess);
+    RUN_TEST(test_ecos_parse_query_objects_multiple_locos);
 
     RUN_TEST(test_ecos_parse_speed_value);
     RUN_TEST(test_ecos_parse_direction_value);

@@ -16,18 +16,26 @@
 // ============================================================================
 
 EcosMessageParser::EcosMessageParser()
-    : line_buffer_index(0), block_line_count(0), block_in_progress(false),
-      block_type(BLOCK_NONE) {
+    : line_buffer_index(0), block_reply_count(0), block_reply_read_index(0),
+      block_in_progress(false), block_header_object_id(0) {
     memset(line_buffer, 0, sizeof(line_buffer));
-    memset(block_lines, 0, sizeof(block_lines));
 }
 
 void EcosMessageParser::reset() {
     line_buffer_index = 0;
-    block_line_count = 0;
+    block_reply_count = 0;
+    block_reply_read_index = 0;
     block_in_progress = false;
-    block_type = BLOCK_NONE;
+    block_header_object_id = 0;
     memset(line_buffer, 0, sizeof(line_buffer));
+}
+
+bool EcosMessageParser::getNextQueuedReply(EcosReply& reply) {
+    if (block_reply_read_index >= block_reply_count) {
+        return false;
+    }
+    reply = block_replies[block_reply_read_index++];
+    return true;
 }
 
 // ============================================================================
@@ -92,7 +100,6 @@ bool EcosMessageParser::processLine(const char* line, EcosReply& reply) {
         // Starting a new <REPLY> block
         resetBlock();
         block_in_progress = true;
-        block_type = BLOCK_REPLY;
         reply.kind = EcosReply::REPLY;
         return false;
     }
@@ -101,9 +108,8 @@ bool EcosMessageParser::processLine(const char* line, EcosReply& reply) {
         // Starting a new <EVENT> block
         resetBlock();
         block_in_progress = true;
-        block_type = BLOCK_EVENT;
         reply.kind = EcosReply::EVENT;
-        reply.object_id = ecosParseEventObjectId(line);
+        block_header_object_id = ecosParseEventObjectId(line);
         return false;
     }
 
@@ -115,8 +121,8 @@ bool EcosMessageParser::processLine(const char* line, EcosReply& reply) {
             return false;
         }
 
-        // End of block — parse accumulated lines and return reply
-        reply.end_code = ecosParseEndCode(line);
+        int16_t end_code = ecosParseEndCode(line);
+        char end_text[32] = {0};
 
         // Extract end text (e.g., "OK" or "ERR")
         const char* p = line;
@@ -124,33 +130,54 @@ bool EcosMessageParser::processLine(const char* line, EcosReply& reply) {
         if (*p == '(') {
             p++;
             int i = 0;
-            while (*p && *p != ')' && i < (int)sizeof(reply.end_text) - 1) {
-                reply.end_text[i++] = *p++;
+            while (*p && *p != ')' && i < (int)sizeof(end_text) - 1) {
+                end_text[i++] = *p++;
             }
-            reply.end_text[i] = '\0';
+            end_text[i] = '\0';
         }
 
-        // Parse all accumulated block lines
-        parseBlock(reply);
+        // Stamp the shared block-level fields (kind/end_code/end_text) onto
+        // every entry parsed so far, and fill in the <EVENT NNN> header's
+        // object ID as a fallback for any entry whose own content line
+        // didn't carry one.
+        for (uint16_t i = 0; i < block_reply_count; i++) {
+            block_replies[i].kind = reply.kind;
+            block_replies[i].end_code = end_code;
+            strncpy(block_replies[i].end_text, end_text, sizeof(block_replies[i].end_text) - 1);
+            if (block_replies[i].object_id == 0) {
+                block_replies[i].object_id = block_header_object_id;
+            }
+        }
 
-        // Reset for next block
-        resetBlock();
+        if (block_reply_count == 0) {
+            // No content lines (e.g. a bare set() acknowledgment, or an
+            // error with no data) - still surface something so the caller
+            // sees the error/ack and its last-received-data watchdog resets.
+            reply.end_code = end_code;
+            strncpy(reply.end_text, end_text, sizeof(reply.end_text) - 1);
+            reply.object_id = block_header_object_id;
+        } else {
+            reply = block_replies[0];
+            block_reply_read_index = 1;  // remaining entries wait for getNextQueuedReply()
+        }
+
+        block_in_progress = false;
         return true;  // Block complete!
     }
 
-    // Regular content line — accumulate if block in progress
+    // Regular content line — parse immediately and queue if block in progress
     if (block_in_progress) {
-        if (block_line_count < MAX_BLOCK_LINES) {
-            strncpy(block_lines[block_line_count].data, line, MAX_LINE_LENGTH - 1);
-            block_lines[block_line_count].data[MAX_LINE_LENGTH - 1] = '\0';
-            block_line_count++;
+        if (block_reply_count < MAX_BLOCK_REPLIES) {
+            EcosReply entry;
+            parsePropertyLine(line, entry);
+            block_replies[block_reply_count++] = entry;
             return false;
         } else {
-            // Block too many lines — discard oldest and add new
-            DEBUG_ECOS_PRINTF("Ecos: Block buffer full (> %d lines)\n", MAX_BLOCK_LINES);
-            memmove(&block_lines[0], &block_lines[1],
-                   sizeof(BlockLine) * (MAX_BLOCK_LINES - 1));
-            strncpy(block_lines[MAX_BLOCK_LINES - 1].data, line, MAX_LINE_LENGTH - 1);
+            // Defensive backstop only - MAX_BLOCK_REPLIES matches
+            // MAX_ECOS_OBJECTS, comfortably above any real layout's
+            // locomotive count. Drop the line rather than losing an
+            // already-queued entry to a memmove.
+            DEBUG_ECOS_PRINTF("Ecos: Block buffer full (> %d entries), dropping line\n", MAX_BLOCK_REPLIES);
             return false;
         }
     }
@@ -162,13 +189,6 @@ bool EcosMessageParser::processLine(const char* line, EcosReply& reply) {
 // ============================================================================
 // BLOCK PARSING
 // ============================================================================
-
-void EcosMessageParser::parseBlock(EcosReply& reply) {
-    // Parse all accumulated lines in the block
-    for (uint16_t i = 0; i < block_line_count; i++) {
-        parsePropertyLine(block_lines[i].data, reply);
-    }
-}
 
 void EcosMessageParser::parsePropertyLine(const char* line, EcosReply& reply) {
     if (!line || strlen(line) == 0) {
@@ -291,8 +311,8 @@ void EcosMessageParser::discardLine() {
 }
 
 void EcosMessageParser::resetBlock() {
-    block_line_count = 0;
+    block_reply_count = 0;
+    block_reply_read_index = 0;
     block_in_progress = false;
-    block_type = BLOCK_NONE;
-    memset(block_lines, 0, sizeof(block_lines));
+    block_header_object_id = 0;
 }

@@ -106,8 +106,13 @@ void EcosInterface::update() {
             EcosReply reply;
 
             if (parser && parser->processByte(byte, reply)) {
-                // Complete message parsed
+                // Complete message parsed - a block enumerating multiple
+                // objects (e.g. queryObjects listing every locomotive) queues
+                // additional entries beyond this first one; drain them all.
                 handleReply(reply);
+                while (parser->getNextQueuedReply(reply)) {
+                    handleReply(reply);
+                }
             }
 
             yield();  // Let ESP8266 WiFi stack run
@@ -310,6 +315,17 @@ uint16_t EcosInterface::findEcosObjectId(uint16_t dcc_address) const {
 }
 
 bool EcosInterface::addAddressMapEntry(uint16_t dcc_address, uint16_t ecos_id) {
+    // Upsert: queryObjects() now re-runs on every heartbeat (30s), so the
+    // same locomotive list arrives repeatedly - update in place instead of
+    // appending duplicates, which would otherwise fill MAX_ECOS_OBJECTS
+    // within a few heartbeat cycles on a layout with many locos.
+    for (uint16_t i = 0; i < address_map_count; i++) {
+        if (address_map[i].dcc_address == dcc_address) {
+            address_map[i].ecos_id = ecos_id;
+            return true;
+        }
+    }
+
     if (address_map_count >= MAX_ECOS_OBJECTS) {
         return false;  // Map full
     }
