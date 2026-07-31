@@ -156,8 +156,8 @@ void EcosInterface::updateConnectionStatus() {
                 address_map_count = 0;  // Address map stale, will refresh on next connect
                 DEBUG_ECOS_PRINTF("Ecos TCP disconnected\n");
             } else {
-                // Check for heartbeat timeout (no data for > 10 sec)
-                if (now - last_message_time > 10000) {
+                // Check for heartbeat timeout (no data for > ECOS_MESSAGE_TIMEOUT)
+                if (now - last_message_time > ECOS_MESSAGE_TIMEOUT) {
                     DEBUG_ECOS_PRINTF("Ecos heartbeat timeout\n");
                     wifi_client.stop();
                     current_status = ComponentStatus::DISCONNECTED;
@@ -178,21 +178,7 @@ void EcosInterface::updateConnectionStatus() {
     }
 }
 
-// TEMP: wifi_client.connect() blocks for the full TCP connect timeout (~5s)
-// when Ecos is unreachable, starving xnet.update() of loop time for that
-// whole window - this was masking/disrupting XpressNet RX-path testing.
-// Skip the actual connect attempt while isolating that test. Remove this
-// guard (and the #define above it) once XpressNet is validated and Ecos
-// testing resumes.
-#define TEMP_SKIP_ECOS_CONNECT 1
-
 void EcosInterface::attemptTcpConnect() {
-#if TEMP_SKIP_ECOS_CONNECT
-    DEBUG_ECOS_PRINTF("Ecos TCP connect skipped (TEMP_SKIP_ECOS_CONNECT)\n");
-    current_status = ComponentStatus::DISCONNECTED;
-    return;
-#endif
-
     DEBUG_ECOS_PRINTF("Attempting TCP connect to %s:%u...\n", ECOS_IP, ECOS_PORT);
 
     if (wifi_client.connect(ECOS_IP, ECOS_PORT)) {
@@ -242,15 +228,13 @@ void EcosInterface::sendHeartbeat() {
         return;
     }
 
-    // Send a simple get() query to keep connection alive
-    // Using get(10, name) — queries the locomotive manager's name (cheap, always succeeds)
-    char cmd_buffer[80];
-    uint16_t len = ecosBuildGetCmd(cmd_buffer, sizeof(cmd_buffer), ECOS_OBJECT_LOCOMOTIVE_MANAGER, "name");
-
-    if (len > 0) {
-        wifi_client.write((uint8_t*)cmd_buffer, len);
-        DEBUG_ECOS_PRINTF("Heartbeat sent\n");
-    }
+    // ECOS_OBJECT_LOCOMOTIVE_MANAGER (10) is a query category, not an addressable
+    // object - get(10, name) returns a real Ecos error ("internal error"), confirmed
+    // against real hardware. queryObjects(10, addr, name) is the already-proven-working
+    // command for that category, so reuse it as the keep-alive - it doubles as an
+    // incidental address-map refresh between the 10-minute scheduled ones.
+    DEBUG_ECOS_PRINTF("Heartbeat: ");
+    queryAddressMap();
 }
 
 // ============================================================================

@@ -69,11 +69,8 @@
 
 //--------------------------------------------------------------------------------------------
 //only for Debug:
-// TEMP: enabled to see raw received bytes at the software level, bypassing
-// checksum/message-recognition entirely - confirms whether bytes are really
-// reaching the firmware at all. Revert to commented-out once RX diagnosis is done.
-#define XNetSerial Serial	//Debugging Serial
-#define XNetDEBUG		//Put out the messages
+//#define XNetSerial Serial	//Debugging Serial
+//#define XNetDEBUG		//Put out the messages
 //#define XNetDEBUGTime	//Put out the microseconds
 
 

@@ -29,9 +29,13 @@
 >    fixed with a minimal wire-protocol echo (does not yet force locos to actually
 >    stop - see Future Improvements).
 >
-> **Still active, not yet reverted**: `XNetDEBUG` raw-byte logging and
-> `TEMP_SKIP_ECOS_CONNECT` (Ecos deliberately disconnected throughout that session's
-> testing). **Next**: revert both and validate against a real, connected Ecos - see
+> **2026-07-31 update**: both temporary diagnostic aids reverted, and the bridge
+> connected to a real Ecos for the first time. Two real connection bugs found and
+> fixed (a heartbeat/watchdog timing mismatch that dropped the connection every
+> ~10s, and an invalid heartbeat command Ecos was rejecting) - connection now
+> confirmed stable across multiple heartbeat cycles. Full diagnosis in
+> [docs/CHANGELOG.md](docs/CHANGELOG.md). **Next**: end-to-end command
+> propagation (throttle ↔ Ecos) and real-timing subscription lifecycle - see
 > Phase 4.6 below.
 
 ---
@@ -49,10 +53,14 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   direction, all function groups, 128-step declaration to the throttle, and
   STOP-button track-power acknowledgment all confirmed working against a real
   Roco MultiMaus.
-- **Not yet done**: Ecos-side validation against a real, connected Ecos.
-  `TEMP_SKIP_ECOS_CONNECT` (in `ecos_interface.cpp`) and `XNetDEBUG` (in
-  `libraries/XpressNetMaster/XpressNetMaster.h`) are both still active from
-  the isolated XpressNet testing and need reverting first.
+- **Ecos connection confirmed stable (2026-07-31)**: `TEMP_SKIP_ECOS_CONNECT` and
+  `XNetDEBUG` reverted; connected to the real Ecos and found/fixed two real bugs
+  (heartbeat/watchdog timing mismatch, invalid heartbeat command) - see
+  [docs/CHANGELOG.md](docs/CHANGELOG.md). Connection held stable across multiple
+  30-second heartbeat cycles with no drops.
+- **Not yet done**: end-to-end command propagation (XpressNet throttle command
+  reaching Ecos, Ecos-side changes reaching XpressNet) and subscription lifecycle
+  (new loco → subscribe, 5-minute inactivity → unsubscribe) under real timing.
 - **Deliberately deferred**: bus-wide emergency stop only acknowledges on the
   wire now - it does not yet force any locomotives to actually stop moving
   (see Future Improvements).
@@ -95,15 +103,17 @@ if that happens, run `.pio/build/native/program.exe` directly for the ground tru
 
 Completed: manual throttle test checklist (speed/direction/function/128-step/STOP,
 all confirmed 2026-07-30), firmware flashing, WiFi/Ecos credential confirmation
-against the real network. Full detail: [docs/CHANGELOG.md](docs/CHANGELOG.md).
+against the real network, reverting the temporary diagnostic aids, and
+confirming a stable real Ecos TCP connection (2026-07-31, two bugs found and
+fixed along the way). Full detail: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
-**Remaining**: revert `TEMP_SKIP_ECOS_CONNECT` (`ecos_interface.cpp`) and
-`XNetDEBUG` (`XpressNetMaster.h`), then validate against a real, connected Ecos:
-confirm XpressNet commands reach Ecos correctly, Ecos-side changes propagate
-back to XpressNet, and subscription lifecycle (new loco → subscribe, 5-minute
-inactivity → unsubscribe) works against real timing, not mocked time. (Bus-wide
-emergency stop still only acknowledges on the wire, not actually stopping locos -
-see Future Improvements - so it's not part of this checklist.)
+**Remaining**: confirm XpressNet commands reach Ecos correctly end-to-end (move
+a throttle loco and see it reflected in Ecos), confirm Ecos-side changes
+propagate back to XpressNet, and confirm subscription lifecycle (new loco →
+subscribe, 5-minute inactivity → unsubscribe) works against real timing, not
+mocked time. (Bus-wide emergency stop still only acknowledges on the wire, not
+actually stopping locos - see Future Improvements - so it's not part of this
+checklist.)
 
 ### After Phase 4.6
 

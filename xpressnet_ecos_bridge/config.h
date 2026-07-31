@@ -72,6 +72,9 @@
     // Timeouts and intervals
     #define ECOS_TIMEOUT                5000            // TCP connection timeout (ms)
     #define ECOS_HEARTBEAT_INTERVAL     30000           // Heartbeat query every X ms
+    // Must exceed ECOS_HEARTBEAT_INTERVAL with margin for the round trip, or the
+    // "no data" watchdog trips before the heartbeat ever gets a reply back.
+    #define ECOS_MESSAGE_TIMEOUT        (ECOS_HEARTBEAT_INTERVAL + 15000)  // No-data disconnect threshold (ms)
     #define ECOS_RECONNECT_INTERVAL     10000           // Backoff retry interval (ms)
     #define ECOS_ADDRESS_MAP_REFRESH_INTERVAL 600000    // Refresh loco list every 10 minutes
 
