@@ -46,7 +46,10 @@ uint16_t ecosBuildSetSpeedCmd(char* buffer, uint16_t buffer_size,
 uint16_t ecosBuildSetDirectionCmd(char* buffer, uint16_t buffer_size,
                                  uint16_t object_id, uint8_t direction) {
     if (!buffer || buffer_size < 60) return 0;
-    int len = snprintf(buffer, buffer_size, "set(%u, direction[%u])\n", object_id, (uint16_t)direction);
+    // Real Ecos property is "dir", not "direction" - "direction" is
+    // rejected as "unknown option" (confirmed against real hardware
+    // 2026-07-31).
+    int len = snprintf(buffer, buffer_size, "set(%u, dir[%u])\n", object_id, (uint16_t)direction);
     return (len > 0) ? len : 0;
 }
 

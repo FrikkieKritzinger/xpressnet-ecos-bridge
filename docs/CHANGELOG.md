@@ -53,6 +53,91 @@ here. Newest entries first.
 
 ---
 
+**2026-07-31 — Real Ecos/RocoNet protocol docs obtained; dir property confirmed, a well-intentioned busy-slot fix tried and reverted**
+- **Trigger**: after the subscription/status/TX-blocking fixes, user reported
+  the reverse direction still had problems: XpressNet→Ecos speed and direction
+  now echoed correctly, but manual changes on Ecos didn't visibly reach the
+  MultiMaus - its loco icon flashed "stolen" (another controller has it) but
+  the displayed values never updated, and reselecting the loco didn't clear
+  the flash either. User then provided the official ESU Ecos PC-Interface
+  spec (`docs/ecos_pc_interface3.pdf`) and the Roco RocoNet interface 10785
+  spec (`docs/Protocol roconet-v1.6.1.pdf`).
+- **Ecos spec confirms real protocol details**: section 7.11 (Listenobjekt
+  Lok) confirms `get(id, dir)`/`set(id, dir[val])` is the real property
+  (matching the 2026-07-31 hardware-discovered fix earlier today) and
+  documents the full Control/View registration model exactly as implemented
+  (`request(id,view|control[,force])`/`release`) - confirming
+  `subscribeToLoco()`'s existing `request(view)`+`request(control)` calls are
+  correctly shaped, modulo not passing `force` (not changed - see below).
+  The RocoNet doc turned out to document a different product (the Roco 10785
+  PC↔RocoNet interface: CV programming, feedback modules) and doesn't cover
+  MultiMaus's LocoInfo/busy-slot semantics at all, so it neither confirmed
+  nor refuted the busy-slot theory below.
+- **Spec vs. hardware contradiction, resolved in favor of hardware**: the
+  Ecos spec's `dir` field is documented as `1=rückwärts` (1=reverse) -
+  opposite of this bridge's internal/DCC/XpressNet convention
+  (`direction=1=forward`). Implemented an inversion for both directions
+  (`ecos_message_parser.cpp`'s `dir` parsing, `EcosInterface::sendSpeedCommand()`'s
+  outbound call), but the user immediately flagged that the *already-tested,
+  un-inverted* code had shown matching direction arrows between the MultiMaus
+  and Ecos in the earlier successful round-trip test. Trusted the confirmed
+  empirical result over the spec passage and reverted the inversion in both
+  places, with a comment explaining why: most likely this specific
+  loco/decoder has its own reverse-direction compensation configured in Ecos
+  for physical motor wiring, which a blanket protocol-level inversion would
+  fight rather than respect. Flagged as something to revisit only if a loco
+  *without* that per-decoder compensation shows a real mismatch.
+- **Busy-slot fix attempted for the "stolen but frozen" MultiMaus display,
+  then reverted after it broke bidirectional propagation**: traced the
+  "stolen" flash back to the vendored XpressNetMaster library's real
+  multi-controller mechanism - `SetLocoInfo()`/`SetLocoInfoMM()` compute a
+  "busy" bit from `SlotLokUse[UserOps]` (comment: "B=0 free; B=1 controlled
+  by another Device"), and the library exposes a public `ReqLocoBusy(Adr)`
+  specifically documented as "Slot 0 is reserved for non XpressNet Device" -
+  i.e. the intended mechanism for a source like Ecos to properly claim a
+  loco. Added `ProtocolInterface::claimLocoControl()` (no-op default,
+  matching the existing `subscribeToLoco`/`unsubscribeFromLoco` pattern),
+  overridden in `XpressNetInterface` to call `xnet.ReqLocoBusy()`, invoked
+  from `CommandRouter::broadcastCommand()`'s Ecos-sourced branch. Flashed and
+  tested: the busy claim fired correctly on every Ecos update, and the
+  MultiMaus *did* successfully reconnect and resume sending real commands
+  after a claim+reclaim cycle - the handover itself worked correctly for
+  about 3-4 iterations, then stopped, and the user reported Ecos no longer
+  reflected the MultiMaus's settings after reclaiming - a real regression,
+  and one whose "works for a few cycles, then breaks" shape fits a
+  cumulative-corruption theory rather than an immediate, deterministic
+  failure. Root-caused (from the library source, not yet independently
+  verified against real behavior beyond this one regression): `ReqLocoBusy()` parks
+  the claim in `SlotLokUse[0]`, but the library's own `SetBusy(slot)` cleanup
+  loop that runs when a throttle re-claims a loco only scans slots 1-31
+  (`for (byte s = 1; s < 32; s++)`) - slot 0 is never cleared, leaving the
+  library's internal bookkeeping in an inconsistent state (both the
+  MultiMaus's real slot and the reserved slot 0 claiming the same address)
+  after a reclaim. Given the original bidirectional propagation was already
+  confirmed solid before this change, and the "frozen display while flagged
+  busy" behavior may simply be intentional Lenz/Roco throttle UX (many
+  real command-station-driven throttles deliberately freeze rather than
+  redraw values while another controller holds a loco, to avoid showing
+  numbers that might not be trustworthy) rather than a bug in this bridge,
+  reverted `claimLocoControl()` entirely (`interface_base.h`,
+  `xpressnet_interface.h/.cpp`, `command_router.cpp`) rather than risk the
+  regression for an unconfirmed cosmetic improvement.
+- **Result, confirmed on real hardware after the revert**: a clean multi-cycle
+  round trip - MultiMaus drives loco 5452 (broadcasts to Ecos correctly),
+  Ecos then drives it through several updates including surviving a bus
+  timeout (broadcasts to XpressNet correctly, matching the earlier TX-fix),
+  MultiMaus reclaims and drives again including a direction change
+  (broadcasts to Ecos correctly), Ecos drives it once more (broadcasts back
+  again) - no drops, no regressions. Native suite: 93/93 passing throughout;
+  `env:debug` rebuilds clean each time.
+- **Not pursued further**: the "MultiMaus display frozen while flagged busy"
+  UX question remains open but is not being treated as a confirmed bug -
+  core bidirectional command propagation (the actual Phase 4.6 goal) is
+  solid, which takes priority over refining conflict-indicator cosmetics on
+  one specific throttle.
+
+---
+
 **2026-07-31 — First real end-to-end XpressNet→Ecos test: physical RX fault recurrence, then two more real bugs found and fixed**
 - **Trigger**: with the address map now correctly listing loco 5452 (the
   MultiMaus's loco), attempted the first real end-to-end test - move the

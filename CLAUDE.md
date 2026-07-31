@@ -65,19 +65,32 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   (would have filled `MAX_ECOS_OBJECTS` within minutes once heartbeat started
   re-querying every 30s). Both fixed and confirmed on hardware - all 15 locos
   now populate the map correctly and stay stable across repeated heartbeats.
-- **XpressNet → Ecos end-to-end propagation confirmed (2026-07-31)**: a real
-  MultiMaus speed sweep correctly reached Ecos throughout (speed, direction).
-  Getting here required fixing a recurring physical RX-path fault (same
-  MAX485 fragility as 2026-07-29 - fixed by reseating/wiggling the module,
-  no code change) plus two real software bugs: `subscribed_to_ecos` was
-  never set by the XpressNet-initiated path (caused "requesting Ecos
-  subscription" to fire on every single command instead of once), and
-  `markBusActivity()` could never recover the status display from
-  `DISCONNECTED` back to `CONNECTED` once it had timed out - see
-  [docs/CHANGELOG.md](docs/CHANGELOG.md) for full diagnosis.
-- **Not yet done**: Ecos-side changes propagating back to XpressNet, and the
-  5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min idle →
-  unsubscribe) under real timing.
+- **Bidirectional XpressNet ↔ Ecos propagation confirmed robust (2026-07-31)**:
+  a real MultiMaus speed sweep correctly reaches Ecos, and Ecos-side changes
+  correctly reach the MultiMaus back, across multiple claim/reclaim cycles
+  and surviving bus timeouts. Getting here required fixing a recurring
+  physical RX-path fault (same MAX485 fragility as 2026-07-29 - fixed by
+  reseating/wiggling the module), plus several real software bugs:
+  `subscribed_to_ecos` never set by the XpressNet-initiated path (resubscribe
+  spam), `markBusActivity()` never recovering the status display from
+  `DISCONNECTED`, `XpressNetInterface::sendSpeedCommand()`/`sendFunctionCommand()`
+  silently refusing to transmit once 5s had passed without hearing a
+  throttle, and `EcosInterface` never actually sending direction changes at
+  all (plus using the wrong property name, `direction` instead of the real
+  `dir`, confirmed against the official ESU protocol spec now in
+  `docs/ecos_pc_interface3.pdf`). A follow-up attempt to fix the MultiMaus's
+  "stolen" conflict icon not refreshing its displayed values (via the
+  library's `ReqLocoBusy()`) was tried, found to break bidirectional
+  propagation after a few claim/reclaim cycles, and reverted - see
+  [docs/CHANGELOG.md](docs/CHANGELOG.md) for full diagnosis of everything
+  above.
+- **Known, deliberately not fixed**: the MultiMaus's own display doesn't
+  visually refresh speed/direction while its "stolen" (in-use-elsewhere)
+  icon is flashing - likely intentional Lenz/Roco throttle UX rather than a
+  bug in this bridge. Not pursued further after the fix attempt above proved
+  net-negative for the actually-important goal (command propagation).
+- **Not yet done**: the 5-minute subscription-lifecycle timeout (new loco →
+  subscribe, 5 min idle → unsubscribe) under real timing.
 - **Deliberately deferred**: bus-wide emergency stop only acknowledges on the
   wire now - it does not yet force any locomotives to actually stop moving
   (see Future Improvements).
@@ -536,6 +549,9 @@ rather than completed, since it served no design purpose.
 - **`docs/01_DESIGN_DOCUMENT.md`**: Overall architecture and Phase 1-2 specification
 - **`docs/02_PHASE_3_2_ECOS_DESIGN.md`**: Ecos LAN protocol (TCP/text, echo prevention, subscription model)
 - **`docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`**: Complete Phase 4 testing plan (12 steps, frameworks, success criteria)
+- **`docs/ecos_pc_interface3.pdf`**: Official ESU Ecos PC-Interface protocol spec (German) - the authoritative
+  source for real property names/commands (e.g. confirmed `dir` not `direction`) and the Control/View
+  registration model. Consult this before guessing at Ecos wire behavior.
 - **`docs/CHANGELOG.md`**: Dated development history - full detail behind every status line in this file
 
 ## Useful References

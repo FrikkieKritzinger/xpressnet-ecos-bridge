@@ -404,12 +404,13 @@ void test_ecos_parse_speed_value(void) {
 }
 
 void test_ecos_parse_direction_value(void) {
-    // Extract direction[1] from message
+    // Extract dir[1] from message - real Ecos property is "dir", not
+    // "direction" (confirmed against real hardware 2026-07-31).
     EcosMessageParser parser;
     EcosReply reply;
     bool completed = false;
 
-    const char* msg = "<REPLY get(100, view)>\n100 direction[1]\n<END 0 (OK)>\n";
+    const char* msg = "<REPLY get(100, view)>\n100 dir[1]\n<END 0 (OK)>\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
             completed = true;
@@ -428,7 +429,7 @@ void test_ecos_parse_multiple_values(void) {
     EcosReply reply;
     bool completed = false;
 
-    const char* msg = "<REPLY get(100, view)>\n100 speed[80] direction[0]\n<END 0 (OK)>\n";
+    const char* msg = "<REPLY get(100, view)>\n100 speed[80] dir[0]\n<END 0 (OK)>\n";
     for (const char* c = msg; *c != '\0'; c++) {
         if (parser.processByte(*c, reply)) {
             completed = true;

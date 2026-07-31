@@ -275,17 +275,23 @@ All commands end with `\n` (LF). All replies/events are framed by `<REPLY>`/`<EV
 
 → request(1000, view)
 ← <REPLY request(1000,view)>
-← 1000 speed[0] direction[1]
+← 1000 speed[0] dir[1]
 ← <END 0 (OK)>
 
 ← <EVENT 1000>
-← 1000 speed[64] direction[1]
+← 1000 speed[64] dir[1]
 ← <END 0 (OK)>
 
 → set(1000, speed[80])
 ← <REPLY set(1000, speed[80])>
 ← <END 0 (OK)>
 ```
+
+> **Corrected 2026-07-31**: the direction property is `dir`, not `direction` -
+> `direction` is rejected by real Ecos as "unknown option". This example
+> originally used the wrong (unverified) name; confirmed against real
+> hardware via `get(id)`, which dumps every real property name for a
+> locomotive object. See `docs/CHANGELOG.md`.
 
 **Key Points**:
 - Object IDs (e.g., 1000) are Ecos-internal, independent of DCC address

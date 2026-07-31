@@ -15,9 +15,11 @@
 // Simple get request reply (e.g., query loco status)
 // Real block shape: start marker (no id here - REPLY doesn't carry one),
 // then a property line with the object ID as its leading token, then <END>.
+// Property is "dir", not "direction" - "direction" is rejected by real
+// Ecos as "unknown option" (confirmed against real hardware 2026-07-31).
 static const char* ECOS_REPLY_SPEED_QUERY =
     "<REPLY get(100, view)>\n"
-    "100 speed[64] direction[1] func[0,0]\n"
+    "100 speed[64] dir[1] func[0,0]\n"
     "<END 0 (OK)>\n";
 
 // Event: Loco speed change (unsolicited update from Ecos)
@@ -25,13 +27,13 @@ static const char* ECOS_REPLY_SPEED_QUERY =
 // format "<EVENT 1000>" - no "id" keyword.
 static const char* ECOS_EVENT_SPEED_CHANGE =
     "<EVENT 101>\n"
-    "101 speed[90] direction[1] func[1,0]\n"
+    "101 speed[90] dir[1] func[1,0]\n"
     "<END 0 (OK)>\n";
 
 // Multiple lines (typical: request then reply)
 static const char* ECOS_MULTILINE_RESPONSE =
     "request(100, view)\n"
-    "<REPLY id 100 speed[64] direction[1] func[0,0]>\n"
+    "<REPLY id 100 speed[64] dir[1] func[0,0]>\n"
     "<END>";
 
 // Query objects response (address map discovery) - real wire shape: one
@@ -111,7 +113,7 @@ static const char* ECOS_FORMATTED =
     "<REPLY\n"
     "  id 100\n"
     "  speed[64]\n"
-    "  direction[1]\n"
+    "  dir[1]\n"
     ">";
 
 #endif  // ECOS_RESPONSES_H

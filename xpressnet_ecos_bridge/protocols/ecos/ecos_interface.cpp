@@ -509,6 +509,20 @@ void EcosInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t di
         addToEchoQueue(address, ECHO_TYPE_SPEED, speed);
         DEBUG_ECOS_PRINTF("Ecos TX: Speed loco %u = %u\n", address, speed);
     }
+
+    // Real bug found on hardware 2026-07-31: direction was accepted as a
+    // parameter here but never actually sent - ecosBuildSetDirectionCmd()
+    // existed with zero callers, so Ecos never heard about direction
+    // changes from XpressNet at all.
+    // NOTE: the ESU spec says Ecos's dir=1 means reverse (opposite of our
+    // direction=1=forward convention), but passing the value through
+    // UN-inverted is what real-hardware testing confirmed matches - see the
+    // matching note in ecos_message_parser.cpp's "dir" key handling.
+    len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, direction);
+    if (len > 0) {
+        wifi_client.write((uint8_t*)cmd_buffer, len);
+        DEBUG_ECOS_PRINTF("Ecos TX: Direction loco %u = %u\n", address, direction);
+    }
 }
 
 void EcosInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {

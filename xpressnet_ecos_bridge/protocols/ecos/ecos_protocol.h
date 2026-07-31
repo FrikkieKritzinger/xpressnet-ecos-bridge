@@ -99,7 +99,10 @@ uint16_t ecosBuildSetSpeedCmd(char* buffer, uint16_t buffer_size,
 
 /**
  * Build a "set" command to change locomotive direction
- * Returns: "set(1000, direction[1])\n"
+ * Returns: "set(1000, dir[1])\n" - the real Ecos property is "dir", not
+ * "direction" ("direction" is rejected as "unknown option"; confirmed
+ * against real hardware 2026-07-31 via get(id) dumping every real property
+ * name for a locomotive object).
  * Requires prior "request(id, control)"
  *
  * @param buffer Destination for the command string
@@ -134,7 +137,7 @@ uint16_t ecosBuildSetFunctionCmd(char* buffer, uint16_t buffer_size,
  * @param buffer Destination for the command string
  * @param buffer_size Size of the destination buffer
  * @param object_id Ecos object ID
- * @param property Property name (e.g., "speed", "direction", "name", "addr")
+ * @param property Property name (e.g., "speed", "dir", "name", "addr")
  * @return Number of bytes written, or 0 if buffer too small
  */
 uint16_t ecosBuildGetCmd(char* buffer, uint16_t buffer_size,

@@ -195,8 +195,10 @@ void EcosMessageParser::parsePropertyLine(const char* line, EcosReply& reply) {
         return;
     }
 
-    // Format: "1000 speed[64] direction[1] func[0,1] func[1,0] ..."
-    // First token is object ID, rest are key[value] pairs
+    // Format: "1000 speed[64] dir[1] func[0,1] func[1,0] ..."
+    // First token is object ID, rest are key[value] pairs. Real property is
+    // "dir", not "direction" - confirmed against real hardware 2026-07-31
+    // (get(id) dumps every real property name Ecos actually uses).
 
     const char* p = line;
 
@@ -232,7 +234,18 @@ void EcosMessageParser::parsePropertyLine(const char* line, EcosReply& reply) {
             reply.speed = atoi(value);
             reply.has_speed = true;
         }
-        else if (strcmp(key, "direction") == 0) {
+        else if (strcmp(key, "dir") == 0) {
+            // NOTE: the official ESU PC-Interface spec (section 7.11) states
+            // dir=1 means reverse, opposite of our internal convention
+            // (direction=1=forward) - but real-hardware testing 2026-07-31
+            // showed the MultiMaus and Ecos direction arrows matching with
+            // this value passed through UN-inverted. Not applying the spec's
+            // stated inversion here since it would contradict a confirmed
+            // empirical result - likely this particular loco/decoder profile
+            // has its own reverse-direction setting in Ecos compensating for
+            // physical motor wiring, which a blanket protocol-level inversion
+            // would fight rather than respect. Revisit if a loco without that
+            // per-decoder compensation shows a real mismatch.
             reply.direction = atoi(value);
             reply.has_direction = true;
         }

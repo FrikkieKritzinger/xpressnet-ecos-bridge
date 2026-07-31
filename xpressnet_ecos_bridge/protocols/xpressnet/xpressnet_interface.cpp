@@ -103,6 +103,7 @@ XpressNetInterface::XpressNetInterface()
       last_message_time(0),
       bus_connect_time(0),
       was_master_mode(true),
+      led_off_at_ms(0),
       router(nullptr) {
     g_xnet_instance = this;
 }
@@ -133,6 +134,11 @@ bool XpressNetInterface::begin() {
         // told the track is actually powered.
         xnet.setPower(csNormal);
 
+        // TEMP: onboard LED (GPIO2/D4 on this board - not used by anything
+        // else here) as a visual bus-activity indicator. Active-low: HIGH=off.
+        pinMode(LED_BUILTIN, OUTPUT);
+        digitalWrite(LED_BUILTIN, HIGH);
+
         current_status = ComponentStatus::CONNECTING;
         last_message_time = millis();
         bus_connect_time = 0;
@@ -157,6 +163,12 @@ void XpressNetInterface::update() {
     #endif
 
     updateBusStatus();
+
+    // TEMP: non-blocking turn-off for the activity LED - see markBusActivity().
+    if (led_off_at_ms != 0 && (long)(millis() - led_off_at_ms) >= 0) {
+        digitalWrite(LED_BUILTIN, HIGH);  // active-low: HIGH=off
+        led_off_at_ms = 0;
+    }
 
     // Pumps the library's SoftwareSerial read/parse state machine; fires
     // notifyXNet* callbacks synchronously for any complete message found.
@@ -201,6 +213,11 @@ void XpressNetInterface::updateBusStatus() {
 }
 
 void XpressNetInterface::markBusActivity() {
+    // TEMP: flash the activity LED on for ACTIVITY_LED_MS - see update()
+    // for the non-blocking turn-off.
+    digitalWrite(LED_BUILTIN, LOW);  // active-low: LOW=on
+    led_off_at_ms = millis() + ACTIVITY_LED_MS;
+
     last_message_time = millis();
     if (bus_connect_time == 0) {
         bus_connect_time = last_message_time;
@@ -416,10 +433,14 @@ void XpressNetInterface::onLocoFunctionGroup(uint16_t address, uint8_t group, ui
 // ============================================================================
 
 void XpressNetInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) {
-    if (current_status != ComponentStatus::CONNECTED) {
-        return;
-    }
-
+    // Real bug found on hardware 2026-07-31: this used to bail out unless
+    // current_status == CONNECTED, but that status only reflects "have we
+    // recently heard a throttle speak" (it drops to DISCONNECTED after just
+    // BUS_TIMEOUT/5s of RX silence). A master must keep transmitting
+    // regardless - it doesn't need to have recently heard from a throttle
+    // to legitimately broadcast a loco's new state. This silently dropped
+    // 88 of 89 Ecos-originated updates in one real test (only the first,
+    // arriving just before the 5s timeout tripped, ever reached the bus).
     if (!isValidDccAddress(address) || !isValidSpeed(speed) || !isValidDirection(direction)) {
         DEBUG_XNET_PRINTF("XpressNet TX: Invalid speed command - addr=%u speed=%u dir=%u\n",
                          address, speed, direction);
@@ -437,10 +458,8 @@ void XpressNetInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8
 }
 
 void XpressNetInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
-    if (current_status != ComponentStatus::CONNECTED) {
-        return;
-    }
-
+    // See sendSpeedCommand() - a master must keep transmitting regardless of
+    // whether it has recently heard a throttle speak.
     if (!isValidDccAddress(address)) {
         return;
     }

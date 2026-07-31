@@ -65,15 +65,17 @@ void test_ecos_build_speed_command_buffer_too_small(void) {
 // ============================================================================
 
 void test_ecos_build_direction_command_forward(void) {
+    // Real property is "dir", not "direction" - confirmed against real
+    // hardware 2026-07-31 ("direction" is rejected as "unknown option").
     int len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), 100, 1);
     TEST_ASSERT_TRUE(len > 0);
-    TEST_ASSERT_EQUAL_STRING("set(100, direction[1])\n", cmd_buffer);
+    TEST_ASSERT_EQUAL_STRING("set(100, dir[1])\n", cmd_buffer);
 }
 
 void test_ecos_build_direction_command_reverse(void) {
     int len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), 100, 0);
     TEST_ASSERT_TRUE(len > 0);
-    TEST_ASSERT_EQUAL_STRING("set(100, direction[0])\n", cmd_buffer);
+    TEST_ASSERT_EQUAL_STRING("set(100, dir[0])\n", cmd_buffer);
 }
 
 // ============================================================================

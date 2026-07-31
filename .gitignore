@@ -69,3 +69,7 @@ site/
 xpressnet_ecos_bridge/wifi_credentials.local.h
 .env
 .env.local
+
+# Third-party protocol specs under redistribution-restricted licenses -
+# reference material only, never commit (this repo is public)
+docs/ecos_pc_interface3.pdf

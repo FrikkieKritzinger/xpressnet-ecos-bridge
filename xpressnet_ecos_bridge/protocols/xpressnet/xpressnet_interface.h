@@ -171,6 +171,13 @@ private:
     static const unsigned long BUS_TIMEOUT = 5000;  // 5 seconds = no bus
     bool was_master_mode;                   // Last known xnet.getOperationModeMaster() - edge-triggered tripwire
 
+    // TEMP: visual health indicator for hardware testing - onboard LED
+    // blinks briefly on every real XpressNet message, so bus activity is
+    // visible without a serial monitor attached. Remove once Ecos-side
+    // round-trip testing is done. 0 = LED currently off/idle.
+    static const unsigned long ACTIVITY_LED_MS = 40;
+    unsigned long led_off_at_ms;
+
     // Library instance - owns the half-duplex SoftwareSerial and XpressNet framing
     XpressNetMasterClass xnet;
 

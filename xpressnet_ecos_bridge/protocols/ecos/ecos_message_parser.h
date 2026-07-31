@@ -145,7 +145,7 @@ private:
     bool processLine(const char* line, EcosReply& reply);
 
     /**
-     * Parse a single object property line like "1000 speed[64] direction[1]"
+     * Parse a single object property line like "1000 speed[64] dir[1]"
      * into the reply structure
      */
     void parsePropertyLine(const char* line, EcosReply& reply);
