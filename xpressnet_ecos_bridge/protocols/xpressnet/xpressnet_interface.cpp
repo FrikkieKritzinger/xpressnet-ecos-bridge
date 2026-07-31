@@ -205,7 +205,14 @@ void XpressNetInterface::markBusActivity() {
     if (bus_connect_time == 0) {
         bus_connect_time = last_message_time;
     }
-    if (current_status == ComponentStatus::CONNECTING) {
+    // Real bug found on hardware 2026-07-31: this only handled the
+    // CONNECTING->CONNECTED transition, so once updateBusStatus() had
+    // already timed out to DISCONNECTED (e.g. the initial 3s grace period
+    // elapsing before a throttle first spoke), the status display got stuck
+    // on "Disconnected" forever even once real traffic started arriving -
+    // commands were still processed correctly (this method's caller had
+    // already parsed a real message), only the reported status was wrong.
+    if (current_status != ComponentStatus::CONNECTED) {
         current_status = ComponentStatus::CONNECTED;
         DEBUG_XNET_PRINTF("XpressNet: Bus connected! First message from device\n");
     }

@@ -53,6 +53,98 @@ here. Newest entries first.
 
 ---
 
+**2026-07-31 — First real end-to-end XpressNet→Ecos test: physical RX fault recurrence, then two more real bugs found and fixed**
+- **Trigger**: with the address map now correctly listing loco 5452 (the
+  MultiMaus's loco), attempted the first real end-to-end test - move the
+  throttle, confirm the command reaches Ecos.
+- **False start - physical RX path fault recurred**: two capture attempts
+  (60s and 90s, with the user deliberately waiting ~15s after each flash for
+  the DTR-triggered reboot to settle before touching the throttle) both
+  showed `XNet=Disconnected` for the *entire* window and `Locos=0` never
+  changed - meaning zero valid XpressNet messages were received, not just a
+  display glitch. Cross-checking against every capture from earlier today
+  confirmed this predated all of today's Ecos work (even the very first
+  capture right after reverting `TEMP_SKIP_ECOS_CONNECT`/`XNetDEBUG` never
+  showed "Bus connected!") - and confirmed `XNetDEBUG` only gates print
+  statements in the vendored library, no functional code path, ruling out
+  today's revert as the cause. The user confirmed the MultiMaus's own display
+  showed normal/active (not `Err 13`), meaning master→throttle (TX) was
+  still fine - and separately mentioned an already-known symptom: unplugging
+  the MAX485 causes `Err 13` that doesn't recover on its own and needs
+  "wiggling" the module or a power cycle to clear. That's a textbook loose
+  physical connection, and matches the exact TX-works/RX-fragile asymmetry
+  already root-caused on 2026-07-29 (MAX485 undervoltage, a resistor wired
+  in parallel instead of series, bad modules) - very plausibly re-jostled
+  loose by today's dozen-plus reflashes. **Fix**: physical only - wiggling
+  the MAX485's connections (no code change). Retested and got full real
+  traffic immediately.
+- **Full real end-to-end propagation confirmed**: with the connection
+  physically restored, a MultiMaus speed sweep (dial swept both directions)
+  produced a clean pipeline for every command:
+  `XpressNet RX: Speed - Addr=5452 Speed=20 Dir=0` -> loco created in
+  `StateEngine` -> `Subscribed to loco 5452 (Ecos ID 1009)` ->
+  `Ecos TX: Speed loco 5452 = 20` - repeated correctly across a full range
+  including a direction reversal (`Dir=1`). This is the core Phase 4.6 goal:
+  a real XpressNet command reaching a real, connected Ecos.
+- **Bug found while reviewing that same log - `subscribed_to_ecos` never set
+  true by the XpressNet-initiated path**: the log showed "New loco from
+  XpressNet: requesting Ecos subscription" on every single speed update
+  instead of just the first - a "known side-effect, not yet investigated"
+  item flagged back on 2026-07-30. Root cause: `subscribed_to_ecos` is set
+  `true` in 4 places in `command_router.cpp`, but all 4 are on the
+  *Ecos-initiated* path (`handleEcosCommand`/`handleEcosFunctionCommand`) -
+  the *XpressNet-initiated* path (`handleXpressNetCommand`/
+  `handleXpressNetFunctionCommand`) calls `requestEcosSubscription()` but
+  never marks the loco as subscribed afterward, so every subsequent command
+  for that loco looked like "first time" again, forever.
+  **Fixed**: both XpressNet-initiated handlers now set
+  `subscribed_to_ecos = true` as soon as the subscription is requested
+  (not only once Ecos confirms it) - `subscribeToLoco()` is a fire-and-forget
+  TCP query with no clean way to correlate Ecos's async reply back to a
+  specific request, and the flag's existing semantics elsewhere in the file
+  are already "do we know about this relationship," not "has Ecos
+  specifically confirmed this one" - so this is consistent, not a
+  weakening. A local `already_subscribed` bool captures the pre-update value
+  so the actual `requestEcosSubscription()` call still only fires once.
+- **Second bug found while fixing the first - XpressNet status display stuck
+  on "Disconnected" forever once it timed out once**: while confirming the
+  end-to-end log, noticed `Status: XNet=Disconnected` was still being
+  printed even in the middle of clean, continuous real traffic flowing
+  through (the RX-path fault above already proved the *status field* isn't
+  what gates real command processing, but it's still a real reporting bug
+  worth fixing). Root cause: `XpressNetInterface::markBusActivity()`
+  (`xpressnet_interface.cpp`) only handled the `CONNECTING -> CONNECTED`
+  transition; once `updateBusStatus()`'s 3-second "no initial activity"
+  grace period had already timed out to `DISCONNECTED` (which it always
+  does if the throttle doesn't speak within the first 3 seconds after boot -
+  a near-certainty in practice, since the human needs time to notice and
+  touch the throttle), no amount of subsequent real traffic could ever move
+  it back to `CONNECTED` - the guard's condition was simply never satisfied
+  again. **Fixed**: broadened the guard to `if (current_status !=
+  ComponentStatus::CONNECTED)`, so activity from any prior state
+  (`CONNECTING` or `DISCONNECTED`) correctly restores `CONNECTED`.
+- **Result, confirmed on real hardware**: reflashed once more and reran the
+  speed-sweep test - `XpressNet: Bus connected! First message from device`
+  now fires correctly, `Status: XNet=Connected Ecos=Connected Locos=1`
+  displays correctly, and "requesting Ecos subscription" appears exactly
+  once across a sequence of 8+ speed commands (99/53/27/28/9/29/66/112),
+  every one of which still correctly reached Ecos. Added
+  `test_router_repeat_xpressnet_commands_do_not_resubscribe` (regression
+  test for the subscription bug, driven directly off the real log's speed
+  sequence). Native suite: 93/93 passing. `env:debug` rebuilds clean, memory
+  unchanged (44.7% RAM / 31.2% Flash).
+- **Noted, not investigated**: one `XpressNet: Invalid speed byte 0xff for
+  addr 5452` appeared once near the end of the retest, likely a reserved/
+  edge-case byte from a dial extreme or fast direction reversal - the parser
+  correctly rejected it rather than mishandling it (consistent with reserved
+  speed codes being already-documented as unmodeled), so not treated as a
+  bug unless it recurs as an actual problem.
+- **Remaining Phase 4.6 items**: Ecos-side changes propagating back to
+  XpressNet, and the 5-minute subscription-lifecycle timeout under real
+  (not mocked) timing.
+
+---
+
 **2026-07-31 — Address map only ever kept the last of many locomotives (two more real bugs, found by inspecting the log)**
 - **Trigger**: user asked what the "Address map: DCC 24" log line meant, and
   pointed out they have loco 5452 selected on the MultiMaus while "definitely

@@ -65,9 +65,19 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   (would have filled `MAX_ECOS_OBJECTS` within minutes once heartbeat started
   re-querying every 30s). Both fixed and confirmed on hardware - all 15 locos
   now populate the map correctly and stay stable across repeated heartbeats.
-- **Not yet done**: end-to-end command propagation (XpressNet throttle command
-  reaching Ecos, Ecos-side changes reaching XpressNet) and subscription lifecycle
-  (new loco → subscribe, 5-minute inactivity → unsubscribe) under real timing.
+- **XpressNet → Ecos end-to-end propagation confirmed (2026-07-31)**: a real
+  MultiMaus speed sweep correctly reached Ecos throughout (speed, direction).
+  Getting here required fixing a recurring physical RX-path fault (same
+  MAX485 fragility as 2026-07-29 - fixed by reseating/wiggling the module,
+  no code change) plus two real software bugs: `subscribed_to_ecos` was
+  never set by the XpressNet-initiated path (caused "requesting Ecos
+  subscription" to fire on every single command instead of once), and
+  `markBusActivity()` could never recover the status display from
+  `DISCONNECTED` back to `CONNECTED` once it had timed out - see
+  [docs/CHANGELOG.md](docs/CHANGELOG.md) for full diagnosis.
+- **Not yet done**: Ecos-side changes propagating back to XpressNet, and the
+  5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min idle →
+  unsubscribe) under real timing.
 - **Deliberately deferred**: bus-wide emergency stop only acknowledges on the
   wire now - it does not yet force any locomotives to actually stop moving
   (see Future Improvements).

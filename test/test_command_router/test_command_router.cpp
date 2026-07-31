@@ -272,6 +272,24 @@ void test_router_new_loco_triggers_ecos_subscription(void) {
     TEST_ASSERT_EQUAL_UINT16(100, ecos_mock.getLastSubscribedAddress());
 }
 
+void test_router_repeat_xpressnet_commands_do_not_resubscribe(void) {
+    // Regression test for a real bug found against hardware (2026-07-31): a
+    // real MultiMaus speed sweep showed "requesting Ecos subscription" on
+    // every single command instead of just the first. Root cause was that
+    // subscribed_to_ecos was only ever set true by the Ecos-initiated path,
+    // never by the XpressNet-initiated one that actually requests it.
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleXpressNetCommand(100, 20, 0);
+    router.handleXpressNetCommand(100, 29, 0);
+    router.handleXpressNetCommand(100, 27, 0);
+    router.handleXpressNetCommand(100, 0, 1);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getSubscribeCallCount());
+}
+
 void test_router_expiry_triggers_ecos_unsubscribe(void) {
     // Loco expiring after 5 minutes of inactivity should unsubscribe from Ecos
     CommandRouter router;
@@ -385,6 +403,7 @@ int main(void) {
     RUN_TEST(test_router_broadcast_ecos_function_to_xpressnet);
 
     RUN_TEST(test_router_new_loco_triggers_ecos_subscription);
+    RUN_TEST(test_router_repeat_xpressnet_commands_do_not_resubscribe);
     RUN_TEST(test_router_expiry_triggers_ecos_unsubscribe);
 
     RUN_TEST(test_router_reject_invalid_address_zero);

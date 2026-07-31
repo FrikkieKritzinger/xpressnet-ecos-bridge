@@ -99,23 +99,30 @@ void CommandRouter::handleXpressNetCommand(uint16_t address, uint8_t speed, uint
     new_state.direction = direction;
     new_state.functions = 0;  // Preserve existing functions
     new_state.last_source = LocoSource::XPRESSNET;
-    new_state.subscribed_to_ecos = false;
-    
-    // If locomotive exists, preserve functions
+
+    // If locomotive exists, preserve functions and subscription state
     LocoState existing;
+    bool already_subscribed = false;
     if (state_engine.getLoco(address, existing)) {
         new_state.functions = existing.functions;  // Keep existing function states
-        new_state.subscribed_to_ecos = existing.subscribed_to_ecos;
+        already_subscribed = existing.subscribed_to_ecos;
     }
-    
+    // Mark subscribed as soon as we ask, not only once Ecos confirms -
+    // subscribeToLoco() is a fire-and-forget TCP query with no clean way to
+    // correlate Ecos's async reply back to this specific request. Real bug
+    // found on hardware 2026-07-31: this flag was previously only ever set
+    // true by the Ecos-initiated path, so a loco discovered via XpressNet
+    // re-requested a subscription on every single subsequent update forever.
+    new_state.subscribed_to_ecos = true;
+
     // Add or update in state engine
     if (!state_engine.addOrUpdateLoco(address, new_state)) {
         DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u (state engine full?)\n", address);
         return;
     }
-    
+
     // If this is new loco, request Ecos subscription
-    if (!new_state.subscribed_to_ecos) {
+    if (!already_subscribed) {
         DEBUG_STATE_PRINTF("New loco from XpressNet: requesting Ecos subscription\n");
         requestEcosSubscription(address);
     }
@@ -163,13 +170,13 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
         new_state.speed = 0;
         new_state.direction = 1;
         new_state.functions = functions;
-        new_state.subscribed_to_ecos = false;
-        
+        new_state.subscribed_to_ecos = true;  // mark now; see handleXpressNetCommand for why
+
         if (!state_engine.addOrUpdateLoco(address, new_state)) {
             DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u\n", address);
             return;
         }
-        
+
         // Request subscription for new loco
         requestEcosSubscription(address);
     } else {
