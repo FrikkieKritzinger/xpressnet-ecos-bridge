@@ -84,11 +84,21 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   propagation after a few claim/reclaim cycles, and reverted - see
   [docs/CHANGELOG.md](docs/CHANGELOG.md) for full diagnosis of everything
   above.
-- **Known, deliberately not fixed**: the MultiMaus's own display doesn't
-  visually refresh speed/direction while its "stolen" (in-use-elsewhere)
-  icon is flashing - likely intentional Lenz/Roco throttle UX rather than a
-  bug in this bridge. Not pursued further after the fix attempt above proved
-  net-negative for the actually-important goal (command propagation).
+- **Known, deferred follow-up**: the MultiMaus's own display doesn't visually
+  refresh speed/direction while its "stolen" (in-use-elsewhere) icon is
+  flashing, when the change originates from Ecos. A two-MultiMaus test
+  disproved "intentional throttle UX" as the explanation - genuine MM-to-MM
+  steal/reclaim DOES correctly refresh both units' displays, so the gap is
+  bridge-side: Ecos-driven changes trigger the "stolen" flash via a side
+  effect of the plain drive-command broadcast, not via the real
+  `SetLocoBusy` message that MM-to-MM handoff uses to prompt a refresh. The
+  earlier `ReqLocoBusy()` attempt (tried and reverted same day) used the
+  conceptually-correct mechanism but had a real side effect that broke
+  forward propagation after a few cycles, not yet root-caused with
+  confidence - see [docs/CHANGELOG.md](docs/CHANGELOG.md) for the follow-up
+  plan (re-attempt with live dual-MultiMaus monitoring; possibly a targeted
+  patch to the vendored library's `SetBusy()`). Deliberately deferred - core
+  bidirectional command propagation (the actual Phase 4.6 goal) is solid.
 - **Not yet done**: the 5-minute subscription-lifecycle timeout (new loco →
   subscribe, 5 min idle → unsubscribe) under real timing.
 - **Deliberately deferred**: bus-wide emergency stop only acknowledges on the

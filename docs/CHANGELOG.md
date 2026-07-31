@@ -130,11 +130,39 @@ here. Newest entries first.
   (broadcasts to Ecos correctly), Ecos drives it once more (broadcasts back
   again) - no drops, no regressions. Native suite: 93/93 passing throughout;
   `env:debug` rebuilds clean each time.
-- **Not pursued further**: the "MultiMaus display frozen while flagged busy"
-  UX question remains open but is not being treated as a confirmed bug -
-  core bidirectional command propagation (the actual Phase 4.6 goal) is
-  solid, which takes priority over refining conflict-indicator cosmetics on
-  one specific throttle.
+- **Follow-up same day - two-MultiMaus test disproves the "intentional UX"
+  theory**: user connected a second real MultiMaus and tested three
+  scenarios. (1) MM-to-MM steal/reclaim: both throttles correctly flash
+  "stolen" AND correctly refresh direction/functions on both units, in
+  both directions - proving the MultiMaus is fully capable of refreshing
+  when properly notified, so "frozen display is intentional throttle UX"
+  is disproven. (2) Ecos-driven changes: both MultiMaus units correctly
+  flash "stolen" now (some signal from the bridge's plain `xnet.setSpeed()`
+  broadcast does reach them), but neither ever refreshes its displayed
+  values. Conclusion: the real `SetLocoBusy` (0xE3/0x40) message - the
+  mechanism genuine MM-to-MM handoff uses, and the one `ReqLocoBusy()`
+  sends - is very likely what actually triggers a throttle to re-query and
+  refresh, and the bridge's plain drive-command broadcast only accidentally
+  triggers the "stolen" flash as a side effect without prompting a refresh.
+  This means the earlier `ReqLocoBusy()` approach (tried and reverted the
+  same day - see above) was conceptually the right mechanism; it just had a
+  real, not-yet-fully-diagnosed side effect that broke XpressNet→Ecos
+  forward propagation after a few cycles. The exact mechanism connecting
+  the library's stale `SlotLokUse[0]` bookkeeping (root-caused above) to
+  that specific forward-propagation regression is not yet confirmed -
+  `onLocoDrive128()`/`onLocoDriveStepped()` call `router->handleXpressNetCommand()`
+  unconditionally, with no apparent dependency on busy-slot state, so the
+  causal link needs more careful, instrumented hardware testing (ideally
+  with both real MultiMaus units live) before attempting the fix again.
+  **Deliberately deferred to a future session** rather than risk another
+  late-session regression - the core Phase 4.6 goal (bidirectional command
+  propagation) is confirmed solid, which takes priority over this UI-refresh
+  refinement. Follow-up plan for whenever this is revisited: re-add the
+  busy-claim call with live monitoring of both MultiMaus screens plus serial
+  capture, cycle-by-cycle, to pin down exactly what breaks and why - then
+  decide whether the real fix is a targeted patch to the vendored library's
+  `SetBusy()` (to also clear the reserved slot 0) or a different mechanism
+  entirely.
 
 ---
 
