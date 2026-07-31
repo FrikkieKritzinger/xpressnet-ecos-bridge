@@ -99,8 +99,15 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   plan (re-attempt with live dual-MultiMaus monitoring; possibly a targeted
   patch to the vendored library's `SetBusy()`). Deliberately deferred - core
   bidirectional command propagation (the actual Phase 4.6 goal) is solid.
-- **Not yet done**: the 5-minute subscription-lifecycle timeout (new loco →
-  subscribe, 5 min idle → unsubscribe) under real timing.
+- **Not yet done (next session's plan)**:
+  1. The 5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min
+     idle → unsubscribe) under real timing. Verified by code inspection that
+     the 30-second Ecos address-map heartbeat refresh cannot resurrect a
+     purged loco (it only touches the address-map lookup table, never
+     `StateEngine` or re-subscribes) - but not yet tested live.
+  2. OLED display validation against real hardware - not tested at all during
+     Phase 4.6 so far; last touched 2026-07-29 when confirmed to harmlessly
+     no-op with nothing wired. Real display behavior is still unverified.
 - **Deliberately deferred**: bus-wide emergency stop only acknowledges on the
   wire now - it does not yet force any locomotives to actually stop moving
   (see Future Improvements).
