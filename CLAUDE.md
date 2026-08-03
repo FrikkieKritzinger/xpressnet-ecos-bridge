@@ -12,69 +12,33 @@
 > after a session, add detail to the changelog and only touch this file's status
 > sections if the current state actually changed.
 
-> ✅ **Phase 4.6 checkpoint (2026-07-30): XpressNet fully validated on real hardware.**
-> A real MultiMaus now works end-to-end against this bridge - speed, direction,
-> functions (F0-F31), the master correctly declaring 128-speed-step mode to the
-> throttle, and the STOP button's track-power acknowledgment all confirmed working
-> live. Three real bugs found and fixed that session (full diagnosis in
-> [docs/CHANGELOG.md](docs/CHANGELOG.md)):
-> 1. Drive commands were silently dropped for any throttle/loco not in 128-step mode
->    (the MultiMaus defaults to 28-step) - added handlers for 14/27/28-step modes.
-> 2. The master never answered a throttle's loco-info request at all, so it had no
->    way to declare a step count in the first place - implemented both the generic
->    Lenz reply and the Roco MultiMaus's proprietary variant, always declaring
->    128-step. Needs no Ecos involvement - it's a pure master↔throttle wire contract.
-> 3. The MultiMaus's STOP button froze its display (required physical unplug) because
->    the master never acknowledged track-power/emergency-stop requests on the bus -
->    fixed with a minimal wire-protocol echo (does not yet force locos to actually
->    stop - see Future Improvements).
+> ✅ **Phase 4.6 COMPLETE (2026-08-03): full bridge validated end-to-end on real hardware.**
+> Every checklist item now confirmed live, across sessions from 2026-07-30 to
+> 2026-08-03: XpressNet command/reply correctness (speed, direction, functions,
+> 128-step declaration, STOP-button ack) against a real MultiMaus; a stable Ecos
+> TCP connection; bidirectional XpressNet↔Ecos command propagation surviving
+> reclaim cycles and bus timeouts; the 5-minute subscription lifecycle (loco
+> purged from `StateEngine` and unsubscribed from Ecos after real, unmocked
+> inactivity - confirmed today, active-loco count dropped 2→1 on both the XNet
+> and Ecos pages exactly as expected); and the OLED display (live status icons,
+> 10-second OmniConnect boot splash). Many real hardware bugs were found and
+> fixed to get here - full dated diagnosis for every one in
+> [docs/CHANGELOG.md](docs/CHANGELOG.md), starting from the 2026-07-30 entry.
 >
-> **2026-07-31 update**: both temporary diagnostic aids reverted, and the bridge
-> connected to a real Ecos for the first time. Two real connection bugs found and
-> fixed (a heartbeat/watchdog timing mismatch that dropped the connection every
-> ~10s, and an invalid heartbeat command Ecos was rejecting) - connection now
-> confirmed stable across multiple heartbeat cycles. Full diagnosis in
-> [docs/CHANGELOG.md](docs/CHANGELOG.md).
+> **Deliberately out of scope for Phase 4.6** (tracked separately - see Future
+> Improvements below): bus-wide emergency stop only acknowledges on the wire,
+> doesn't yet force locos to actually stop; the MultiMaus "stolen icon" display
+> not refreshing when Ecos drives a loco (one fix attempted and reverted -
+> needs careful instrumented retesting, see changelog); a few deferred OLED
+> fields (XNet last-message age, Ecos round-trip latency, per-loco functions
+> on the main page).
 >
-> **2026-08-03 update**: OLED physically attached and validated for the first
-> time. A blocking `wifi_client.connect()` call (bounded only by the ESP8266
-> core's own 5000ms default, since a same-named `config.h` timeout constant
-> was never actually wired up) was freezing the entire main loop for up to 5s
-> on every Ecos reconnect attempt while Ecos was down - explaining all three
-> of "XNet never shows Connected", "active locos stuck at 0", and "MultiMaus
-> err13 requiring a power-cycle" as one root cause. Fixed, confirmed on
-> hardware. Also found (in two attempts) and fixed the XNet status flapping
-> to Disconnected during normal idling: an incomplete first attempt added
-> `markBusActivity()` to `onGiveLocoInfo()`/`onGiveLocoMM()`/
-> `onPowerStateChange()` (a real correctness fix, but live testing showed no
-> change) before the real root cause was confirmed against the vendored
-> library source - Lenz XpressNet's call-byte polling has no "nothing to
-> report" acknowledgment, so an idle throttle can legitimately go silent
-> indefinitely, and 5000ms was just far too aggressive a timeout for that.
-> Raised to 120s (user's judgment call for a single-throttle layout) and
-> moved out of `xpressnet_interface.h` into `config.h` as
-> `XPRESSNET_BUS_TIMEOUT`, matching the project's config-is-the-timing-
-> source-of-truth convention. OLED display validated against real hardware
-> for the first time, several Phase-2-era placeholder fields wired to live
-> data, and the status/page UI reworked around hand-drawn icons (the
-> SSD1306's default font has no real glyphs for the Unicode checkmark/X used
-> previously - confirmed to render as garbage on real hardware). **Confirmed
-> live**: the 120s XNet bus timeout holds Connected correctly through widely
-> spaced throttle commands. Also added a 10-second boot splash (OmniConnect
-> logo, `display/boot_logo.h`) shown immediately at power-up while XNet/Ecos
-> connect in the background, and removed the now-duplicate RSSI text from the
-> Device Status page (the header icon already covers it). "OmniConnect" is
-> new branding invented after this project already existed - a conscious
-> decision was made to keep it user-facing only (the boot splash) rather than
-> rename the codebase, since a real rename would touch the Arduino-IDE-
-> mandated folder/`.ino` name match for no functional benefit at this stage.
-> Full diagnosis in [docs/CHANGELOG.md](docs/CHANGELOG.md). **Next**: the
-> real-timing subscription lifecycle - see Phase
-> 4.6 below.
+> **Next**: nothing required to close out Phase 4.6 - see "After Phase 4.6"
+> below for the open backlog.
 
 ---
 
-## 🎯 Phase 4.6: Hardware Procedures 🔧 IN PROGRESS
+## 🎯 Phase 4.6: Hardware Procedures ✅ COMPLETE
 
 Hardware assembled 2026-07-27 (Wemos D1 Mini + MAX485, D6 data / D0 control per
 Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
@@ -172,16 +136,16 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   while XNet/Ecos connect in the background - see `display/boot_logo.h`) and
   removed the Device Status page's now-duplicate RSSI text. See
   [docs/CHANGELOG.md](docs/CHANGELOG.md).
-- **Not yet done (next session's plan)**:
-  1. The 5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min
-     idle → unsubscribe) under real timing. Verified by code inspection that
-     the 30-second Ecos address-map heartbeat refresh cannot resurrect a
-     purged loco (it only touches the address-map lookup table, never
-     `StateEngine` or re-subscribes) - but not yet tested live.
-  2. Deferred display fields: XNet last-message age (needs exposing through
-     `ProtocolInterface`, touching the mock used by native tests), Ecos
-     round-trip latency (needs timestamp correlation on the heartbeat query),
-     per-loco functions on the main page.
+- **5-minute subscription lifecycle confirmed under real timing (2026-08-03)**:
+  left a loco untouched on XpressNet for 5+ minutes - active-loco count
+  dropped 2→1 on both the XNet and Ecos pages, confirming `StateEngine`
+  purge and `EcosInterface::unsubscribeFromLoco()` both fired correctly.
+  This was the last open item from Phase 4.6's checklist - **Phase 4.6 is
+  now complete**.
+- **Deferred, not part of Phase 4.6**: XNet last-message age display (needs
+  exposing through `ProtocolInterface`, touching the mock used by native
+  tests), Ecos round-trip latency display (needs timestamp correlation on
+  the heartbeat query), per-loco functions on the main page.
 - **Deliberately deferred**: bus-wide emergency stop only acknowledges on the
   wire now - it does not yet force any locomotives to actually stop moving
   (see Future Improvements).
@@ -220,21 +184,18 @@ if that happens, run `.pio/build/native/program.exe` directly for the ground tru
 
 **Build real firmware**: `python -m platformio run -e wemos`
 
-### What Phase 4.6 Actually Needs
+### What Phase 4.6 Needed (all done)
 
-Completed: manual throttle test checklist (speed/direction/function/128-step/STOP,
-all confirmed 2026-07-30), firmware flashing, WiFi/Ecos credential confirmation
-against the real network, reverting the temporary diagnostic aids, and
-confirming a stable real Ecos TCP connection (2026-07-31, two bugs found and
-fixed along the way). Full detail: [docs/CHANGELOG.md](docs/CHANGELOG.md).
+All completed and confirmed on real hardware: manual throttle test checklist
+(speed/direction/function/128-step/STOP, 2026-07-30), firmware flashing,
+WiFi/Ecos credential confirmation, a stable real Ecos TCP connection
+(2026-07-31), bidirectional XpressNet↔Ecos command propagation (2026-07-31),
+the 5-minute subscription lifecycle under real timing (2026-08-03), and the
+OLED display (2026-08-03). Full detail: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
-**Remaining**: confirm XpressNet commands reach Ecos correctly end-to-end (move
-a throttle loco and see it reflected in Ecos), confirm Ecos-side changes
-propagate back to XpressNet, and confirm subscription lifecycle (new loco →
-subscribe, 5-minute inactivity → unsubscribe) works against real timing, not
-mocked time. (Bus-wide emergency stop still only acknowledges on the wire, not
-actually stopping locos - see Future Improvements - so it's not part of this
-checklist.)
+(Bus-wide emergency stop still only acknowledges on the wire, not actually
+stopping locos - see Future Improvements - this was always out of scope for
+this checklist.)
 
 ### After Phase 4.6
 
@@ -301,8 +262,8 @@ All disabled features = zero compiled code overhead.
   88.3% line / 96.6% function / 58.1% branch coverage across the 5 core modules
   before the Phase 3.1 rewrite (91/91 after, since the superseded XpressNet parser
   tests were removed). Full step-by-step history in the changelog.
-- **Phase 4.6 (Hardware Procedures)**: 🔧 In progress - see the dedicated section
-  above for current state and what's left.
+- **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
+  above for what was validated and the remaining backlog.
 
 ---
 
@@ -677,11 +638,14 @@ rather than completed, since it served no design purpose.
 
 ---
 
-**Last Updated**: 2026-08-03. Project status as of the last real session:
-OLED physically attached and validated on real hardware for the first time.
-Two real bugs found and fixed, both confirmed live: a blocking Ecos-connect
-call that explained XNet-never-connects/active-locos-stuck-at-0/MultiMaus
-err13 as one root cause, and an XNet bus-timeout far too short for genuine
-throttle idle behavior (raised 5s → 120s). Added a 10-second OmniConnect
-boot splash and cleaned up duplicate/stubbed display fields. The 5-minute
-subscription-lifecycle timeout is the next step.
+**Last Updated**: 2026-08-03. **Phase 4.6 is complete** - every checklist item
+confirmed on real hardware, most recently the 5-minute subscription-lifecycle
+timeout (loco purge + Ecos unsubscribe both confirmed live). Getting here
+this session also meant finding and fixing a blocking Ecos-connect call
+(explained XNet-never-connects/active-locos-stuck-at-0/MultiMaus err13 as one
+root cause) and an XNet bus-timeout far too short for genuine throttle idle
+behavior (5s → 120s), plus validating the OLED display for the first time
+(live status icons, 10-second OmniConnect boot splash). Next: pick from the
+"After Phase 4.6" backlog (LocoNet, Z21, the deferred stolen-icon display
+bug, bus-wide e-stop actually stopping locos, or the remaining deferred OLED
+fields).

@@ -7,6 +7,28 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 4.6 complete: 5-minute subscription lifecycle confirmed under real timing**
+- **Test**: with Ecos running, moved a loco's speed once via the MultiMaus
+  (active-loco count → 1), then left it completely untouched (no further
+  drive/function commands) for 5+ minutes.
+- **Result**: active-loco count dropped 2→1 on both the XNet page (`Active:`)
+  and the Ecos page (`Subscribed:`) as expected - confirming `StateEngine::
+  expungeInactiveLocos()` purged the inactive loco after `LOCO_INACTIVITY_
+  TIMEOUT` (5 min) and `CommandRouter::update()` correctly called
+  `EcosInterface::unsubscribeFromLoco()` for it, matching the code-inspection
+  analysis from the 2026-07-31 entry (the 30s Ecos address-map heartbeat
+  refresh is fully decoupled from this and cannot resurrect a purged loco).
+- **Significance**: this was the last open item from Phase 4.6's checklist
+  ("What Phase 4.6 Actually Needs" in `CLAUDE.md`) - all three remaining
+  items (XpressNet→Ecos propagation, Ecos→XpressNet propagation, and this
+  subscription lifecycle) are now confirmed live. **Phase 4.6 is complete.**
+  `CLAUDE.md`'s top banner, Phase 4.6 section, and Development Status were
+  all updated to reflect this - see "After Phase 4.6" there for what's next
+  (LocoNet, Z21, the deferred stolen-icon display bug, bus-wide e-stop
+  actually stopping locos, remaining deferred OLED fields).
+
+---
+
 **2026-08-03 — Boot splash added (OmniConnect logo); RSSI text de-duplicated; branding decision**
 - **Trigger**: user confirmed the 120s XNet bus-timeout fix worked live (icon
   stays Connected between widely-spaced throttle commands now), then flagged
