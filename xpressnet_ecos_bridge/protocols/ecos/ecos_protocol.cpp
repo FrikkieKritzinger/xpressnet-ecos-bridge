@@ -61,13 +61,6 @@ uint16_t ecosBuildSetFunctionCmd(char* buffer, uint16_t buffer_size,
     return (len > 0) ? len : 0;
 }
 
-uint16_t ecosBuildGetCmd(char* buffer, uint16_t buffer_size,
-                        uint16_t object_id, const char* property) {
-    if (!buffer || !property || buffer_size < 60) return 0;
-    int len = snprintf(buffer, buffer_size, "get(%u, %s)\n", object_id, property);
-    return (len > 0) ? len : 0;
-}
-
 // ============================================================================
 // PROTOCOL PARSING HELPERS
 // ============================================================================

@@ -203,7 +203,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔲 NOT STARTED
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (step 1 of 10 done)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -218,13 +218,14 @@ before the display/feature work that would otherwise sit on top of wrong data;
 the riskiest item (5.9, previously caused a live regression) is scheduled once
 everything else gives a clean, tested baseline to attempt it from again.
 
-1. **Dead-code cleanup** (trivial, do first to clear noise): remove unused
-   `ecosBuildGetCmd()` (`protocols/ecos/ecos_protocol.h/.cpp`, zero callers),
-   unused `LocoState.unknown` and `LocoState.ecos_object_id` fields
-   (`definitions.h` - `ecos_object_id` duplicates `EcosInterface`'s own
-   internal address map). `nextPage()`/`prevPage()` on `OledDisplay` are also
-   unused (no button wired up yet) but harmless - leave unless it's convenient
-   to touch the same file anyway.
+1. ✅ **Dead-code cleanup** (2026-08-03) - removed unused `ecosBuildGetCmd()`
+   (`protocols/ecos/ecos_protocol.h/.cpp` - its only callers turned out to be
+   its own now-deleted unit tests, not production code) and the unused
+   `LocoState.unknown`/`ecos_object_id` fields (`definitions.h`). Left
+   `nextPage()`/`prevPage()` on `OledDisplay` alone (no button wired up yet,
+   but harmless and didn't touch the same file). Native suite 91/91 passing
+   (down from 93 - the two `ecosBuildGetCmd` tests were removed with it, not
+   a regression); firmware builds clean and flashed.
 2. **Bus-wide E-stop actually stops locos** - operating-safety priority.
    `XpressNetInterface::onPowerStateChange()` currently only echoes the
    acknowledgment back onto the bus (fixes the MultiMaus STOP-button display
@@ -344,8 +345,8 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔲 Not started - see the dedicated section
-  below for the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (step 1 of 10 done) - see
+  the dedicated section below for the roadmap.
 
 ---
 
@@ -716,8 +717,8 @@ a program track.
 ---
 
 **Last Updated**: 2026-08-03. **Phase 4.6 is complete** - every checklist item
-confirmed on real hardware. **Phase 5 (Feature Completion) is now planned**,
+confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Not started yet; next session should begin at step 1
-(dead-code cleanup) and proceed in order.
+section above. Step 1 (dead-code cleanup) is done; next up is step 2
+(bus-wide E-stop actually stopping locos).

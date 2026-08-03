@@ -159,21 +159,6 @@ void test_ecos_build_release_control(void) {
 }
 
 // ============================================================================
-// TESTS - GET (PROPERTY QUERY)
-// ============================================================================
-
-void test_ecos_build_get_speed_property(void) {
-    int len = ecosBuildGetCmd(cmd_buffer, sizeof(cmd_buffer), 100, "speed");
-    TEST_ASSERT_TRUE(len > 0);
-    TEST_ASSERT_EQUAL_STRING("get(100, speed)\n", cmd_buffer);
-}
-
-void test_ecos_build_get_null_property_rejected(void) {
-    int len = ecosBuildGetCmd(cmd_buffer, sizeof(cmd_buffer), 100, nullptr);
-    TEST_ASSERT_EQUAL_INT(0, len);
-}
-
-// ============================================================================
 // TESTS - COMMAND FORMAT
 // ============================================================================
 
@@ -249,9 +234,6 @@ int main(void) {
 
     RUN_TEST(test_ecos_build_release_view);
     RUN_TEST(test_ecos_build_release_control);
-
-    RUN_TEST(test_ecos_build_get_speed_property);
-    RUN_TEST(test_ecos_build_get_null_property_rejected);
 
     RUN_TEST(test_ecos_command_includes_trailing_newline);
 

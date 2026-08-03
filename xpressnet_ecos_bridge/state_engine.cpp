@@ -102,8 +102,7 @@ bool StateEngine::addOrUpdateLoco(uint16_t address, const LocoState& state) {
     new_loco.last_source = state.last_source;
     new_loco.last_update_ms = now_ms();
     new_loco.subscribed_to_ecos = state.subscribed_to_ecos;
-    new_loco.unknown = false;
-    
+
     loco_count++;
     
     DEBUG_STATE_PRINTF("Added new loco %u (now %d total). Source: %s\n",
@@ -346,7 +345,6 @@ void StateEngine::debugPrintLoco(uint16_t address) const {
     DEBUG_STATE_PRINTF("Last Update:       %lu ms ago\n", age);
     DEBUG_STATE_PRINTF("Last Source:       %s\n", locoSourceToString(loco.last_source));
     DEBUG_STATE_PRINTF("Subscribed to Ecos: %s\n", loco.subscribed_to_ecos ? "Yes" : "No");
-    DEBUG_STATE_PRINTF("Unknown:           %s\n", loco.unknown ? "Yes" : "No");
     DEBUG_STATE_PRINT("====================\n\n");
 }
 

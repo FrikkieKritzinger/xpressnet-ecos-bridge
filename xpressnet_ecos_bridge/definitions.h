@@ -54,7 +54,6 @@ enum class ComponentStatus {
 struct LocoState {
     // Identity
     uint16_t dcc_address;           // DCC address (0-9999), short or long
-    uint16_t ecos_object_id;        // Ecos-internal object ID (maps DCC address to Ecos ID, 0=unknown)
 
     // Control state
     uint8_t speed;                  // Speed: 0-126 (0 = stop)
@@ -65,8 +64,7 @@ struct LocoState {
     LocoSource last_source;         // Where last command came from
     unsigned long last_update_ms;   // Timestamp of last update (for expiry)
     bool subscribed_to_ecos;        // Is Ecos sending us updates for this loco?
-    bool unknown;                   // Placeholder for unknown locos (future)
-    
+
     // Comparison operator for searching
     bool operator==(uint16_t addr) const {
         return dcc_address == addr;

@@ -7,6 +7,35 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 5 step 1: dead-code cleanup**
+- **`ecosBuildGetCmd()` removed** (`protocols/ecos/ecos_protocol.h/.cpp`) - the
+  earlier audit said "zero callers", which was true for production code but
+  missed that its own unit test suite (`test_ecos_command_builder.cpp`) called
+  it directly. Traced the history: this builder was originally used by
+  `sendHeartbeat()` (`get(10, name)`), but that call site was replaced with
+  `queryAddressMap()` when the 2026-07-31 heartbeat bug was fixed (see that
+  entry below) - leaving the builder orphaned with only its own tests keeping
+  it alive. Removed the function and its two tests (`test_ecos_build_get_speed_property`,
+  `test_ecos_build_get_null_property_rejected`) together, consistent with
+  "if you're certain something is unused, delete it completely" rather than
+  keeping tests for dead code.
+- **`LocoState.unknown` and `LocoState.ecos_object_id` removed** (`definitions.h`):
+  `unknown` was always initialized `false` and never set `true` anywhere,
+  only ever read in a debug print (removed too, `state_engine.cpp`);
+  `ecos_object_id` was declared but never written or read anywhere - it
+  duplicated the separate address-map array `EcosInterface` already
+  maintains internally. Confirmed no positional/aggregate `LocoState{...}`
+  initialization exists anywhere that field order/count could break.
+- **Left alone**: `OledDisplay::nextPage()`/`prevPage()` - unused (no
+  physical button wired up yet) but harmless, and cleanup didn't happen to
+  touch that file.
+- **Verified**: native suite 91/91 passing (down from 93 - exactly the two
+  `ecosBuildGetCmd` tests removed with it, not a regression); RAM usage
+  dropped slightly (~150 bytes, consistent with 3 fewer bytes × 50 max
+  locos); firmware builds clean and flashed.
+
+---
+
 **2026-08-03 — Phase 5 roadmap planned: full codebase audit, 10 ordered steps**
 - **Trigger**: with Phase 4.6 complete, user asked to plan Phase 5 covering
   every deferred item, proposing an initial list (E-stop, deferred display

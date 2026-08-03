@@ -129,20 +129,6 @@ uint16_t ecosBuildSetDirectionCmd(char* buffer, uint16_t buffer_size,
 uint16_t ecosBuildSetFunctionCmd(char* buffer, uint16_t buffer_size,
                                 uint16_t object_id, uint8_t function_index, uint8_t state);
 
-/**
- * Build a "get" command to query a specific property
- * Returns: "get(1000, speed)\n" or "get(1000, functions)\n"
- * Used for on-demand property queries (not typically needed if subscribed)
- *
- * @param buffer Destination for the command string
- * @param buffer_size Size of the destination buffer
- * @param object_id Ecos object ID
- * @param property Property name (e.g., "speed", "dir", "name", "addr")
- * @return Number of bytes written, or 0 if buffer too small
- */
-uint16_t ecosBuildGetCmd(char* buffer, uint16_t buffer_size,
-                        uint16_t object_id, const char* property);
-
 // ============================================================================
 // PROTOCOL PARSING HELPERS
 // ============================================================================
