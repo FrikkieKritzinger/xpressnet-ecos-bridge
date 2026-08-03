@@ -285,7 +285,7 @@ void EcosMessageParser::parsePropertyLine(const char* line, EcosReply& reply) {
                     } else {
                         reply.functions &= ~(1UL << fn_index);
                     }
-                    reply.functions_mask |= (1 << fn_index);
+                    reply.functions_mask |= (1UL << fn_index);
                     reply.has_functions = true;
                 }
             }

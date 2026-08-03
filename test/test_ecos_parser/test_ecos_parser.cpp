@@ -462,6 +462,93 @@ void test_ecos_parse_addr_value(void) {
     TEST_ASSERT_EQUAL_UINT16(100, reply.dcc_address);
 }
 
+void test_ecos_parse_single_function_on(void) {
+    // func[0,1] means F0 is on - both the bit itself and the mask bit
+    // marking "this reply actually reported F0" must be set.
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 1000>\n1000 func[0,1]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_TRUE(reply.has_functions);
+    TEST_ASSERT_EQUAL_UINT32(0x01, reply.functions);
+    TEST_ASSERT_EQUAL_UINT32(0x01, reply.functions_mask);
+}
+
+void test_ecos_parse_function_reply_only_masks_reported_bits(void) {
+    // A real Ecos event usually reports just the one function that
+    // changed - functions_mask must reflect only that bit, not every bit,
+    // so a caller can merge instead of overwriting the full bitmap.
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 1000>\n1000 func[3,1]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT32(1UL << 3, reply.functions);
+    TEST_ASSERT_EQUAL_UINT32(1UL << 3, reply.functions_mask);
+}
+
+void test_ecos_parse_function_bit_31_not_truncated(void) {
+    // Regression test for a real bug found in a 2026-08-03 codebase audit:
+    // functions_mask used to be uint8_t (only 8 bits) with a plain `int`
+    // shift, so `1 << fn_index` for fn_index 8-31 silently truncated to 0
+    // on assignment - any function at F8 or above never actually
+    // registered in the mask at all, regardless of the merge logic built
+    // on top of it.
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 1000>\n1000 func[31,1]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT32(1UL << 31, reply.functions);
+    TEST_ASSERT_EQUAL_UINT32(1UL << 31, reply.functions_mask);
+}
+
+void test_ecos_parse_function_off_still_masked(void) {
+    // func[n,0] (function turned off) must still mark the mask bit - the
+    // mask means "this reply said something about this function", not
+    // "this function is on".
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 1000>\n1000 func[5,0]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT32(0, reply.functions & (1UL << 5));
+    TEST_ASSERT_EQUAL_UINT32(1UL << 5, reply.functions_mask);
+}
+
 void test_ecos_parse_system_status_stop_event(void) {
     // Base ECoS object (id=1) pushing an unsolicited STOP event - the
     // real-world trigger for Phase 5 step 2's Ecos-to-XpressNet direction
@@ -589,6 +676,11 @@ int main(void) {
     RUN_TEST(test_ecos_parse_direction_value);
     RUN_TEST(test_ecos_parse_multiple_values);
     RUN_TEST(test_ecos_parse_addr_value);
+
+    RUN_TEST(test_ecos_parse_single_function_on);
+    RUN_TEST(test_ecos_parse_function_reply_only_masks_reported_bits);
+    RUN_TEST(test_ecos_parse_function_bit_31_not_truncated);
+    RUN_TEST(test_ecos_parse_function_off_still_masked);
 
     RUN_TEST(test_ecos_parse_system_status_stop_event);
     RUN_TEST(test_ecos_parse_system_status_go_event);

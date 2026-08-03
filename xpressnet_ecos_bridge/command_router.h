@@ -71,8 +71,14 @@ public:
     
     /**
      * Handle incoming function command from Ecos
+     * @param functions Bitmap F0-F31, but only the bits set in functions_mask
+     *                  are actually applied - unset bits keep their
+     *                  previously-known value rather than being clobbered
+     *                  to 0, since a single Ecos event often only reports
+     *                  the one function that actually changed.
+     * @param functions_mask Which bits in functions are meaningful
      */
-    void handleEcosFunctionCommand(uint16_t address, uint32_t functions);
+    void handleEcosFunctionCommand(uint16_t address, uint32_t functions, uint32_t functions_mask);
 
     /**
      * Bus-wide emergency stop / track power off. Forces every known loco's

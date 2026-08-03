@@ -7,6 +7,65 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Boot splash layout: title in the header band, logo below, no divider**
+- User request, unrelated to Phase 5: reworked `OledDisplay::drawBootLogo()`
+  so "OmniConnect" sits in the top 16 rows (the same yellow/header band
+  every regular page splits at `COLOR_SPLIT_Y`) and the logo bitmap starts
+  below that line, rather than the original top-to-bottom layout with the
+  logo first and text last. Reason given: undecided yet between a
+  full-white OLED and a yellow/blue one, and neither the text nor the logo
+  mark should straddle the physical color split if it ends up being the
+  two-tone display. First pass added a divider line at that row matching
+  the regular pages' convention; user liked the layout on the real
+  yellow/blue OLED but asked for the line itself removed (the physical
+  color split already reads as a divider on that hardware, an explicit
+  drawn line was redundant). Two quick flash-and-check iterations, both
+  confirmed on real hardware.
+
+---
+
+**2026-08-03 — Phase 5 step 4: Ecos function-command merge bug, fixed (pending live test)**
+- **The bug**: `EcosReply.functions_mask` (which function bits a given Ecos
+  reply actually reported) was parsed but never consulted anywhere.
+  `CommandRouter::handleEcosFunctionCommand()` overwrote the *entire*
+  32-bit function bitmap on every Ecos event, using only the `functions`
+  value from that one event - since a real Ecos event typically only
+  reports the single function that changed, every other already-known
+  function would silently reset to 0.
+- **The fix**: `handleEcosFunctionCommand()` now takes a `functions_mask`
+  parameter and merges - `(existing_functions & ~functions_mask) |
+  (functions & functions_mask)` - so only the bits this specific event
+  actually reported get updated; everything else keeps its prior value.
+  Updated the one call site (`EcosInterface::handleReply()`) to pass
+  `reply.functions_mask` through, where previously it was computed and
+  then dropped on the floor.
+- **A second, more fundamental bug found in the same area**: `functions_mask`
+  was declared `uint8_t` - only 8 bits, but functions span F0-F31 (32
+  bits, matching `functions`'s own `uint32_t` width). Worse, the line
+  setting it used a plain `int` shift (`reply.functions_mask |= (1 <<
+  fn_index)`) rather than the `1UL <<` idiom already used correctly one
+  line above for `functions` itself - so for any `fn_index` 8 or above,
+  the shifted value silently truncated to 0 on assignment to the 8-bit
+  field. Any function at F8 or above never actually registered in the
+  mask at all, independent of whatever merge logic sat on top of it -
+  fixing only the merge logic without this would have left high-numbered
+  functions permanently stuck. Fixed by widening `functions_mask` to
+  `uint32_t` and using `1UL << fn_index` to match.
+- **Zero prior test coverage found for this whole area**: `test_ecos_parser`
+  had no `func[]` parsing tests at all before this. Added 4 (single
+  function on, mask reflects only the reported bit, F31 specifically -
+  the regression test for the truncation bug, function-off still sets the
+  mask bit) plus 2 new `test_command_router` cases exercising the actual
+  merge (a later partial update preserves earlier bits; a partial update
+  can still clear a bit if that bit is the one reported). Native suite
+  118/118 passing (up from 112).
+- **Verified**: firmware builds clean, flashed. **Not yet verified live**:
+  via Ecos (not XpressNet), turn two different functions on one at a time
+  and confirm both show on simultaneously - the old bug would have reset
+  the first back off the moment the second event arrived.
+
+---
+
 **2026-08-03 — Phase 5 step 3 follow-up: two more real bugs found via live testing, now confirmed both directions**
 - **Trigger**: live test of the step 3 fix (disconnect Ecos, change speed/
   direction, reconnect) showed "changes does not feed down to ecos, even

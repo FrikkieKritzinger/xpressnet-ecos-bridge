@@ -203,7 +203,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-3 done, 4-10 remaining)
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-3 done, step 4 pending live test, 5-10 remaining)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -303,13 +303,29 @@ everything else gives a clean, tested baseline to attempt it from again.
      excluded from the native build, real-hardware/WiFi-coupled - matches
      its existing testing boundary); native suite 112/112 passing
      throughout (config/logic changes elsewhere unaffected).
-4. **Ecos function-command merge bug** - also a real correctness bug:
-   `EcosReply.functions_mask` (which function bits a given Ecos reply
-   actually reported) is parsed but never consulted anywhere.
-   `CommandRouter::handleEcosFunctionCommand` overwrites the *entire*
+4. ⏳ **Ecos function-command merge bug - fixed, pending live test (2026-08-03)**.
+   `EcosReply.functions_mask` was parsed but never consulted anywhere -
+   `CommandRouter::handleEcosFunctionCommand` overwrote the *entire*
    function bitmap on every Ecos event instead of merging only the reported
-   bits, so a partial Ecos function update can silently clobber other
-   already-known function state.
+   bits, so a single Ecos event reporting just one changed function (e.g.
+   only F3) would silently clobber every other already-known function back
+   to 0. Fixed: `handleEcosFunctionCommand()` now takes a `functions_mask`
+   parameter and merges - `(existing & ~mask) | (functions & mask)` -
+   preserving every bit not covered by this specific event. Found a second,
+   more fundamental bug in the same area while wiring this up:
+   `functions_mask` was declared `uint8_t` (only 8 bits) with a plain `int`
+   shift, so `1 << fn_index` for fn_index 8-31 silently truncated to 0 on
+   assignment - any function at F8 or above never actually registered in
+   the mask at all, regardless of merge logic built on top of it. Widened
+   to `uint32_t` and fixed the shift to `1UL <<`, matching the pattern
+   already used correctly for `functions` itself one line above. This area
+   had zero existing test coverage (no `func[]` parsing tests existed in
+   `test_ecos_parser` at all) - added 4 parser tests plus 2
+   `test_command_router` merge tests; native suite 118/118 passing.
+   **Needs a live test**: via Ecos (not XpressNet), turn two different
+   functions on one at a time and confirm both show on simultaneously - the
+   old bug would have reset the first back off the instant the second
+   event arrived.
 5. **OLED function display** ("Fn: (TBD)" on the main page) - cheaper than
    it looks: `LocoState.functions` is already tracked and already used
    elsewhere (answering throttle LocoInfo requests); it just never got
@@ -406,8 +422,9 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-3 done, 4-10
-  remaining) - see the dedicated section below for the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-3 done, step 4
+  pending live test, 5-10 remaining) - see the dedicated section below for
+  the roadmap.
 
 ---
 
@@ -781,14 +798,14 @@ a program track.
 confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Steps 1-3 are done. Step 3 (fake outgoing Ecos command
-queue) took several rounds of live testing to fully close out - beyond the
-original fix, found and fixed a disconnect-detection gap (one of two
-disconnect paths never cleared the stale address map, so commands kept
-resolving and writing into a dead socket instead of queuing; also
-tightened detection from 45s to 10s worst-case) and a command-order bug
-(speed sent before direction meant Ecos built its real combined DCC packet
-from a stale cached speed whenever direction was genuinely changing -
-reordered to direction-before-speed). Both directions and the disconnect/
-reconnect recovery path are now confirmed live. Native suite 112/112. Next:
-step 4 (Ecos function-command merge bug).
+section above. Steps 1-3 are done and confirmed live (step 3, the fake
+outgoing Ecos command queue, took several rounds - a disconnect-detection
+gap, faster 10s detection, and a speed/direction command-order bug all
+found and fixed along the way). Step 4 (Ecos function-command merge bug)
+is implemented - `handleEcosFunctionCommand()` now merges via
+`functions_mask` instead of overwriting the whole bitmap, and a second bug
+in the mask's own type (`uint8_t`, silently truncating any function at F8
+or above) is fixed too - but still needs a live test: via Ecos, turn two
+different functions on one at a time and confirm both stay on. Native
+suite 118/118. Also updated the boot splash layout per request - title
+text in the top 16 rows, logo below, no divider line.

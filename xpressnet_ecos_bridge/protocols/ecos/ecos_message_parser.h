@@ -51,8 +51,14 @@ struct EcosReply {
     uint8_t direction;              // 0=reverse, 1=forward (invalid if not set)
     uint32_t functions;             // Bitmap F0-F31
 
-    uint8_t functions_mask;         // Which function bits were actually set in this reply
-                                    // (so we don't overwrite unset functions when backfilling)
+    // Which function bits were actually reported in this reply (so a caller
+    // can merge instead of overwriting unset functions when backfilling).
+    // Real bug found in codebase audit 2026-08-03: this was uint8_t, which
+    // can only represent F0-F7 - `1 << fn_index` for fn_index 8-31 silently
+    // truncated to 0 on assignment, so any reported bit at F8 or above
+    // never actually registered in the mask. Must match `functions`'s own
+    // 32-bit width.
+    uint32_t functions_mask;
 
     SystemStatus system_status;     // Valid only if has_system_status
 

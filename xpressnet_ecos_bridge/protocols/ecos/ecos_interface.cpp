@@ -523,7 +523,7 @@ void EcosInterface::handleReply(const EcosReply& reply) {
                     router->handleEcosCommand(dcc_address, reply.speed, reply.direction);
                 }
                 if (reply.has_functions) {
-                    router->handleEcosFunctionCommand(dcc_address, reply.functions);
+                    router->handleEcosFunctionCommand(dcc_address, reply.functions, reply.functions_mask);
                 }
             }
         }

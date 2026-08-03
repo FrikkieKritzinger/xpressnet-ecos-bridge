@@ -120,7 +120,7 @@ void test_router_ecos_function_command_rejects_invalid_address(void) {
     MockProtocolInterface xnet_mock;
     router.setXpressNetInterface(&xnet_mock);
 
-    router.handleEcosFunctionCommand(0, 0x01);
+    router.handleEcosFunctionCommand(0, 0x01, 0xFFFFFFFF);
 
     TEST_ASSERT_EQUAL_INT(0, xnet_mock.getFunctionCommandCount());
     TEST_ASSERT_TRUE(router.getStateEngine().findLoco(0) < 0);
@@ -131,12 +131,43 @@ void test_router_ecos_function_command_updates_existing_loco(void) {
     CommandRouter router;
 
     router.handleEcosCommand(75, 50, 1);              // creates loco 75
-    router.handleEcosFunctionCommand(75, 0x07);        // updates it
+    router.handleEcosFunctionCommand(75, 0x07, 0xFFFFFFFF);  // updates it (fully-specified)
 
     LocoState state;
     router.getStateEngine().getLoco(75, state);
     TEST_ASSERT_EQUAL_UINT32(0x07, state.functions);
     TEST_ASSERT_EQUAL_UINT8(50, state.speed);  // Speed preserved
+}
+
+void test_router_ecos_function_command_merges_partial_update(void) {
+    // Phase 5 step 4: a single Ecos event usually only reports the one
+    // function that actually changed (functions_mask marks which bit),
+    // not the full F0-F31 state. This used to overwrite the entire bitmap
+    // unconditionally, silently clobbering every other already-known
+    // function back to 0.
+    CommandRouter router;
+    router.handleEcosFunctionCommand(75, 0x03, 0x03);  // F0 and F1 on, fully-specified
+
+    // Only F2 is reported this time (mask=0x04) - F0/F1 must survive
+    router.handleEcosFunctionCommand(75, 0x04, 0x04);
+
+    LocoState state;
+    router.getStateEngine().getLoco(75, state);
+    TEST_ASSERT_EQUAL_UINT32(0x07, state.functions);  // F0, F1, F2 all on
+}
+
+void test_router_ecos_function_command_partial_update_can_clear_a_bit(void) {
+    // The merge must also be able to turn a previously-on function off,
+    // not just add new ones - as long as that bit is in the mask.
+    CommandRouter router;
+    router.handleEcosFunctionCommand(75, 0x07, 0x07);  // F0, F1, F2 all on
+
+    // F2 reported off this time; F0/F1 not mentioned (mask only covers F2)
+    router.handleEcosFunctionCommand(75, 0x00, 0x04);
+
+    LocoState state;
+    router.getStateEngine().getLoco(75, state);
+    TEST_ASSERT_EQUAL_UINT32(0x03, state.functions);  // F0, F1 survive; F2 cleared
 }
 
 // ============================================================================
@@ -250,7 +281,7 @@ void test_router_broadcast_ecos_function_to_xpressnet(void) {
     MockProtocolInterface xnet_mock;
     router.setXpressNetInterface(&xnet_mock);
 
-    router.handleEcosFunctionCommand(75, 0x03);  // F0 and F1
+    router.handleEcosFunctionCommand(75, 0x03, 0xFFFFFFFF);  // F0 and F1, fully-specified
 
     TEST_ASSERT_EQUAL_INT(1, xnet_mock.getFunctionCommandCount());
     TEST_ASSERT_EQUAL_UINT32(0x03, xnet_mock.getLastFunctionCommand().functions);
@@ -567,6 +598,8 @@ int main(void) {
     RUN_TEST(test_router_ecos_command_rejects_invalid_speed);
     RUN_TEST(test_router_ecos_function_command_rejects_invalid_address);
     RUN_TEST(test_router_ecos_function_command_updates_existing_loco);
+    RUN_TEST(test_router_ecos_function_command_merges_partial_update);
+    RUN_TEST(test_router_ecos_function_command_partial_update_can_clear_a_bit);
 
     RUN_TEST(test_router_echo_prevention_opposite_source_suppressed);
     RUN_TEST(test_router_echo_prevention_reverse_direction_suppressed);

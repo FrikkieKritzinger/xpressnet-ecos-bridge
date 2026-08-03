@@ -286,19 +286,19 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
     echo_state.last_source = LocoSource::ECOS;
 }
 
-void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functions) {
+void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functions, uint32_t functions_mask) {
     /*
      * Process function state update from Ecos
      */
-    
-    DEBUG_ECOS_PRINTF("Ecos: Loco %u Functions 0x%08x\n", address, functions);
-    
+
+    DEBUG_ECOS_PRINTF("Ecos: Loco %u Functions 0x%08x (mask 0x%08x)\n", address, functions, functions_mask);
+
     // Validate
     if (!isValidDccAddress(address)) {
         DEBUG_ECOS_PRINTF("ERROR: Invalid Ecos address: %u\n", address);
         return;
     }
-    
+
     // Check echo prevention
     if (isEchoCommand(address, LocoSource::ECOS)) {
         DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u function command (from XpressNet)\n", address);
@@ -308,24 +308,31 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
 
     // Get existing or create
     LocoState new_state;
-    if (!state_engine.getLoco(address, new_state)) {
+    bool known = state_engine.getLoco(address, new_state);
+    uint32_t existing_functions = known ? new_state.functions : 0;
+
+    if (!known) {
         new_state.dcc_address = address;
         new_state.speed = 0;
         new_state.direction = 1;
-        new_state.functions = functions;
-        new_state.subscribed_to_ecos = true;
-        
-        if (!state_engine.addOrUpdateLoco(address, new_state)) {
-            DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u\n", address);
-            return;
-        }
-    } else {
-        new_state.functions = functions;
-        new_state.subscribed_to_ecos = true;
-        new_state.last_source = LocoSource::ECOS;
-        state_engine.addOrUpdateLoco(address, new_state);
     }
-    
+
+    // Merge: only apply the bits Ecos actually reported (functions_mask),
+    // keeping every other already-known function bit as-is. Real bug found
+    // in codebase audit 2026-08-03: this used to overwrite the entire
+    // bitmap unconditionally, so a single Ecos event reporting just one
+    // changed function (e.g. only F3) would silently clobber every other
+    // already-known function state back to 0, since the parser only ever
+    // sets bits it actually saw in that specific event.
+    new_state.functions = (existing_functions & ~functions_mask) | (functions & functions_mask);
+    new_state.subscribed_to_ecos = true;
+    new_state.last_source = LocoSource::ECOS;
+
+    if (!state_engine.addOrUpdateLoco(address, new_state)) {
+        DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u\n", address);
+        return;
+    }
+
     // Broadcast to XpressNet
     broadcastCommand(address, new_state, LocoSource::ECOS);
 
