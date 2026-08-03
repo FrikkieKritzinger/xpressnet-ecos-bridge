@@ -90,21 +90,31 @@ bool OledDisplay::begin() {
 // ============================================================================
 
 void OledDisplay::drawBootLogo() {
-    // logo.png's icon mark only - the wordmark/tagline were cropped out
-    // during conversion, too fine-detailed to stay legible at this
-    // resolution (see display/boot_logo.h). "OmniConnect" is printed here
-    // instead, as crisp vector text rather than part of the bitmap.
+    // "OmniConnect" text lives in the top 16 rows - the same yellow/header
+    // band every other page splits at COLOR_SPLIT_Y - and the logo bitmap
+    // starts below that line. Keeps the whole splash usable regardless of
+    // whether this ends up being a full-white OLED or a yellow/blue one:
+    // neither the text nor the logo mark straddles the physical color
+    // split, unlike the original top-to-bottom layout.
     display.clearDisplay();
-    display.drawBitmap((SCREEN_WIDTH - BOOT_LOGO_WIDTH) / 2, 2,
-                        boot_logo_bitmap, BOOT_LOGO_WIDTH, BOOT_LOGO_HEIGHT,
-                        SSD1306_WHITE);
 
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     const char* title = "OmniConnect";
     int text_width = (int)strlen(title) * 6;  // 6px/char at text size 1
-    display.setCursor((SCREEN_WIDTH - text_width) / 2, 52);
+    display.setCursor((SCREEN_WIDTH - text_width) / 2, 4);
     display.print(title);
+
+    // No divider line here (unlike the regular pages) - the physical
+    // yellow/blue color split at this same row already does that visually
+    // on the two-tone display, and a drawn line was redundant/unwanted on it.
+
+    // logo.png's icon mark only - the wordmark/tagline were cropped out
+    // during conversion, too fine-detailed to stay legible at this
+    // resolution (see display/boot_logo.h).
+    display.drawBitmap((SCREEN_WIDTH - BOOT_LOGO_WIDTH) / 2, COLOR_SPLIT_Y + 4,
+                        boot_logo_bitmap, BOOT_LOGO_WIDTH, BOOT_LOGO_HEIGHT,
+                        SSD1306_WHITE);
 
     display.display();
 }
