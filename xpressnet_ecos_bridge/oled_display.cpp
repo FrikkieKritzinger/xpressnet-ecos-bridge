@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include "display/oled_display.h"
+#include "display/boot_logo.h"
 #include "config.h"
 #include "definitions.h"
 #include "utils/debug.h"
@@ -66,34 +67,46 @@ OledDisplay::OledDisplay()
 
 bool OledDisplay::begin() {
     DEBUG_STARTUP_PRINT("Initializing OLED display...\n");
-    
+
     Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-    
+
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
         DEBUG_STARTUP_PRINTF("ERROR: OLED not found at address 0x%02X\n", OLED_ADDRESS);
         return false;
     }
-    
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    
-    // Title in yellow
-    display.setCursor(20, YELLOW_TITLE_Y);
-    display.println(F("XpressNet-Ecos"));
-    
-    // Subtitle in yellow
-    display.setCursor(35, YELLOW_STATUS_Y);
-    display.println(F("Bridge"));
-    
-    // Content in blue
-    display.setCursor(20, BLUE_CONTENT_Y + 10);
-    display.println(F("Initializing..."));
-    
-    display.display();
-    
+
+    // Boot splash: shown for OLED_BOOT_LOGO_DURATION_MS from here, while
+    // setup() continues on to init XpressNet/Ecos and the main loop starts
+    // connecting in the background - see update()'s early-return gate.
+    boot_started_ms = millis();
+    drawBootLogo();
+
     DEBUG_STARTUP_PRINT("OLED display initialized successfully\n");
     return true;
+}
+
+// ============================================================================
+// BOOT SPLASH (OmniConnect logo)
+// ============================================================================
+
+void OledDisplay::drawBootLogo() {
+    // logo.png's icon mark only - the wordmark/tagline were cropped out
+    // during conversion, too fine-detailed to stay legible at this
+    // resolution (see display/boot_logo.h). "OmniConnect" is printed here
+    // instead, as crisp vector text rather than part of the bitmap.
+    display.clearDisplay();
+    display.drawBitmap((SCREEN_WIDTH - BOOT_LOGO_WIDTH) / 2, 2,
+                        boot_logo_bitmap, BOOT_LOGO_WIDTH, BOOT_LOGO_HEIGHT,
+                        SSD1306_WHITE);
+
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    const char* title = "OmniConnect";
+    int text_width = (int)strlen(title) * 6;  // 6px/char at text size 1
+    display.setCursor((SCREEN_WIDTH - text_width) / 2, 52);
+    display.print(title);
+
+    display.display();
 }
 
 // ============================================================================
@@ -102,7 +115,18 @@ bool OledDisplay::begin() {
 
 void OledDisplay::update(const SystemStatus& status) {
     current_status = status;
-    
+
+    if (!boot_logo_done) {
+        if (millis() - boot_started_ms < OLED_BOOT_LOGO_DURATION_MS) {
+            return;  // still showing the static splash - nothing else to draw
+        }
+        boot_logo_done = true;
+        // Give PAGE_MAIN a full dwell instead of page_cycle_task firing
+        // immediately (its internal timer started at construction, long
+        // before the splash window ended).
+        page_cycle_task.reset();
+    }
+
     if (popup_message.active && shouldClearPopup()) {
         popup_message.active = false;
         DEBUG_TIMING_PRINT("Popup auto-cleared\n");
@@ -259,13 +283,12 @@ void OledDisplay::drawDeviceStatusScreen() {
     display.print(heap_percent);
     display.print(F("%)"));
     
-    // CPU freq and WiFi signal strength (IRAM usage isn't exposed by the
-    // ESP8266 Arduino core at runtime, so this slot shows RSSI instead)
+    // CPU freq (RSSI now lives only in the header icon, shown on every page -
+    // no need to duplicate it here as text too)
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
     display.print(F("CPU: "));
     display.print(getCpuFreqMhz());
-    display.print(F("MHz RSSI:"));
-    display.print(current_status.wifi_rssi);
+    display.print(F("MHz"));
     
     // Memory warning if critical
     if (current_status.current_heap_bytes < 10000) {

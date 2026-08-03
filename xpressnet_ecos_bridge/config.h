@@ -146,6 +146,12 @@
     
     // Timing
     #define OLED_UPDATE_INTERVAL    500   // ms - how often to refresh display
+
+    // Boot splash: shown once from display init, while setup()/loop() carry
+    // on connecting XpressNet/Ecos in the background - not a "wait until
+    // connected" gate, just a fixed-length logo screen to let power settle
+    // before switching to the regular status pages.
+    #define OLED_BOOT_LOGO_DURATION_MS  10000
 #endif
 
 // ============================================================================

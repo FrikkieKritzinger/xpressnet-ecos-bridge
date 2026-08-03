@@ -100,8 +100,20 @@ void setup() {
         debugPrintf("Build: %s %s\n", __DATE__, __TIME__);
     #endif
     
+    // Display first - shows the boot splash immediately at power-up, before
+    // anything else starts. Protocol init below runs in the background while
+    // it's showing (see OledDisplay::update()'s boot-splash gate).
+    #if ENABLE_OLED_DISPLAY
+        debugPrintf("Initializing OLED display...\n");
+        if (!display.begin()) {
+            debugPrintf("ERROR: OLED display initialization failed!\n");
+        } else {
+            debugPrintf("OLED display initialized\n");
+        }
+    #endif
+
     // Initialize protocols (order doesn't matter)
-    
+
     #if ENABLE_XPRESSNET
         debugPrintf("Initializing XpressNet interface...\n");
         if (!xnet_interface.begin()) {
@@ -139,16 +151,6 @@ void setup() {
             debugPrintf("ERROR: Z21 LAN initialization failed!\n");
         } else {
             debugPrintf("Z21 LAN interface initialized\n");
-        }
-    #endif
-    
-    // Initialize display
-    #if ENABLE_OLED_DISPLAY
-        debugPrintf("Initializing OLED display...\n");
-        if (!display.begin()) {
-            debugPrintf("ERROR: OLED display initialization failed!\n");
-        } else {
-            debugPrintf("OLED display initialized\n");
         }
     #endif
     

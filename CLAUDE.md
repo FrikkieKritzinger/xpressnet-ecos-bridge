@@ -58,9 +58,17 @@
 > for the first time, several Phase-2-era placeholder fields wired to live
 > data, and the status/page UI reworked around hand-drawn icons (the
 > SSD1306's default font has no real glyphs for the Unicode checkmark/X used
-> previously - confirmed to render as garbage on real hardware). Full
-> diagnosis in [docs/CHANGELOG.md](docs/CHANGELOG.md). **Next**: live
-> confirmation that 120s holds Connected through normal idle gaps, then the
+> previously - confirmed to render as garbage on real hardware). **Confirmed
+> live**: the 120s XNet bus timeout holds Connected correctly through widely
+> spaced throttle commands. Also added a 10-second boot splash (OmniConnect
+> logo, `display/boot_logo.h`) shown immediately at power-up while XNet/Ecos
+> connect in the background, and removed the now-duplicate RSSI text from the
+> Device Status page (the header icon already covers it). "OmniConnect" is
+> new branding invented after this project already existed - a conscious
+> decision was made to keep it user-facing only (the boot splash) rather than
+> rename the codebase, since a real rename would touch the Arduino-IDE-
+> mandated folder/`.ino` name match for no functional benefit at this stage.
+> Full diagnosis in [docs/CHANGELOG.md](docs/CHANGELOG.md). **Next**: the
 > real-timing subscription lifecycle - see Phase
 > 4.6 below.
 
@@ -148,7 +156,8 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   active would mean more background traffic and could allow tightening
   this) and moved from a private constant in `xpressnet_interface.h` into
   `config.h` as `XPRESSNET_BUS_TIMEOUT`, matching every comparable Ecos-side
-  timeout already living there. Flashed; live re-confirmation still pending.
+  timeout already living there. **Confirmed live**: status now holds
+  Connected correctly through widely-spaced throttle commands.
   See [docs/CHANGELOG.md](docs/CHANGELOG.md).
 - **OLED display validated against real hardware for the first time (2026-08-03)**:
   physically attached and confirmed initializing (last touched 2026-07-29
@@ -158,18 +167,18 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   of hardcoded stubs; UI reworked with hand-drawn status icons (WiFi signal
   bars global/every page, per-interface connection icons page-local -
   explicitly setting the pattern for LocoNet/Z21) after confirming Unicode
-  glyphs render as garbage on the real SSD1306 font. See
+  glyphs render as garbage on the real SSD1306 font. Followed up with a
+  10-second boot splash (OmniConnect logo, shown immediately at power-up
+  while XNet/Ecos connect in the background - see `display/boot_logo.h`) and
+  removed the Device Status page's now-duplicate RSSI text. See
   [docs/CHANGELOG.md](docs/CHANGELOG.md).
 - **Not yet done (next session's plan)**:
-  1. Live confirmation that the 120s `XPRESSNET_BUS_TIMEOUT` actually holds
-     status Connected through normal single-throttle idle gaps without
-     needlessly delaying real-disconnect detection.
-  2. The 5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min
+  1. The 5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min
      idle → unsubscribe) under real timing. Verified by code inspection that
      the 30-second Ecos address-map heartbeat refresh cannot resurrect a
      purged loco (it only touches the address-map lookup table, never
      `StateEngine` or re-subscribes) - but not yet tested live.
-  3. Deferred display fields: XNet last-message age (needs exposing through
+  2. Deferred display fields: XNet last-message age (needs exposing through
      `ProtocolInterface`, touching the mock used by native tests), Ecos
      round-trip latency (needs timestamp correlation on the heartbeat query),
      per-loco functions on the main page.
@@ -669,9 +678,10 @@ rather than completed, since it served no design purpose.
 ---
 
 **Last Updated**: 2026-08-03. Project status as of the last real session:
-OLED physically attached and validated on real hardware for the first time;
-a blocking Ecos-connect bug (explaining XNet-never-connects, active-locos-
-stuck-at-0, and MultiMaus err13 as one root cause) and an XNet bus-activity
-gap (status flapping to Disconnected during idle give-loco-info polling)
-both found and fixed. Live re-confirmation of the bus-activity fix and the
-5-minute subscription-lifecycle timeout are the next steps.
+OLED physically attached and validated on real hardware for the first time.
+Two real bugs found and fixed, both confirmed live: a blocking Ecos-connect
+call that explained XNet-never-connects/active-locos-stuck-at-0/MultiMaus
+err13 as one root cause, and an XNet bus-timeout far too short for genuine
+throttle idle behavior (raised 5s → 120s). Added a 10-second OmniConnect
+boot splash and cleaned up duplicate/stubbed display fields. The 5-minute
+subscription-lifecycle timeout is the next step.

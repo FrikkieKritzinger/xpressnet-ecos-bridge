@@ -116,7 +116,11 @@ private:
     
     // Timing tasks
     TimedTask page_cycle_task;
-    
+
+    // Boot splash state - see begin()/update() and OLED_BOOT_LOGO_DURATION_MS
+    unsigned long boot_started_ms = 0;
+    bool boot_logo_done = false;
+
     // Status snapshot (cached from update)
     SystemStatus current_status;
     
@@ -126,6 +130,7 @@ private:
     void drawXpressNetScreen();
     void drawEcosScreen();
     void drawErrorPopup();
+    void drawBootLogo();
     
     // Header icons - hand-drawn shapes only, never font glyphs (the SSD1306
     // default font has no Unicode checkmark/X glyphs; confirmed to render

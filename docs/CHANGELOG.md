@@ -7,6 +7,48 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Boot splash added (OmniConnect logo); RSSI text de-duplicated; branding decision**
+- **Trigger**: user confirmed the 120s XNet bus-timeout fix worked live (icon
+  stays Connected between widely-spaced throttle commands now), then flagged
+  two small UI leftovers and dropped a `logo.png` into the project root
+  wanting it shown on the OLED at power-up.
+- **RSSI text removed from the Device Status page**: it duplicated the
+  header icon (shown on every page already) - `CPU: XXMHz` stays, the
+  trailing `RSSI:` text is gone.
+- **Boot splash**: `logo.png` (1024x1024 full color - "OmniConnect: Any
+  throttle. Any command station. Total freedom.") is far too much for a
+  128x64 monochrome display. Cropped to the icon mark only (Pillow, not
+  bundled with the project - installed ad hoc for this conversion); dropped
+  the wordmark/tagline entirely since fine text doesn't stay legible at this
+  resolution; thresholded against the sampled background color and
+  hand-packed into a 104x39px 1-bit bitmap (`display/boot_logo.h`, a derived
+  asset - regenerate from `logo.png` if the logo ever changes, don't
+  hand-edit). "OmniConnect" is printed underneath as real vector text
+  instead of trying to bitmap-render it. `OledDisplay::begin()` draws this
+  immediately and records a timestamp; `update()` gates on
+  `OLED_BOOT_LOGO_DURATION_MS` (10s, `config.h`) before falling through to
+  the normal page-cycling logic - not a "wait until connected" gate, XNet/
+  Ecos connect in the background the whole time. Moved the OLED init block
+  to the front of `setup()` (was previously last, after XNet/Ecos/LocoNet/
+  Z21) so the splash appears as early as physically possible at power-up.
+  Reset `page_cycle_task`'s timer at the boot-window transition so the Main
+  page gets a full fresh dwell instead of the rotation immediately jumping
+  to Device (its internal timer had been running since construction,
+  10s before the gate ever released it).
+- **Branding decision, not executed**: confirmed with the user that
+  "OmniConnect" is new branding invented after the project already existed
+  under `xpressnet_ecos_bridge` - not a hint to rename anything. Discussed
+  and agreed: a full rename would touch the Arduino-IDE-mandated folder/
+  `.ino` name match, every doc reference, and git, for zero functional
+  benefit at this stage (solo project, no external consumers yet). Decision:
+  "OmniConnect" stays user-facing only (boot splash); revisit a real rename
+  only if this is ever published/handed to other people.
+- **Verified**: firmware builds clean, native suite 93/93 passing (`oled_display.cpp`/
+  `boot_logo.h` excluded from native build), flashed and confirmed on real
+  hardware - splash renders cleanly for the full 10s before handing off.
+
+---
+
 **2026-08-03 — OLED attached: blocking Ecos-connect bug fully explained the "XNet never connects" symptom; display validated and reworked against real hardware**
 - **Trigger**: OLED physically attached for the first time and confirmed
   initializing. With Ecos deliberately left unreachable for this test, three
