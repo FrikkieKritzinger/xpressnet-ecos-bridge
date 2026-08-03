@@ -142,13 +142,9 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   purge and `EcosInterface::unsubscribeFromLoco()` both fired correctly.
   This was the last open item from Phase 4.6's checklist - **Phase 4.6 is
   now complete**.
-- **Deferred, not part of Phase 4.6**: XNet last-message age display (needs
-  exposing through `ProtocolInterface`, touching the mock used by native
-  tests), Ecos round-trip latency display (needs timestamp correlation on
-  the heartbeat query), per-loco functions on the main page.
-- **Deliberately deferred**: bus-wide emergency stop only acknowledges on the
-  wire now - it does not yet force any locomotives to actually stop moving
-  (see Future Improvements).
+- **Deferred, not part of Phase 4.6** - now tracked as ordered Phase 5 steps
+  (see below): deferred OLED display fields (step 8), bus-wide emergency stop
+  actually stopping locos (step 2).
 - Native unit test suite: 93/93 passing (grew from 91 sometime after the
   XpressNetMaster rewrite - not independently investigated, no regressions).
 - ESP8266 (`env:wemos`) firmware build re-verified after the library integration.
@@ -194,13 +190,97 @@ the 5-minute subscription lifecycle under real timing (2026-08-03), and the
 OLED display (2026-08-03). Full detail: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 (Bus-wide emergency stop still only acknowledges on the wire, not actually
-stopping locos - see Future Improvements - this was always out of scope for
-this checklist.)
+stopping locos - now Phase 5 step 2 - this was always out of scope for this
+checklist.)
 
 ### After Phase 4.6
 
-See "Future Improvements (Post-Phase 4)" near the end of this file for the backlog
-(LocoNet, Z21, EEPROM config storage, OTA updates, etc.) - nothing there is started.
+See "🎯 Phase 5: Feature Completion" below - a fully-audited, ordered backlog of
+everything left incomplete in the existing XpressNet+Ecos feature set (bugs,
+deferred display fields, missing accessory support). New protocols (LocoNet,
+Z21) and anything else longer-term live in "Future Improvements" near the end
+of this file instead.
+
+---
+
+## 🎯 Phase 5: Feature Completion 🔲 NOT STARTED
+
+Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
+found during a full codebase audit (2026-08-03) plus every item deliberately
+deferred during Phase 4.6 - before considering new protocols (LocoNet, Z21;
+see Future Improvements). CV/programming-track support (`DirectCV`/POM) was
+audited too but explicitly pulled out of this phase: the user's Ecos already
+handles this conveniently on a program track, so it's not currently planned
+at all, not merely deferred.
+
+Ordered by dependency and risk, not just by value - correctness bugs are fixed
+before the display/feature work that would otherwise sit on top of wrong data;
+the riskiest item (5.9, previously caused a live regression) is scheduled once
+everything else gives a clean, tested baseline to attempt it from again.
+
+1. **Dead-code cleanup** (trivial, do first to clear noise): remove unused
+   `ecosBuildGetCmd()` (`protocols/ecos/ecos_protocol.h/.cpp`, zero callers),
+   unused `LocoState.unknown` and `LocoState.ecos_object_id` fields
+   (`definitions.h` - `ecos_object_id` duplicates `EcosInterface`'s own
+   internal address map). `nextPage()`/`prevPage()` on `OledDisplay` are also
+   unused (no button wired up yet) but harmless - leave unless it's convenient
+   to touch the same file anyway.
+2. **Bus-wide E-stop actually stops locos** - operating-safety priority.
+   `XpressNetInterface::onPowerStateChange()` currently only echoes the
+   acknowledgment back onto the bus (fixes the MultiMaus STOP-button display
+   freeze from 2026-07-30) but never forces any locomotive to actually stop.
+   Needs a new `CommandRouter` path - iterate all known locos in `StateEngine`
+   and force speed=0 out to both XpressNet and Ecos - rather than the
+   single-address `handleXpressNetCommand` path, plus a decision on how this
+   interacts with Ecos-side state.
+3. **Outgoing Ecos command queue is fake** - real correctness bug, not a
+   missing feature: `EcosInterface::sendSpeedCommand()`, when disconnected,
+   calls `queueOutgoingCommand("", 0)` - its own comment says *"Mark for
+   queue, but actually just drop"*. The queue/flush machinery
+   (`outgoing_queue`/`flushOutgoingQueue()`) is real and runs on reconnect,
+   but the actual command text is never captured, so anything sent while
+   Ecos is down is silently lost today, not queued as the code structure
+   implies.
+4. **Ecos function-command merge bug** - also a real correctness bug:
+   `EcosReply.functions_mask` (which function bits a given Ecos reply
+   actually reported) is parsed but never consulted anywhere.
+   `CommandRouter::handleEcosFunctionCommand` overwrites the *entire*
+   function bitmap on every Ecos event instead of merging only the reported
+   bits, so a partial Ecos function update can silently clobber other
+   already-known function state.
+5. **OLED function display** ("Fn: (TBD)" on the main page) - cheaper than
+   it looks: `LocoState.functions` is already tracked and already used
+   elsewhere (answering throttle LocoInfo requests); it just never got
+   threaded through `SystemStatus`/`CommandRouter::getSystemStatus()` to the
+   display layer. Doing this right after step 4 means the data it displays
+   is already trustworthy.
+6. **`notifyXNetgiveLocoFunc` handler** - a MultiMaus function-status
+   request, unimplemented; same shape as `onGiveLocoMM` (which is handled) -
+   same function-handling code path as steps 4-5, same category of gap as
+   the LocoInfo bug fixed 2026-07-30.
+7. **Function command reconnect-queue parity** - `sendFunctionCommand()`
+   currently just drops the command if the Ecos object ID isn't known yet,
+   unlike `sendSpeedCommand()` which queues via `queuePendingQuery()`. Same
+   Ecos-side function-command code path as steps 3-4-6.
+8. **Deferred OLED display fields** (lower-stakes polish, no dependencies):
+   XNet "Last Msg" age (needs exposing through `ProtocolInterface`, touching
+   the mock used by native tests) and Ecos round-trip latency (needs
+   timestamp correlation on the heartbeat query).
+9. **XNet "stolen icon" re-attempt** (highest risk - do last among the
+   smaller items, once everything else gives a clean baseline to work from):
+   the MultiMaus's "stolen" (in-use-elsewhere) icon doesn't visually refresh
+   speed/direction when Ecos drives the loco. A previous attempt using the
+   library's `ReqLocoBusy()` broke bidirectional propagation after a few
+   claim/reclaim cycles and was fully reverted (zero trace left in code) -
+   needs careful, instrumented dual-MultiMaus retesting, not a quick patch.
+10. **Accessory/turnout support** - the single biggest, fully standalone
+    item, scheduled last for that reason. Confirmed total absence: no
+    accessory concept exists anywhere in `ProtocolInterface` or
+    `CommandRouter`, not even a stub, despite the vendored XpressNetMaster
+    library already exposing everything needed
+    (`SetTrntStatus`/`notifyXNetTrntInfo`/`notifyXNetTrnt`). Real new
+    feature: new interface methods, accessory state storage, routing,
+    Ecos-side switch/turnout protocol support, and a display page.
 
 ---
 
@@ -264,6 +344,8 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
+- **Phase 5 (Feature Completion)**: 🔲 Not started - see the dedicated section
+  below for the roadmap.
 
 ---
 
@@ -397,7 +479,7 @@ no Ecos dependency.
   surfaces via `notifyXNetPower(state)`. The master acknowledges it back onto the
   bus (`onPowerStateChange()` → `xnet.setPower(state)`) - this is what fixes the
   MultiMaus STOP-button display freeze. It does **not** yet force any locomotives
-  to actually stop moving (see Future Improvements).
+  to actually stop moving (Phase 5 step 2).
 
 ### Ecos (Phase 3.2 - Complete)
 
@@ -617,35 +699,25 @@ rather than completed, since it served no design purpose.
 
 ---
 
-## Future Improvements (Post-Phase 4)
+## Future Improvements (Beyond Phase 5)
+
+Bus-wide E-stop, accessory/turnout control, and advanced function mapping are
+now tracked as ordered Phase 5 steps (see above), not here. CV/programming-track
+support was audited during Phase 5 planning but pulled out entirely - not
+currently planned, since the user's Ecos already handles this conveniently on
+a program track.
 
 - EEPROM storage of WiFi credentials and Ecos IP
 - Web-based configuration UI
 - OTA (over-the-air) firmware updates
 - LocoNet support (parallel to XpressNet)
 - Z21 LAN protocol support
-- Accessory decoder (turnout) control
-- Advanced function mapping (e.g., F5=headlight, but only on steam engines)
-- **Bus-wide emergency stop / track power** (Notaus) - actually stopping locos:
-  as of 2026-07-30, `notifyXNetPower` is implemented and echoes the
-  acknowledgment back onto the XpressNet bus (fixes the MultiMaus STOP-button
-  display freeze), but it still does not force any locomotives to actually stop
-  moving. Likely needs a new CommandRouter path (e.g. iterate all known locos in
-  StateEngine and force speed=0) rather than the single-address
-  `handleXpressNetCommand` path, plus a decision on how it interacts with Ecos.
-  Deliberately deferred - the minimal wire-protocol fix was chosen first to
-  unblock hardware testing.
 
 ---
 
 **Last Updated**: 2026-08-03. **Phase 4.6 is complete** - every checklist item
-confirmed on real hardware, most recently the 5-minute subscription-lifecycle
-timeout (loco purge + Ecos unsubscribe both confirmed live). Getting here
-this session also meant finding and fixing a blocking Ecos-connect call
-(explained XNet-never-connects/active-locos-stuck-at-0/MultiMaus err13 as one
-root cause) and an XNet bus-timeout far too short for genuine throttle idle
-behavior (5s → 120s), plus validating the OLED display for the first time
-(live status icons, 10-second OmniConnect boot splash). Next: pick from the
-"After Phase 4.6" backlog (LocoNet, Z21, the deferred stolen-icon display
-bug, bus-wide e-stop actually stopping locos, or the remaining deferred OLED
-fields).
+confirmed on real hardware. **Phase 5 (Feature Completion) is now planned**,
+a 10-step ordered roadmap from a full codebase audit of everything deferred
+or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
+section above. Not started yet; next session should begin at step 1
+(dead-code cleanup) and proceed in order.

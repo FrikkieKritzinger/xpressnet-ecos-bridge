@@ -7,6 +7,55 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 5 roadmap planned: full codebase audit, 10 ordered steps**
+- **Trigger**: with Phase 4.6 complete, user asked to plan Phase 5 covering
+  every deferred item, proposing an initial list (E-stop, deferred display
+  fields, XNet stolen-icon behavior, function display, accessory messages) and
+  asking to find anything else stubbed/deferred in code (explicitly excluding
+  new protocols - LocoNet/Z21 stay a future phase).
+- **Full audit performed** (source code only, not docs - see `CLAUDE.md`'s
+  Phase 5 section for the resulting list) surfaced several items beyond the
+  user's starting list: an Ecos function-command merge bug
+  (`EcosReply.functions_mask` parsed but never consulted, so
+  `handleEcosFunctionCommand` clobbers function state instead of merging),
+  a fake outgoing-command queue (`sendSpeedCommand()` drops the real command
+  and queues an empty placeholder when Ecos is disconnected - commands sent
+  while Ecos is down are silently lost today), missing reconnect-queue parity
+  for function commands, an unimplemented `notifyXNetgiveLocoFunc` handler,
+  unimplemented CV/programming-track support (`DirectCV`/POM - zero code
+  anywhere), and several trivial dead-code items (`ecosBuildGetCmd()`,
+  `LocoState.unknown`/`ecos_object_id` fields, unused `nextPage()`/`prevPage()`).
+- **Also discovered function display is cheaper than its own comment implies**:
+  `LocoState.functions` is already tracked and already used elsewhere
+  (answering throttle LocoInfo requests) - the OLED gap is just that it was
+  never threaded through `SystemStatus` to the display layer. This resolved
+  the "do we even need this" discussion the user asked for - it's cheap
+  enough that the answer is just "yes, do it."
+- **CV programming pulled out of Phase 5 entirely** per user's call - not
+  merely deferred, not currently planned at all, since the user's Ecos
+  already handles this conveniently on a program track.
+- **Ordering proposed and agreed**: correctness bugs before the
+  feature/display work that would otherwise sit on top of wrong data;
+  function-handling items (display, `giveLocoFunc`, reconnect-queue) batched
+  together since they touch the same code paths; the highest-risk item
+  (stolen-icon re-attempt, previously caused a live regression per the
+  2026-07-31 entry above) scheduled after everything else gives a clean,
+  tested baseline; the single biggest standalone feature (accessories/
+  turnouts) scheduled last since nothing else depends on it. Final order:
+  (1) dead-code cleanup, (2) E-stop, (3) fake outgoing queue, (4) Ecos
+  function-merge bug, (5) function display, (6) `giveLocoFunc` handler,
+  (7) function reconnect-queue parity, (8) deferred display fields
+  (last-msg age, Ecos latency), (9) stolen-icon re-attempt, (10) accessories.
+- **Written up as the formal Phase 5 section in `CLAUDE.md`**, mirroring how
+  Phase 4.6 was structured. "Future Improvements" at the end of the file was
+  trimmed to remove items now covered by Phase 5 (accessory control, advanced
+  function mapping, bus-wide e-stop) and renamed to "Beyond Phase 5", keeping
+  only genuinely later items (EEPROM config storage, web config UI, OTA,
+  LocoNet, Z21).
+- Nothing implemented yet - this was planning only.
+
+---
+
 **2026-08-03 — Phase 4.6 complete: 5-minute subscription lifecycle confirmed under real timing**
 - **Test**: with Ecos running, moved a loco's speed once via the MultiMaus
   (active-loco count → 1), then left it completely untouched (no further
