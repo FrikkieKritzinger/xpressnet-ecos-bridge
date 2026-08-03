@@ -164,6 +164,21 @@ void EcosInterface::updateConnectionStatus() {
                     DEBUG_ECOS_PRINTF("Ecos heartbeat timeout\n");
                     wifi_client.stop();
                     current_status = ComponentStatus::DISCONNECTED;
+                    // Real bug found on hardware 2026-08-03: this branch
+                    // never cleared address_map_count, unlike the
+                    // !wifi_client.connected() branch above - but this is
+                    // exactly the branch that fires when Ecos's Ethernet
+                    // cable is physically unplugged (no TCP reset is ever
+                    // generated, so wifi_client.connected() keeps reporting
+                    // true and only this timeout ever notices). With the
+                    // stale map left intact, findEcosObjectId() kept
+                    // resolving real object IDs while genuinely
+                    // disconnected, so sendSpeedCommand() took the
+                    // "connected" branch and wrote into a dead socket
+                    // instead of queuing via queuePendingQuery() - silently
+                    // losing commands, the exact failure mode the Phase 5
+                    // step 3 fix was supposed to eliminate.
+                    address_map_count = 0;
                 }
             }
             break;
@@ -361,25 +376,29 @@ void EcosInterface::flushPendingQueries() {
         uint16_t obj_id = findEcosObjectId(pending_queries[i].address);
 
         if (obj_id > 0) {
-            // We now have the object ID, send the queued command
+            // We now have the object ID, send the queued command. Direction
+            // before speed - see sendSpeedCommand() for why: real hardware
+            // testing 2026-08-03 showed sending speed first meant a
+            // genuine direction change landed correctly but speed read back
+            // as stale/0, consistent with Ecos building the real combined
+            // DCC packet from a not-yet-updated speed cache at the moment
+            // it processes a direction change. Direction was also captured
+            // in PendingQuery but never actually sent here at all until
+            // this same investigation - only speed was ever replayed.
             char cmd_buffer[80];
-            uint16_t len = ecosBuildSetSpeedCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].speed);
+            uint16_t len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].direction);
+            if (len > 0) {
+                wifi_client.write((uint8_t*)cmd_buffer, len);
+            }
+
+            len = ecosBuildSetSpeedCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].speed);
             if (len > 0) {
                 wifi_client.write((uint8_t*)cmd_buffer, len);
                 addToEchoQueue(pending_queries[i].address, ECHO_TYPE_SPEED, pending_queries[i].speed);
             }
 
-            // Real bug found on hardware 2026-08-03: direction was captured
-            // in PendingQuery but never actually sent here - only speed was
-            // replayed, silently dropping direction for any command that had
-            // to wait for the address map (including everything queued while
-            // disconnected, now that sendSpeedCommand() routes through here
-            // for that case too). Same fix as the 2026-07-31 direction bug
-            // in sendSpeedCommand()'s own already-connected path.
-            len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].direction);
-            if (len > 0) {
-                wifi_client.write((uint8_t*)cmd_buffer, len);
-            }
+            DEBUG_ECOS_PRINTF("Ecos TX: Flushed queued command for loco %u (speed=%u dir=%u)\n",
+                              pending_queries[i].address, pending_queries[i].speed, pending_queries[i].direction);
             // Don't add to remaining (discard this entry)
         } else {
             // Still don't have object ID, keep it in the buffer
@@ -550,28 +569,38 @@ void EcosInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t di
         return;
     }
 
-    // Build and send speed command
     char cmd_buffer[80];
-    uint16_t len = ecosBuildSetSpeedCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, speed);
 
-    if (len > 0) {
-        wifi_client.write((uint8_t*)cmd_buffer, len);
-        addToEchoQueue(address, ECHO_TYPE_SPEED, speed);
-        DEBUG_ECOS_PRINTF("Ecos TX: Speed loco %u = %u\n", address, speed);
-    }
-
+    // Direction sent BEFORE speed - real DCC decoders receive speed and
+    // direction combined in one packet, not as two independent properties,
+    // so Ecos likely has to construct that real packet from whatever it has
+    // cached for both. Real bug found on hardware 2026-08-03: sending speed
+    // first meant that if direction was also genuinely changing, Ecos
+    // appeared to build the resulting packet using a not-yet-updated
+    // (stale, often 0) cached speed at the moment it processed the
+    // direction change - direction landed correctly, speed didn't. Sending
+    // direction first means speed is the last property changed, so it's
+    // the value in Ecos's cache by the time any packet gets constructed.
+    //
     // Real bug found on hardware 2026-07-31: direction was accepted as a
-    // parameter here but never actually sent - ecosBuildSetDirectionCmd()
+    // parameter here but never actually sent at all - ecosBuildSetDirectionCmd()
     // existed with zero callers, so Ecos never heard about direction
     // changes from XpressNet at all.
     // NOTE: the ESU spec says Ecos's dir=1 means reverse (opposite of our
     // direction=1=forward convention), but passing the value through
     // UN-inverted is what real-hardware testing confirmed matches - see the
     // matching note in ecos_message_parser.cpp's "dir" key handling.
-    len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, direction);
+    uint16_t len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, direction);
     if (len > 0) {
         wifi_client.write((uint8_t*)cmd_buffer, len);
         DEBUG_ECOS_PRINTF("Ecos TX: Direction loco %u = %u\n", address, direction);
+    }
+
+    len = ecosBuildSetSpeedCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, speed);
+    if (len > 0) {
+        wifi_client.write((uint8_t*)cmd_buffer, len);
+        addToEchoQueue(address, ECHO_TYPE_SPEED, speed);
+        DEBUG_ECOS_PRINTF("Ecos TX: Speed loco %u = %u\n", address, speed);
     }
 }
 

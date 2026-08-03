@@ -94,10 +94,21 @@
     // call bytes long enough to throw err13). Real LAN connects complete in
     // single-digit ms, so this only needs to bound the failure case.
     #define ECOS_TIMEOUT                300             // TCP connection timeout (ms)
-    #define ECOS_HEARTBEAT_INTERVAL     30000           // Heartbeat query every X ms
+    // Real gap found on hardware 2026-08-03: unplugging Ecos's Ethernet
+    // cable (as opposed to Ecos rebooting/closing the socket cleanly) never
+    // generates a TCP reset - our side has no way to notice except this
+    // "no data received" watchdog, which used to allow up to 45s of
+    // silently-lost commands (current_status still reported CONNECTED, and
+    // findEcosObjectId() still resolved from the stale-but-not-yet-cleared
+    // address map, right up until this timeout finally tripped). Tightened
+    // from 30000/45000 to close that window to ~10s - LAN round-trip is
+    // low single-digit ms, so 5s of heartbeat-cadence margin is still very
+    // generous against false-positives from WiFi jitter, just far less
+    // patient about a genuinely dead connection.
+    #define ECOS_HEARTBEAT_INTERVAL     5000            // Heartbeat query every X ms
     // Must exceed ECOS_HEARTBEAT_INTERVAL with margin for the round trip, or the
     // "no data" watchdog trips before the heartbeat ever gets a reply back.
-    #define ECOS_MESSAGE_TIMEOUT        (ECOS_HEARTBEAT_INTERVAL + 15000)  // No-data disconnect threshold (ms)
+    #define ECOS_MESSAGE_TIMEOUT        (ECOS_HEARTBEAT_INTERVAL + 5000)   // No-data disconnect threshold (ms)
     #define ECOS_RECONNECT_INTERVAL     10000           // Backoff retry interval (ms)
     #define ECOS_ADDRESS_MAP_REFRESH_INTERVAL 600000    // Refresh loco list every 10 minutes
 

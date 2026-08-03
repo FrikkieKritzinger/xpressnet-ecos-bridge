@@ -203,7 +203,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-2 done, step 3 pending live test, 4-10 remaining)
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-3 done, 4-10 remaining)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -257,8 +257,8 @@ everything else gives a clean, tested baseline to attempt it from again.
    - 21 new unit tests total across this feature (`test_command_router`,
      `test_ecos_command_builder`, `test_ecos_parser`); native suite
      112/112 passing.
-3. ⏳ **Outgoing Ecos command queue is fake - fixed, pending live test**
-   (2026-08-03). The old `EcosInterface::sendSpeedCommand()` special-cased
+3. ✅ **Outgoing Ecos command queue is fake - fixed and confirmed live
+   (2026-08-03)**. The old `EcosInterface::sendSpeedCommand()` special-cased
    "not connected" by calling `queueOutgoingCommand("", 0)` - its own
    comment admitted *"mark for queue, but actually just drop"* - so commands
    issued while Ecos was down were silently lost, not queued as the
@@ -271,18 +271,38 @@ everything else gives a clean, tested baseline to attempt it from again.
    connected. One correct mechanism instead of two, one of which never
    worked. Two related bugs fixed in the same pass since they'd have
    undermined the fix otherwise: `flushPendingQueries()` only ever replayed
-   speed, silently dropping direction on every deferred command (not just
-   ones queued while disconnected); and `queuePendingQuery()` was
-   append-only with no dedup by address, so repeatedly changing one loco's
-   speed while disconnected would have filled the small
-   `MAX_PENDING_QUERIES` buffer with stale entries and silently dropped
-   later commands (possibly including the real final speed) - now upserts
-   by address instead. No native test coverage for this file (`ecos_interface.cpp`
-   is excluded from the native build, real-hardware/WiFi-coupled - matches
-   its existing testing boundary). **Needs a live test**: disconnect Ecos,
-   change a loco's speed/direction a few times on XpressNet, reconnect, and
-   confirm it ends up at the last commanded speed/direction (not lost, not
-   a stale intermediate value).
+   speed, silently dropping direction on every deferred command; and
+   `queuePendingQuery()` was append-only with no dedup by address, so
+   repeatedly changing one loco's speed while disconnected would have
+   filled the small `MAX_PENDING_QUERIES` buffer with stale entries and
+   silently dropped later commands - now upserts by address instead.
+   - **Live testing surfaced two more real bugs beyond the original fix**:
+     (a) the message-timeout disconnect path (`now - last_message_time >
+     ECOS_MESSAGE_TIMEOUT`) never cleared `address_map_count`, unlike the
+     `!wifi_client.connected()` path - but that's exactly the path that
+     fires when Ecos's Ethernet cable is physically unplugged (no TCP reset
+     is ever generated), so the stale map kept resolving real object IDs
+     and commands went out via direct write into a dead socket instead of
+     queuing. Fixed by clearing it there too. Also tightened
+     `ECOS_HEARTBEAT_INTERVAL`/`ECOS_MESSAGE_TIMEOUT` from 30s/45s to
+     5s/10s, cutting worst-case detection lag ~4.5x.
+     (b) Direction landed correctly after a reconnect-triggered flush, but
+     speed read back as 0 - traced to command order: `sendSpeedCommand()`
+     and `flushPendingQueries()` both sent speed before direction. Real DCC
+     decoders receive speed+direction combined in one packet, not as two
+     independent properties, so Ecos likely constructs that packet from
+     whatever it has cached for both - sending speed first meant a
+     genuinely-changing direction got built against a not-yet-updated
+     (stale) speed. Reordered to direction-before-speed in both places;
+     confirmed live - both now land correctly a couple seconds after
+     reconnecting.
+   - Added a debug line confirming when `flushPendingQueries()` actually
+     sends a queued command - that path had zero visibility before, which
+     is part of why this took several rounds to isolate.
+   - No native test coverage for this file (`ecos_interface.cpp` is
+     excluded from the native build, real-hardware/WiFi-coupled - matches
+     its existing testing boundary); native suite 112/112 passing
+     throughout (config/logic changes elsewhere unaffected).
 4. **Ecos function-command merge bug** - also a real correctness bug:
    `EcosReply.functions_mask` (which function bits a given Ecos reply
    actually reported) is parsed but never consulted anywhere.
@@ -386,9 +406,8 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-2 done, step 3
-  pending live test, 4-10 remaining) - see the dedicated section below for
-  the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-3 done, 4-10
+  remaining) - see the dedicated section below for the roadmap.
 
 ---
 
@@ -762,13 +781,14 @@ a program track.
 confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Step 1 (dead-code cleanup) is done. Step 2 (bus-wide E-stop)
-is done and confirmed live in both directions. Step 3 (fake outgoing Ecos
-command queue) is implemented - the disconnected case now reuses the
-already-working pending-query mechanism instead of a separate queue that
-never actually worked, with two related bugs fixed alongside (missing
-direction on replay, no dedup-by-address) - but has no native test coverage
-(`ecos_interface.cpp` is hardware/WiFi-coupled, excluded from the native
-build) and still needs a live test: disconnect Ecos, change a loco's speed/
-direction a few times, reconnect, confirm it lands on the last commanded
-value. Native suite 112/112.
+section above. Steps 1-3 are done. Step 3 (fake outgoing Ecos command
+queue) took several rounds of live testing to fully close out - beyond the
+original fix, found and fixed a disconnect-detection gap (one of two
+disconnect paths never cleared the stale address map, so commands kept
+resolving and writing into a dead socket instead of queuing; also
+tightened detection from 45s to 10s worst-case) and a command-order bug
+(speed sent before direction meant Ecos built its real combined DCC packet
+from a stale cached speed whenever direction was genuinely changing -
+reordered to direction-before-speed). Both directions and the disconnect/
+reconnect recovery path are now confirmed live. Native suite 112/112. Next:
+step 4 (Ecos function-command merge bug).

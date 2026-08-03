@@ -7,6 +7,70 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 5 step 3 follow-up: two more real bugs found via live testing, now confirmed both directions**
+- **Trigger**: live test of the step 3 fix (disconnect Ecos, change speed/
+  direction, reconnect) showed "changes does not feed down to ecos, even
+  though bridge indicates connected." Root-caused across several rounds of
+  testing, each round narrowing the search with real evidence rather than
+  guessing.
+- **Bug 1 - message-timeout disconnect path never cleared the address map**:
+  `updateConnectionStatus()`'s `!wifi_client.connected()` branch clears
+  `address_map_count = 0` on disconnect, but the *other* disconnect branch
+  (the `now - last_message_time > ECOS_MESSAGE_TIMEOUT` watchdog) never did.
+  That second branch is exactly the one that fires when Ecos's Ethernet
+  cable is physically unplugged - no TCP reset is ever generated in that
+  case, so `wifi_client.connected()` keeps reporting true and only the
+  message-timeout watchdog ever notices. With the stale map left intact,
+  `findEcosObjectId()` kept resolving real object IDs while genuinely
+  disconnected, so `sendSpeedCommand()` took the "connected" branch and
+  wrote straight into a dead socket instead of queuing via
+  `queuePendingQuery()` - the exact silent-loss failure mode the original
+  step 3 fix was supposed to eliminate, just reachable via the other
+  disconnect path. Fixed by clearing `address_map_count` there too.
+- **Detection lag was also just too slow to usefully test with**: worst-case
+  was bounded by `ECOS_MESSAGE_TIMEOUT` alone (45s - corrected from an
+  earlier "45-75s" estimate that wrongly assumed heartbeat cadence factored
+  into the bound; `last_message_time` resets on any received byte and the
+  timeout is checked every loop iteration regardless of heartbeat
+  schedule). Tightened `ECOS_HEARTBEAT_INTERVAL`/`ECOS_MESSAGE_TIMEOUT` from
+  30s/45s to 5s/10s - LAN round-trip is low single-digit ms, so 5s of
+  margin is still generous against false positives from WiFi jitter, just
+  far less patient about a genuinely dead connection. ~4.5x faster
+  detection.
+- **Bug 2 - command order**: with bugs 1 fixed, a queued command now
+  reliably flushed after reconnect (confirmed via a new debug line -
+  `flushPendingQueries()`'s success path had zero log output before this,
+  which is part of why bug 1 took a few rounds to isolate) - but live
+  testing then showed direction landed correctly while speed read back as
+  0. User correctly pushed back on an initial (wrong) hypothesis blaming
+  lost Ecos "control" registration across the reconnect - manual commands
+  worked fine post-reconnect with no special re-subscription logic, which
+  a control-registration theory couldn't explain. A cleaner isolating test
+  (toggle a function - a single discrete action, unlike an analog speed
+  dial which could fire several intermediate commands - as the very first
+  action after a clean reconnect with nothing queued) confirmed a general
+  "first command after reconnect" failure wasn't the issue either: the
+  function toggle worked immediately. That narrowed it specifically to the
+  speed+direction combination. Root cause (user's own hypothesis, confirmed
+  by testing): both `sendSpeedCommand()` and `flushPendingQueries()` sent
+  speed before direction. Real DCC decoders receive speed and direction
+  combined in a single packet, not as two independent properties - Ecos
+  likely constructs that real packet from whatever it has cached for both,
+  so sending speed first meant a *genuinely changing* direction got built
+  against a not-yet-updated (stale, effectively 0) cached speed. Reordered
+  to direction-before-speed in both places.
+- **Result, confirmed live**: unplug Ecos, wait for Disconnected (~10s now),
+  change speed and direction, reconnect - both land correctly a couple of
+  seconds later (address map has to repopulate over async TCP replies
+  first, which is expected/inherent, not a bug).
+- **Verified**: native suite 112/112 passing throughout (no coverage exists
+  or was added for `ecos_interface.cpp` itself - excluded from the native
+  build, real WiFiClient/hardware dependency). Firmware builds clean,
+  flashed and confirmed working on real hardware for the full disconnect
+  → command → reconnect → correct-recovery cycle.
+
+---
+
 **2026-08-03 — Phase 5 step 3: the fake outgoing Ecos command queue, fixed (pending live test)**
 - **The bug**: `EcosInterface::sendSpeedCommand()` special-cased "Ecos not
   connected" by calling `queueOutgoingCommand("", 0)` - its own comment
