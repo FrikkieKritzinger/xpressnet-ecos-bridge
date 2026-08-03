@@ -46,6 +46,20 @@
     // Timing and lifecycle
     #define XPRESSNET_TIMEOUT       300000  // 5 minutes - remove inactive locos from state engine
     #define XPRESSNET_POLL_INTERVAL 20     // ms - how often to check for new messages
+
+    // How long with no received XpressNet message before status flips to
+    // DISCONNECTED. Real bug found on hardware 2026-08-03: at 5000ms this
+    // flapped to DISCONNECTED during completely normal single-throttle
+    // idling. Lenz XpressNet's call-byte polling has no "nothing to report"
+    // acknowledgment - a throttle with nothing new just stays silent - so
+    // there's no passive signal to distinguish "no throttle" from "idle
+    // throttle" below some threshold; picking this value is a real judgment
+    // call, not a bug to fix in logic. 120s was chosen for a single-throttle
+    // layout with long gaps between inputs. With multiple throttles active
+    // there's more background traffic and this could likely be tightened.
+    // If a genuine disconnect (bus fault, throttle unplugged) ever needs to
+    // be detected faster than this, that's the tradeoff to revisit here.
+    #define XPRESSNET_BUS_TIMEOUT   120000
 #endif
 
 // ============================================================================

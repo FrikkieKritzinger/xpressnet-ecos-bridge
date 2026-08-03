@@ -168,7 +168,9 @@ private:
     ComponentStatus current_status;         // CONNECTED, DISCONNECTED, ERROR
     unsigned long last_message_time;        // Timestamp of last received message
     unsigned long bus_connect_time;         // When we first detected bus activity
-    static const unsigned long BUS_TIMEOUT = 5000;  // 5 seconds = no bus
+    // See XPRESSNET_BUS_TIMEOUT in config.h for why this is 120s, not a
+    // shorter "obviously safe" value.
+    static const unsigned long BUS_TIMEOUT = XPRESSNET_BUS_TIMEOUT;
     bool was_master_mode;                   // Last known xnet.getOperationModeMaster() - edge-triggered tripwire
 
     // TEMP: visual health indicator for hardware testing - onboard LED

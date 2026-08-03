@@ -87,29 +87,48 @@ here. Newest entries first.
   suite 93/93 passing throughout (grew from 91 sometime after the last
   changelog entry - not investigated, no regressions). Flashed and confirmed
   working on real hardware after each round of changes.
-- **XNet status flapping to Disconnected between drive commands**: user
-  reported the XNet connection icon showed Connected right after a message
-  but reverted to Disconnected shortly after, well before `BUS_TIMEOUT` (5s)
-  should plausibly apply if the MultiMaus were still actively talking. Root
-  cause: `onGiveLocoInfo()`, `onGiveLocoMM()`, and `onPowerStateChange()`
-  (`xpressnet_interface.cpp`) are all real, successfully-parsed messages
-  received from a device on the bus, but none of them called
-  `markBusActivity()` - only `onLocoDrive128`/`onLocoDriveStepped`/
-  `onLocoFunctionGroup` did. A throttle with a loco selected typically
-  re-polls "give me loco info" regularly just to keep its own display in
-  sync (the same mechanism behind the "stolen icon" behavior noted
-  elsewhere in this file) - none of that traffic counted as bus activity, so
-  the moment the user stopped actively turning the knob (no more drive/
-  function commands), the status timed out to Disconnected after 5s even
-  though the MultiMaus was still there and still talking, just via a message
-  type the code didn't recognize. **Fixed**: added `markBusActivity()` calls
-  to all three handlers. Firmware builds clean, flashed; live re-validation
-  of the fix (confirming status now stays Connected through idle
-  give-loco-info polling) still pending user confirmation on hardware.
+- **XNet status flapping to Disconnected between drive commands - two attempts,
+  second one is the real fix**:
+  - *First attempt (incomplete)*: hypothesized `onGiveLocoInfo()`/
+    `onGiveLocoMM()`/`onPowerStateChange()` don't call `markBusActivity()`
+    (only `onLocoDrive128`/`onLocoDriveStepped`/`onLocoFunctionGroup` did),
+    theorizing the MultiMaus re-polls loco info regularly while idle and
+    that traffic just wasn't being counted. Added the missing
+    `markBusActivity()` calls (a real correctness improvement regardless -
+    these genuinely are parsed bus messages and should count) but the user
+    tested live and reported **no change**: toggle speed → icon shows
+    Connected → reverts to Disconnected by the next time the XNet page
+    cycles back into view.
+  - *Root cause, confirmed against the vendored library source*: Lenz
+    XpressNet's master polls each throttle slot with a bare call-byte
+    inquiry (`XpressNetMaster.cpp` ~line 762); a throttle with nothing new
+    to report simply stays silent - there is no "acknowledge, nothing to
+    report" response in the base protocol. So a real, present, idle
+    MultiMaus can legitimately go silent (no drive commands, no
+    give-loco-info repolls, nothing) for a long stretch, and there is no
+    passive signal available to distinguish that from "no throttle at all."
+    `BUS_TIMEOUT` at 5000ms was simply far too aggressive for genuine
+    single-throttle idle behavior - this had never been observed before
+    since every earlier XpressNet test session had someone actively
+    operating the throttle the whole time, so idle behavior was never
+    watched live until the OLED made it visible.
+  - **Fixed**: raised the timeout to 120 seconds per user's judgment (their
+    call - "with just one throttle, there might be a while between throttle
+    inputs... very happy to go to 120 seconds and see"; noted multiple active
+    throttles would produce more background traffic and could likely
+    tighten this later). Moved it out of `xpressnet_interface.h` into
+    `config.h` as `XPRESSNET_BUS_TIMEOUT`, matching this project's "config.h
+    is the single source of truth for timing constants" convention (it was
+    previously a private class constant, unlike every comparable Ecos-side
+    timeout which already lived in `config.h`). Comment at the definition
+    documents the full tradeoff for whoever needs to revisit it if a genuine
+    disconnect ever needs detecting faster than 120s allows.
+  - Firmware builds clean, flashed; live re-confirmation still pending.
 - **Not yet done**: the 5-minute subscription-lifecycle timeout under real
   timing, the deferred display fields noted above (last-message age, Ecos
-  latency, per-loco functions), and live confirmation of the XNet status-flap
-  fix just described.
+  latency, per-loco functions), and live confirmation that 120s actually
+  holds Connected through normal single-throttle idle gaps without
+  needlessly delaying real-disconnect detection.
 
 ---
 

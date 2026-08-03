@@ -43,17 +43,25 @@
 > on every Ecos reconnect attempt while Ecos was down - explaining all three
 > of "XNet never shows Connected", "active locos stuck at 0", and "MultiMaus
 > err13 requiring a power-cycle" as one root cause. Fixed, confirmed on
-> hardware. Also found and fixed: `onGiveLocoInfo()`/`onGiveLocoMM()`/
-> `onPowerStateChange()` never counted as bus activity, so the XNet status
-> flapped back to Disconnected a few seconds after the user stopped actively
-> driving a loco, even though the MultiMaus was still there and still polling.
-> OLED display validated against real hardware for the first time, several
-> Phase-2-era placeholder fields wired to live data, and the status/page UI
-> reworked around hand-drawn icons (the SSD1306's default font has no real
-> glyphs for the Unicode checkmark/X used previously - confirmed to render as
-> garbage on real hardware). Full diagnosis in
-> [docs/CHANGELOG.md](docs/CHANGELOG.md). **Next**: live confirmation of the
-> bus-activity fix, then the real-timing subscription lifecycle - see Phase
+> hardware. Also found (in two attempts) and fixed the XNet status flapping
+> to Disconnected during normal idling: an incomplete first attempt added
+> `markBusActivity()` to `onGiveLocoInfo()`/`onGiveLocoMM()`/
+> `onPowerStateChange()` (a real correctness fix, but live testing showed no
+> change) before the real root cause was confirmed against the vendored
+> library source - Lenz XpressNet's call-byte polling has no "nothing to
+> report" acknowledgment, so an idle throttle can legitimately go silent
+> indefinitely, and 5000ms was just far too aggressive a timeout for that.
+> Raised to 120s (user's judgment call for a single-throttle layout) and
+> moved out of `xpressnet_interface.h` into `config.h` as
+> `XPRESSNET_BUS_TIMEOUT`, matching the project's config-is-the-timing-
+> source-of-truth convention. OLED display validated against real hardware
+> for the first time, several Phase-2-era placeholder fields wired to live
+> data, and the status/page UI reworked around hand-drawn icons (the
+> SSD1306's default font has no real glyphs for the Unicode checkmark/X used
+> previously - confirmed to render as garbage on real hardware). Full
+> diagnosis in [docs/CHANGELOG.md](docs/CHANGELOG.md). **Next**: live
+> confirmation that 120s holds Connected through normal idle gaps, then the
+> real-timing subscription lifecycle - see Phase
 > 4.6 below.
 
 ---
@@ -127,15 +135,21 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   `wifi_client.setTimeout()` and dropping it to 300ms. Confirmed on hardware -
   MultiMaus attached immediately and active-loco count tracked speed changes
   correctly with Ecos still down. See [docs/CHANGELOG.md](docs/CHANGELOG.md).
-- **XNet bus-activity gap fixed (2026-08-03)**: `onGiveLocoInfo()`/
-  `onGiveLocoMM()`/`onPowerStateChange()` are real parsed messages from a
-  device on the bus but never called `markBusActivity()` - only drive/
-  function commands did. A throttle that mostly re-polls loco info (to keep
-  its own display in sync) rather than sending new drive commands looked
-  like it had gone silent, so status flapped to Disconnected a few seconds
-  after the user stopped actively driving a loco. Fixed by adding
-  `markBusActivity()` to all three handlers; flashed, live re-confirmation on
-  hardware still pending. See [docs/CHANGELOG.md](docs/CHANGELOG.md).
+- **XNet status-flap fixed (2026-08-03, two attempts)**: status was
+  reverting to Disconnected during completely normal single-throttle idling.
+  First attempt added `markBusActivity()` to `onGiveLocoInfo()`/
+  `onGiveLocoMM()`/`onPowerStateChange()` (real parsed bus messages that
+  weren't counted before - a genuine correctness fix) but live testing
+  showed no change. Real root cause, confirmed against the vendored library
+  source: Lenz XpressNet's call-byte polling has no "nothing to report"
+  acknowledgment, so an idle throttle can legitimately stay silent
+  indefinitely - `BUS_TIMEOUT` at 5000ms was just too aggressive for that.
+  Raised to 120s (user's call for a single-throttle layout - more throttles
+  active would mean more background traffic and could allow tightening
+  this) and moved from a private constant in `xpressnet_interface.h` into
+  `config.h` as `XPRESSNET_BUS_TIMEOUT`, matching every comparable Ecos-side
+  timeout already living there. Flashed; live re-confirmation still pending.
+  See [docs/CHANGELOG.md](docs/CHANGELOG.md).
 - **OLED display validated against real hardware for the first time (2026-08-03)**:
   physically attached and confirmed initializing (last touched 2026-07-29
   when confirmed to harmlessly no-op with nothing wired - now genuinely
@@ -147,9 +161,9 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   glyphs render as garbage on the real SSD1306 font. See
   [docs/CHANGELOG.md](docs/CHANGELOG.md).
 - **Not yet done (next session's plan)**:
-  1. Live confirmation that the XNet bus-activity fix above actually keeps
-     status stable through idle give-loco-info polling, not just drive
-     commands.
+  1. Live confirmation that the 120s `XPRESSNET_BUS_TIMEOUT` actually holds
+     status Connected through normal single-throttle idle gaps without
+     needlessly delaying real-disconnect detection.
   2. The 5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min
      idle → unsubscribe) under real timing. Verified by code inspection that
      the 30-second Ecos address-map heartbeat refresh cannot resurrect a
