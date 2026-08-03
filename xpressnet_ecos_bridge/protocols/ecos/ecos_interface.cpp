@@ -6,7 +6,7 @@
  * updates to XpressNet via CommandRouter.
  *
  * Non-blocking polling design: update() processes available TCP data, connection
- * state machine, heartbeat, and outgoing queue — all without blocking.
+ * state machine, heartbeat, and the pending-query queue — all without blocking.
  */
 
 #include "ecos_interface.h"
@@ -34,8 +34,6 @@ EcosInterface::EcosInterface()
       address_map_count(0),
       address_map_last_refresh(0),
       pending_query_count(0),
-      outgoing_queue_head(0),
-      outgoing_queue_tail(0),
       echo_queue_head(0),
       echo_queue_tail(0),
       heartbeat_timer(ECOS_HEARTBEAT_INTERVAL),
@@ -44,7 +42,6 @@ EcosInterface::EcosInterface()
       last_reconnect_attempt(0) {
     memset(address_map, 0, sizeof(address_map));
     memset(pending_queries, 0, sizeof(pending_queries));
-    memset(outgoing_queue, 0, sizeof(outgoing_queue));
     memset(echo_queue, 0, sizeof(echo_queue));
 }
 
@@ -128,9 +125,10 @@ void EcosInterface::update() {
         queryAddressMap();
     }
 
-    // Phase 4: Flush pending queries and outgoing commands
+    // Phase 4: Flush pending queries (addresses not yet resolved to an Ecos
+    // object ID - including everything queued while disconnected, since the
+    // address map is empty then too - see sendSpeedCommand())
     flushPendingQueries();
-    flushOutgoingQueue();
 }
 
 // ============================================================================
@@ -267,47 +265,6 @@ void EcosInterface::sendHeartbeat() {
     queryAddressMap();
 }
 
-// ============================================================================
-// COMMAND QUEUEING (for while disconnected)
-// ============================================================================
-
-bool EcosInterface::queueOutgoingCommand(const char* cmd, uint16_t len) {
-    if (len >= MAX_COMMAND_LENGTH - 1) {
-        return false;  // Command too large
-    }
-
-    // Calculate next write position (circular buffer)
-    uint16_t next_tail = (outgoing_queue_tail + 1) % MAX_OUTGOING_QUEUE;
-
-    // Check if queue full
-    if (next_tail == outgoing_queue_head) {
-        DEBUG_ECOS_PRINTF("Ecos: Outgoing queue full, dropping oldest\n");
-        // Discard oldest entry (move head forward)
-        outgoing_queue_head = (outgoing_queue_head + 1) % MAX_OUTGOING_QUEUE;
-    }
-
-    // Store command
-    strncpy(outgoing_queue[outgoing_queue_tail].cmd, cmd, MAX_COMMAND_LENGTH - 1);
-    outgoing_queue[outgoing_queue_tail].cmd[MAX_COMMAND_LENGTH - 1] = '\0';
-    outgoing_queue[outgoing_queue_tail].len = len;
-    outgoing_queue[outgoing_queue_tail].timestamp = millis();
-
-    outgoing_queue_tail = next_tail;
-    return true;
-}
-
-void EcosInterface::flushOutgoingQueue() {
-    if (current_status != ComponentStatus::CONNECTED) {
-        return;
-    }
-
-    while (outgoing_queue_head != outgoing_queue_tail) {
-        const auto& entry = outgoing_queue[outgoing_queue_head];
-        wifi_client.write((uint8_t*)entry.cmd, entry.len);
-
-        outgoing_queue_head = (outgoing_queue_head + 1) % MAX_OUTGOING_QUEUE;
-    }
-}
 
 // ============================================================================
 // ADDRESS MAP MANAGEMENT
@@ -366,6 +323,22 @@ bool EcosInterface::addAddressMapEntry(uint16_t dcc_address, uint16_t ecos_id) {
 // ============================================================================
 
 void EcosInterface::queuePendingQuery(uint16_t address, uint8_t speed, uint8_t direction) {
+    // Upsert by address - real gap found while fixing the fake outgoing
+    // queue (2026-08-03): this queue now also has to survive a full Ecos
+    // disconnection, not just the brief window before the first address-map
+    // reply arrives. Without upserting, repeatedly changing one loco's
+    // speed while disconnected would fill the small MAX_PENDING_QUERIES
+    // buffer with stale entries for that same address, silently dropping
+    // any later command (including the actual final speed) once full -
+    // and blocking any other loco from queuing at all.
+    for (uint16_t i = 0; i < pending_query_count; i++) {
+        if (pending_queries[i].address == address) {
+            pending_queries[i].speed = speed;
+            pending_queries[i].direction = direction;
+            return;
+        }
+    }
+
     if (pending_query_count >= MAX_PENDING_QUERIES) {
         DEBUG_ECOS_PRINTF("Pending query queue full\n");
         return;
@@ -394,6 +367,18 @@ void EcosInterface::flushPendingQueries() {
             if (len > 0) {
                 wifi_client.write((uint8_t*)cmd_buffer, len);
                 addToEchoQueue(pending_queries[i].address, ECHO_TYPE_SPEED, pending_queries[i].speed);
+            }
+
+            // Real bug found on hardware 2026-08-03: direction was captured
+            // in PendingQuery but never actually sent here - only speed was
+            // replayed, silently dropping direction for any command that had
+            // to wait for the address map (including everything queued while
+            // disconnected, now that sendSpeedCommand() routes through here
+            // for that case too). Same fix as the 2026-07-31 direction bug
+            // in sendSpeedCommand()'s own already-connected path.
+            len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].direction);
+            if (len > 0) {
+                wifi_client.write((uint8_t*)cmd_buffer, len);
             }
             // Don't add to remaining (discard this entry)
         } else {
@@ -544,16 +529,23 @@ void EcosInterface::handleReply(const EcosReply& reply) {
 // ============================================================================
 
 void EcosInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) {
-    if (current_status != ComponentStatus::CONNECTED) {
-        queueOutgoingCommand("", 0);  // Mark for queue, but actually just drop
-        return;
-    }
-
-    // Look up Ecos object ID
+    // Real bug found on hardware 2026-08-03: this used to special-case
+    // "not connected" by calling queueOutgoingCommand("", 0) - its own
+    // comment admitted "mark for queue, but actually just drop" - so any
+    // command issued while Ecos was disconnected was silently lost, not
+    // queued as the surrounding machinery implied.
+    //
+    // No special case is needed: while disconnected, address_map_count is
+    // always 0 (cleared in updateConnectionStatus() on disconnect), so
+    // findEcosObjectId() naturally returns 0 below, which already routes
+    // into queuePendingQuery() - the exact same real address+speed+direction
+    // queue used for "loco not resolved yet" while connected. One mechanism
+    // instead of two, and this one actually works.
     uint16_t obj_id = findEcosObjectId(address);
 
     if (obj_id == 0) {
-        // Unknown address yet, queue the command for when address map is updated
+        // Unknown address yet, or Ecos currently disconnected/reconnecting -
+        // queue the command for when the address map is available.
         queuePendingQuery(address, speed, direction);
         return;
     }

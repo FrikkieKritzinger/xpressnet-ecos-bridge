@@ -39,7 +39,8 @@ public:
      * - Reads available TCP bytes into message parser
      * - Updates connection status with backoff retry
      * - Sends periodic heartbeat to keep connection alive
-     * - Flushes pending query buffer and outgoing command queue
+     * - Flushes the pending-query buffer (unresolved addresses, including
+     *   anything queued while disconnected)
      * Must NEVER block
      */
     void update() override;
@@ -205,33 +206,6 @@ private:
      * Window: ECOS_ECHO_WINDOW_MS from config.h (2 seconds, accounts for TCP latency)
      */
     bool isEchoCommand(uint16_t address, uint8_t cmd_type, uint8_t value) const;
-
-    // ========================================================================
-    // OUTGOING COMMAND QUEUE (for while disconnected)
-    // ========================================================================
-
-    static const int MAX_COMMAND_LENGTH = 80;
-
-    struct QueuedCommand {
-        char cmd[MAX_COMMAND_LENGTH];
-        uint16_t len;
-        unsigned long timestamp;
-    };
-
-    QueuedCommand outgoing_queue[MAX_OUTGOING_QUEUE];
-    uint16_t outgoing_queue_head;
-    uint16_t outgoing_queue_tail;
-
-    /**
-     * Queue an outgoing command (used if connection drops)
-     * Small circular buffer; oldest entries are discarded if full
-     */
-    bool queueOutgoingCommand(const char* cmd, uint16_t len);
-
-    /**
-     * Flush queued commands to Ecos (called when connection re-established)
-     */
-    void flushOutgoingQueue();
 
     // ========================================================================
     // CONNECTION/BACKOFF MANAGEMENT

@@ -7,6 +7,59 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 5 step 3: the fake outgoing Ecos command queue, fixed (pending live test)**
+- **The bug**: `EcosInterface::sendSpeedCommand()` special-cased "Ecos not
+  connected" by calling `queueOutgoingCommand("", 0)` - its own comment
+  admitted *"mark for queue, but actually just drop"*. The
+  `outgoing_queue`/`flushOutgoingQueue()` machinery around it was fully
+  built (circular buffer, timestamps, flush-on-reconnect) but had exactly
+  one caller, always with empty content, making the whole subsystem a
+  no-op dressed up as a real feature.
+- **The fix - reuse, don't rebuild**: while Ecos is disconnected,
+  `address_map_count` is always 0 (`updateConnectionStatus()` clears it the
+  moment the TCP socket drops), so `findEcosObjectId()` naturally returns 0
+  regardless of connection state. That's exactly the condition
+  `sendSpeedCommand()` already handles for a different reason - a loco
+  whose Ecos object ID just hasn't been resolved yet - via
+  `queuePendingQuery()`, which stores the real DCC address/speed/direction
+  and gets replayed by `flushPendingQueries()` once the address map is
+  available. Removing the special-cased disconnected branch entirely means
+  both cases route through the one mechanism that actually works, instead
+  of one that works and one that never did. Deleted the entire dead
+  `outgoing_queue` subsystem: the `QueuedCommand` struct, `MAX_COMMAND_LENGTH`,
+  `outgoing_queue_head`/`_tail`, `queueOutgoingCommand()`,
+  `flushOutgoingQueue()`, and the now-dead `MAX_OUTGOING_QUEUE` config
+  constant.
+- **Two related bugs fixed in the same pass**, since leaving either would
+  have undermined the fix once the disconnected case started flowing
+  through this path for real:
+  1. `flushPendingQueries()` only ever replayed the queued *speed* -
+     direction was captured in `PendingQuery` but never actually sent on
+     replay, for any deferred command, not just ones queued while
+     disconnected. Same category of bug as the 2026-07-31 direction fix in
+     `sendSpeedCommand()`'s already-connected path, just never applied here.
+  2. `queuePendingQuery()` was append-only with no dedup by address. Once
+     this queue also has to survive a full disconnection (not just the
+     brief window before the first address-map reply), repeatedly changing
+     one loco's speed while Ecos is down would fill the 5-slot
+     `MAX_PENDING_QUERIES` buffer with stale entries for that one address,
+     silently dropping any later command once full - including possibly
+     the real final speed, and blocking any other loco from queuing at
+     all. Fixed to upsert by address instead, matching the precedent set by
+     `addAddressMapEntry()`'s 2026-07-31 fix for the same class of bug.
+- **Verified**: firmware builds clean (RAM usage dropped ~900 bytes from
+  removing the dead queue), flashed. No native test coverage exists or was
+  added for this - `ecos_interface.cpp` is excluded from the native build
+  entirely (real WiFiClient/hardware dependency), matching its existing
+  testing boundary; `CommandRouter`/`EcosMessageParser` (which do have
+  native coverage) are untouched by this change.
+- **Not yet verified live**: disconnect Ecos, change a loco's speed/
+  direction a few times on XpressNet while it's down, reconnect, confirm
+  the loco ends up at the last commanded speed/direction rather than lost
+  or stuck on a stale intermediate value.
+
+---
+
 **2026-08-03 — Phase 5 step 2 follow-up: Ecos→XpressNet direction, three real bugs found via live testing**
 - **Trigger**: user tested the E-stop implementation live. XNet→Ecos direction
   worked immediately (MultiMaus STOP/GO reaches Ecos). But hitting STOP or GO

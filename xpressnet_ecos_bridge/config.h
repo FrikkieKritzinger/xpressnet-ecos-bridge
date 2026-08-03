@@ -106,8 +106,11 @@
 
     // Buffers
     #define MAX_ECOS_OBJECTS            100             // Max locomotives in address map
-    #define MAX_PENDING_QUERIES         5               // Commands queued while object ID unknown
-    #define MAX_OUTGOING_QUEUE          10              // Commands queued while disconnected
+    // Commands queued while the object ID is unresolved - covers both "loco
+    // not yet in the address map" and "Ecos currently disconnected" (the
+    // address map is empty in both cases). Upserted by address, so this
+    // bounds concurrently-queued distinct locos, not total speed changes.
+    #define MAX_PENDING_QUERIES         5
 #endif
 
 // ============================================================================
