@@ -115,9 +115,14 @@ struct SystemStatus {
     
     // Diagnostic
     uint32_t total_commands;        // Lifetime command count
+    uint32_t echo_prevented_count;  // Lifetime count of suppressed echo commands
     uint32_t current_heap_bytes;    // Available heap (changed to uint32_t for larger values)
-	
-	LocoState* last_loco;           // Pointer to last active loco (for display)
+
+    // Last drive command processed (0 address = none yet), for display
+    uint16_t last_command_address;
+    uint8_t last_command_speed;
+    uint8_t last_command_direction;
+    LocoSource last_command_source;
 };
 
 // ============================================================================

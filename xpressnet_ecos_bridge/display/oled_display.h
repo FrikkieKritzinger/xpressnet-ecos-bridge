@@ -5,7 +5,8 @@
  * - 4-page rotation (Main, Device, XpressNet, Ecos)
  * - Auto-cycle every 5 seconds
  * - Error popup system (auto-dismiss after 3 seconds)
- * - Connection status indicators
+ * - Hand-drawn icons: WiFi signal (global, every page) + per-interface
+ *   connection status (page-local - only shown on that interface's own page)
  * - Live locomotive display
  * - Non-blocking updates via TimedTask
  * 
@@ -126,8 +127,19 @@ private:
     void drawEcosScreen();
     void drawErrorPopup();
     
-    void drawStatusIcon(int x, int y, ComponentStatus status);
-	void drawStatusText(int x, int y, ComponentStatus status);
+    // Header icons - hand-drawn shapes only, never font glyphs (the SSD1306
+    // default font has no Unicode checkmark/X glyphs; confirmed to render
+    // as garbage on real hardware). drawHeaderIcons() draws only the WiFi
+    // signal icon (infrastructure, global - every page); drawConnectionIcon()
+    // is called directly by each interface's own screen function instead, so
+    // it only appears on that interface's own page - the pattern for future
+    // interfaces (LocoNet, Z21) once there's no room to show all of them.
+    void drawHeaderIcons();
+    void drawConnectionIcon(int x, int y, ComponentStatus status);
+    void drawWifiSignalIcon(int x, int y, int rssi_dbm);
+
+    // Compact page-position dots, replacing the old "[Page X/4]" footer text
+    void drawPageIndicator();
     
     /**
      * Check if popup should be cleared

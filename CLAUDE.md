@@ -34,9 +34,27 @@
 > fixed (a heartbeat/watchdog timing mismatch that dropped the connection every
 > ~10s, and an invalid heartbeat command Ecos was rejecting) - connection now
 > confirmed stable across multiple heartbeat cycles. Full diagnosis in
-> [docs/CHANGELOG.md](docs/CHANGELOG.md). **Next**: end-to-end command
-> propagation (throttle ↔ Ecos) and real-timing subscription lifecycle - see
-> Phase 4.6 below.
+> [docs/CHANGELOG.md](docs/CHANGELOG.md).
+>
+> **2026-08-03 update**: OLED physically attached and validated for the first
+> time. A blocking `wifi_client.connect()` call (bounded only by the ESP8266
+> core's own 5000ms default, since a same-named `config.h` timeout constant
+> was never actually wired up) was freezing the entire main loop for up to 5s
+> on every Ecos reconnect attempt while Ecos was down - explaining all three
+> of "XNet never shows Connected", "active locos stuck at 0", and "MultiMaus
+> err13 requiring a power-cycle" as one root cause. Fixed, confirmed on
+> hardware. Also found and fixed: `onGiveLocoInfo()`/`onGiveLocoMM()`/
+> `onPowerStateChange()` never counted as bus activity, so the XNet status
+> flapped back to Disconnected a few seconds after the user stopped actively
+> driving a loco, even though the MultiMaus was still there and still polling.
+> OLED display validated against real hardware for the first time, several
+> Phase-2-era placeholder fields wired to live data, and the status/page UI
+> reworked around hand-drawn icons (the SSD1306's default font has no real
+> glyphs for the Unicode checkmark/X used previously - confirmed to render as
+> garbage on real hardware). Full diagnosis in
+> [docs/CHANGELOG.md](docs/CHANGELOG.md). **Next**: live confirmation of the
+> bus-activity fix, then the real-timing subscription lifecycle - see Phase
+> 4.6 below.
 
 ---
 
@@ -99,20 +117,53 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
   plan (re-attempt with live dual-MultiMaus monitoring; possibly a targeted
   patch to the vendored library's `SetBusy()`). Deliberately deferred - core
   bidirectional command propagation (the actual Phase 4.6 goal) is solid.
+- **Blocking Ecos-connect bug fixed (2026-08-03)**: `EcosInterface::attemptTcpConnect()`'s
+  `wifi_client.connect()` was blocking the entire main loop for up to 5s per
+  attempt (ESP8266 core default; a `config.h` `ECOS_TIMEOUT` constant existed
+  but was never actually applied). With Ecos unreachable, this froze
+  `xnet_interface.update()` too, on every backoff-scheduled reconnect -
+  explaining XNet never reaching Connected, active-loco count stuck at 0, and
+  MultiMaus err13 as one root cause. Fixed by wiring `ECOS_TIMEOUT` into
+  `wifi_client.setTimeout()` and dropping it to 300ms. Confirmed on hardware -
+  MultiMaus attached immediately and active-loco count tracked speed changes
+  correctly with Ecos still down. See [docs/CHANGELOG.md](docs/CHANGELOG.md).
+- **XNet bus-activity gap fixed (2026-08-03)**: `onGiveLocoInfo()`/
+  `onGiveLocoMM()`/`onPowerStateChange()` are real parsed messages from a
+  device on the bus but never called `markBusActivity()` - only drive/
+  function commands did. A throttle that mostly re-polls loco info (to keep
+  its own display in sync) rather than sending new drive commands looked
+  like it had gone silent, so status flapped to Disconnected a few seconds
+  after the user stopped actively driving a loco. Fixed by adding
+  `markBusActivity()` to all three handlers; flashed, live re-confirmation on
+  hardware still pending. See [docs/CHANGELOG.md](docs/CHANGELOG.md).
+- **OLED display validated against real hardware for the first time (2026-08-03)**:
+  physically attached and confirmed initializing (last touched 2026-07-29
+  when confirmed to harmlessly no-op with nothing wired - now genuinely
+  tested). Several Phase-2-era placeholder fields (device count, IP, CPU
+  freq, command/echo counters, last-command info) wired to live data instead
+  of hardcoded stubs; UI reworked with hand-drawn status icons (WiFi signal
+  bars global/every page, per-interface connection icons page-local -
+  explicitly setting the pattern for LocoNet/Z21) after confirming Unicode
+  glyphs render as garbage on the real SSD1306 font. See
+  [docs/CHANGELOG.md](docs/CHANGELOG.md).
 - **Not yet done (next session's plan)**:
-  1. The 5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min
+  1. Live confirmation that the XNet bus-activity fix above actually keeps
+     status stable through idle give-loco-info polling, not just drive
+     commands.
+  2. The 5-minute subscription-lifecycle timeout (new loco → subscribe, 5 min
      idle → unsubscribe) under real timing. Verified by code inspection that
      the 30-second Ecos address-map heartbeat refresh cannot resurrect a
      purged loco (it only touches the address-map lookup table, never
      `StateEngine` or re-subscribes) - but not yet tested live.
-  2. OLED display validation against real hardware - not tested at all during
-     Phase 4.6 so far; last touched 2026-07-29 when confirmed to harmlessly
-     no-op with nothing wired. Real display behavior is still unverified.
+  3. Deferred display fields: XNet last-message age (needs exposing through
+     `ProtocolInterface`, touching the mock used by native tests), Ecos
+     round-trip latency (needs timestamp correlation on the heartbeat query),
+     per-loco functions on the main page.
 - **Deliberately deferred**: bus-wide emergency stop only acknowledges on the
   wire now - it does not yet force any locomotives to actually stop moving
   (see Future Improvements).
-- Native unit test suite: 91/91 passing (parser-specific tests were removed since
-  that logic now lives in the real XpressNetMaster library).
+- Native unit test suite: 93/93 passing (grew from 91 sometime after the
+  XpressNetMaster rewrite - not independently investigated, no regressions).
 - ESP8266 (`env:wemos`) firmware build re-verified after the library integration.
 - Design premise: forward any XpressNet command to Ecos (and LocoNet/Z21 once
   live); forward any Ecos update for a subscribed loco (or E-stop) to all
@@ -603,9 +654,10 @@ rather than completed, since it served no design purpose.
 
 ---
 
-**Last Updated**: 2026-07-31 (split dated session history out to
-[docs/CHANGELOG.md](docs/CHANGELOG.md); this file trimmed to current-state
-reference only - see the note at the top of the file for the new convention).
-Project status as of the last real session (2026-07-30): XpressNet fully
-validated end-to-end against a real Roco MultiMaus. Ecos-side validation, with
-`TEMP_SKIP_ECOS_CONNECT`/`XNetDEBUG` reverted, is the next step.
+**Last Updated**: 2026-08-03. Project status as of the last real session:
+OLED physically attached and validated on real hardware for the first time;
+a blocking Ecos-connect bug (explaining XNet-never-connects, active-locos-
+stuck-at-0, and MultiMaus err13 as one root cause) and an XNet bus-activity
+gap (status flapping to Disconnected during idle give-loco-info polling)
+both found and fixed. Live re-confirmation of the bus-activity fix and the
+5-minute subscription-lifecycle timeout are the next steps.

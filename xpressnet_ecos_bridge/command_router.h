@@ -122,7 +122,20 @@ private:
     };
     
     EchoPreventionState echo_state = {0, 0, 0, LocoSource::UNKNOWN};
-    
+
+    // Diagnostic counters (for display/status - see getSystemStatus())
+    uint32_t total_commands_count = 0;
+    uint32_t echo_prevented_count = 0;
+
+    // Last drive command processed, for display (see getSystemStatus())
+    struct LastCommandInfo {
+        uint16_t address = 0;
+        uint8_t speed = 0;
+        uint8_t direction = 0;
+        LocoSource source = LocoSource::UNKNOWN;
+    };
+    LastCommandInfo last_command;
+
     // Periodic task tracking
     unsigned long last_expiry_check = 0;
     unsigned long last_status_update = 0;

@@ -186,6 +186,11 @@ void EcosInterface::updateConnectionStatus() {
 void EcosInterface::attemptTcpConnect() {
     DEBUG_ECOS_PRINTF("Attempting TCP connect to %s:%u...\n", ECOS_IP, ECOS_PORT);
 
+    // WiFiClient::connect() blocks the whole loop() until it succeeds, fails,
+    // or this timeout elapses - see ECOS_TIMEOUT in config.h for the hardware
+    // bug this fixes. Must be set before connect(), not after.
+    wifi_client.setTimeout(ECOS_TIMEOUT);
+
     if (wifi_client.connect(ECOS_IP, ECOS_PORT)) {
         current_status = ComponentStatus::CONNECTED;
         connected_time_ms = millis();

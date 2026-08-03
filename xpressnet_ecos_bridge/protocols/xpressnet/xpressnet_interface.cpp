@@ -330,6 +330,14 @@ void XpressNetInterface::onGiveLocoInfo(uint8_t user_ops, uint16_t address) {
         return;
     }
 
+    // A throttle asking for loco info is a real, successfully-parsed message
+    // from a device on the bus - just as much proof of bus activity as a
+    // drive/function command. Real bug: without this, a throttle that only
+    // re-polls loco info (to keep its own display in sync) rather than
+    // sending new drive commands looked like it had gone silent, and status
+    // flipped to DISCONNECTED after BUS_TIMEOUT even though it never left.
+    markBusActivity();
+
     uint8_t speed_byte;
     uint32_t functions;
     resolveLocoStateForReply(address, speed_byte, functions);
@@ -350,6 +358,10 @@ void XpressNetInterface::onGiveLocoMM(uint8_t user_ops, uint16_t address) {
         return;
     }
 
+    // See onGiveLocoInfo() - a real parsed request from a device, same as a
+    // drive/function command for bus-activity purposes.
+    markBusActivity();
+
     uint8_t speed_byte;
     uint32_t functions;
     resolveLocoStateForReply(address, speed_byte, functions);
@@ -364,6 +376,9 @@ void XpressNetInterface::onGiveLocoMM(uint8_t user_ops, uint16_t address) {
 }
 
 void XpressNetInterface::onPowerStateChange(uint8_t state) {
+    // See onGiveLocoInfo() - a real parsed request from a device on the bus.
+    markBusActivity();
+
     DEBUG_XNET_PRINTF("XpressNet: Power state change request - state=0x%02x, echoing acknowledgment\n", state);
     xnet.setPower(state);
 }

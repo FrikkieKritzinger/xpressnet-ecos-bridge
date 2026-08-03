@@ -70,7 +70,16 @@
     #endif
     
     // Timeouts and intervals
-    #define ECOS_TIMEOUT                5000            // TCP connection timeout (ms)
+    // WiFiClient::connect() blocks the main loop for up to this long on every
+    // attempt (real bug found on hardware 2026-08-03: this constant existed
+    // but was never actually applied to wifi_client, so connect() silently
+    // used the ESP8266 core's own 5000ms default instead - when Ecos was
+    // unreachable, every reconnect attempt froze the whole loop, including
+    // XpressNet polling, for up to 5s at a time, matching BUS_TIMEOUT closely
+    // enough to keep XpressNet stuck DISCONNECTED and starve the MultiMaus of
+    // call bytes long enough to throw err13). Real LAN connects complete in
+    // single-digit ms, so this only needs to bound the failure case.
+    #define ECOS_TIMEOUT                300             // TCP connection timeout (ms)
     #define ECOS_HEARTBEAT_INTERVAL     30000           // Heartbeat query every X ms
     // Must exceed ECOS_HEARTBEAT_INTERVAL with margin for the round trip, or the
     // "no data" watchdog trips before the heartbeat ever gets a reply back.

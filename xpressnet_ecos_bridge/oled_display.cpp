@@ -9,10 +9,12 @@
 #include <cstdint>
 #include <cstring>
 #include <Arduino.h>
+#include <ESP8266WiFi.h>
 #include "display/oled_display.h"
 #include "config.h"
 #include "definitions.h"
 #include "utils/debug.h"
+#include "utils/memory.h"
 
 // ============================================================================
 // SCREEN LAYOUT CONSTANTS
@@ -30,6 +32,16 @@
 #define BLUE_CONTENT_Y     17     // Start of blue content (17 gives some gap)
 #define LINE_HEIGHT_SMALL   8     // Small text line height
 #define LINE_HEIGHT_LARGE  10     // Large text line height
+
+// Header icon zone (title row, y=0). WiFi is infrastructure, not
+// protocol-specific, so it's global - drawn on every page in the rightmost
+// corner. Each protocol's connection icon is page-local instead (drawn only
+// by that protocol's own screen, just left of the WiFi icon) - the pattern
+// to follow when LocoNet/Z21 are added, since there won't be room to show
+// every protocol's status on every page at once.
+#define ICON_Y               0
+#define WIFI_ICON_X        115     // rightmost corner - every page
+#define PROTOCOL_ICON_X    102     // just left of WiFi icon - page-local only
 
 // ============================================================================
 // CONSTRUCTOR
@@ -103,7 +115,11 @@ void OledDisplay::update(const SystemStatus& status) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    
+
+    // Header icon cluster - same position on every page, drawn before the
+    // page-specific title/content so it's never overwritten.
+    drawHeaderIcons();
+
     // Draw page content
     switch (current_page) {
         case PAGE_MAIN:
@@ -123,12 +139,15 @@ void OledDisplay::update(const SystemStatus& status) {
             drawMainScreen();
             break;
     }
-    
+
+    // Page-position dots (replaces the old per-page "[Page X/4]" footer text)
+    drawPageIndicator();
+
     // Draw popup overlay if active
     if (popup_message.active) {
         drawErrorPopup();
     }
-    
+
     display.display();
 }
 
@@ -138,17 +157,19 @@ void OledDisplay::update(const SystemStatus& status) {
 
 void OledDisplay::drawMainScreen() {
     // ========== YELLOW SECTION (Header) ==========
+    // Left-aligned (was centered at x=20) - the header icon cluster now
+    // occupies the top-right corner of this row starting at x=86, and this
+    // title is just long enough (14 chars * 6px = 84px) to nearly reach it
+    // from x=0.
     display.setTextSize(1);
-    display.setCursor(20, YELLOW_TITLE_Y);
+    display.setCursor(0, YELLOW_TITLE_Y);
     display.println(F("XpressNet-Ecos"));
     
-     // Status bar in yellow - CHANGED: Use text instead of icons
+    // Status bar in yellow - XNet/Ecos connection state has its own
+    // page-local icon now (see drawXpressNetScreen()/drawEcosScreen()), not
+    // shown here on the main overview page
     display.setCursor(0, YELLOW_STATUS_Y);
-    display.print(F("XNet:"));
-    drawStatusText(30, YELLOW_STATUS_Y, current_status.xnet_status);
-    display.print(F(" Ecos:"));
-    drawStatusText(80, YELLOW_STATUS_Y, current_status.ecos_status);
-    display.print(F(" L:"));
+    display.print(F("Locos: "));
     display.print(current_status.active_locos);
     
     // ========== BLUE SECTION (Content) ==========
@@ -164,21 +185,28 @@ void OledDisplay::drawMainScreen() {
     display.print(mem_percent);
     display.print(F("%"));
     
-    // Last command (placeholder for now)
+    // Last command
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
-    display.print(F("Last: Loco (TBD)"));
-    
+    if (current_status.last_command_address > 0) {
+        display.print(F("Last: Loco "));
+        display.print(current_status.last_command_address);
+    } else {
+        display.print(F("Last: (none yet)"));
+    }
+
     // Speed and direction
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
-    display.print(F("Spd: (TBD) Dir: (TBD)"));
-    
-    // Functions
+    if (current_status.last_command_address > 0) {
+        display.print(F("Spd: "));
+        display.print(current_status.last_command_speed);
+        display.print(current_status.last_command_direction ? F(" Dir: Fwd") : F(" Dir: Rev"));
+    } else {
+        display.print(F("Spd: -- Dir: --"));
+    }
+
+    // Functions (TBD - not yet tracked in SystemStatus, deferred)
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
     display.print(F("Fn: (TBD)"));
-    
-    // Footer with page indicator
-    display.setCursor(0, 57);  // Fixed position, not calculated
-    display.print(F("[Page 1/4]"));
 }
 
 // ============================================================================
@@ -187,8 +215,10 @@ void OledDisplay::drawMainScreen() {
 
 void OledDisplay::drawDeviceStatusScreen() {
     // ========== YELLOW SECTION ==========
+    // Left-aligned - see drawMainScreen() for why (leaves room for the
+    // header icon cluster at x=86+)
     display.setTextSize(1);
-    display.setCursor(30, YELLOW_TITLE_Y);
+    display.setCursor(0, YELLOW_TITLE_Y);
     display.println(F("DEVICE STATUS"));
     
     display.setCursor(18, YELLOW_STATUS_Y);
@@ -199,7 +229,8 @@ void OledDisplay::drawDeviceStatusScreen() {
     
     // IP address
     display.setCursor(0, BLUE_CONTENT_Y);
-    display.print(F("IP: 192.168.1.105"));
+    display.print(F("IP: "));
+    display.print(WiFi.localIP());
     
     // Uptime
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
@@ -228,19 +259,19 @@ void OledDisplay::drawDeviceStatusScreen() {
     display.print(heap_percent);
     display.print(F("%)"));
     
-    // CPU and IRAM
+    // CPU freq and WiFi signal strength (IRAM usage isn't exposed by the
+    // ESP8266 Arduino core at runtime, so this slot shows RSSI instead)
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
-    display.print(F("CPU: 80MHz IRAM: 92%"));
+    display.print(F("CPU: "));
+    display.print(getCpuFreqMhz());
+    display.print(F("MHz RSSI:"));
+    display.print(current_status.wifi_rssi);
     
     // Memory warning if critical
     if (current_status.current_heap_bytes < 10000) {
         display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 4);
         display.println(F("!WARNING: Low memory"));
     }
-    
-    // Footer
-    display.setCursor(0, 57);  // Fixed position, not calculated
-    display.print(F("[Page 2/4]"));
 }
 // ============================================================================
 // PAGE 2: XPRESSNET DETAILS
@@ -248,43 +279,39 @@ void OledDisplay::drawDeviceStatusScreen() {
 
 void OledDisplay::drawXpressNetScreen() {
     // ========== YELLOW SECTION ==========
+    // Left-aligned - see drawMainScreen() for why (leaves room for the
+    // header icon cluster at x=86+)
     display.setTextSize(1);
-    display.setCursor(35, YELLOW_TITLE_Y);
+    display.setCursor(0, YELLOW_TITLE_Y);
     display.println(F("XPRESSNET"));
-    
-    display.setCursor(0, YELLOW_STATUS_Y);
-    display.print(F("Status: "));
-    const char* status_str = statusToString(current_status.xnet_status);
-    display.println(status_str);
-    
+
+    // Connection icon - page-local (only shown here, not on other pages -
+    // see drawHeaderIcons() for the reasoning)
+    drawConnectionIcon(PROTOCOL_ICON_X, ICON_Y, current_status.xnet_status);
+
     // ========== BLUE SECTION ==========
     display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
     
-    // Devices count
-    display.setCursor(0, BLUE_CONTENT_Y);
-    display.print(F("Devices: 0"));
-    
     // Active locos
-    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
+    display.setCursor(0, BLUE_CONTENT_Y);
     display.print(F("Active: "));
     display.print(current_status.active_locos);
     display.print(F(" locos"));
-    
-    // Last message timing
-    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
+
+    // Last message timing - deferred: needs last-message-age exposed through
+    // ProtocolInterface (touches the mock used by native tests too)
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
     display.print(F("Last Msg: N/A"));
-    
+
     // Command counter
-    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
-    display.print(F("Commands: 0"));
-    
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
+    display.print(F("Commands: "));
+    display.print(current_status.total_commands);
+
     // Echo prevention counter
-    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 4);
-    display.print(F("Echo Prev: 0"));
-    
-    // Footer
-    display.setCursor(0, 57);  // Fixed position, not calculated
-    display.print(F("[Page 3/4]"));
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
+    display.print(F("Echo Prev: "));
+    display.print(current_status.echo_prevented_count);
 }
 
 // ============================================================================
@@ -293,15 +320,16 @@ void OledDisplay::drawXpressNetScreen() {
 
 void OledDisplay::drawEcosScreen() {
     // ========== YELLOW SECTION ==========
+    // Left-aligned - see drawMainScreen() for why (leaves room for the
+    // header icon cluster at x=86+)
     display.setTextSize(1);
-    display.setCursor(40, YELLOW_TITLE_Y);
+    display.setCursor(0, YELLOW_TITLE_Y);
     display.println(F("ECOS LAN"));
-    
-    display.setCursor(0, YELLOW_STATUS_Y);
-    display.print(F("Status: "));
-    const char* status_str = statusToString(current_status.ecos_status);
-    display.println(status_str);
-    
+
+    // Connection icon - page-local (only shown here, not on other pages -
+    // see drawHeaderIcons() for the reasoning)
+    drawConnectionIcon(PROTOCOL_ICON_X, ICON_Y, current_status.ecos_status);
+
     // ========== BLUE SECTION ==========
     display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
     
@@ -325,13 +353,11 @@ void OledDisplay::drawEcosScreen() {
     display.print(current_status.active_locos);
     display.print(F(" locos"));
     
-    // Latency
+    // Latency - deferred: needs round-trip timestamp correlation on the
+    // heartbeat query, not wired up yet. N/A is honest; a fixed fake number
+    // wasn't.
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
-    display.print(F("Latency: 125ms"));
-    
-    // Footer
-    display.setCursor(0, 57);  // Fixed position, not calculated
-    display.print(F("[Page 4/4]"));
+    display.print(F("Latency: N/A"));
 }
 
 // ============================================================================
@@ -353,44 +379,83 @@ void OledDisplay::drawErrorPopup() {
 }
 
 // ============================================================================
-// HELPER: DRAW CONNECTION STATUS ICON
+// HELPER: HEADER ICONS (WiFi bars global; connection icons are page-local)
 // ============================================================================
+//
+// A previous version of this display used Unicode glyphs (checkmark/X/
+// diamond) here via the default font - confirmed on real hardware to render
+// as garbage, since the SSD1306's built-in font only covers ASCII. Every
+// icon below is hand-drawn with GFX primitives (circles/lines/rects) instead
+// of relying on any font glyph, which sidesteps that failure entirely.
 
-void OledDisplay::drawStatusIcon(int x, int y, ComponentStatus status) {
-    display.setCursor(x, y);
-    
+void OledDisplay::drawHeaderIcons() {
+    // WiFi is infrastructure, not protocol-specific - shown on every page,
+    // rightmost corner. Each interface's own connection icon (XNet/Ecos/
+    // future LocoNet/Z21) is drawn by that interface's own screen function
+    // instead, at PROTOCOL_ICON_X, so it only appears on its own page.
+    drawWifiSignalIcon(WIFI_ICON_X, ICON_Y, current_status.wifi_rssi);
+}
+
+void OledDisplay::drawConnectionIcon(int x, int y, ComponentStatus status) {
+    // ~7x8px, hand-drawn - no font glyphs involved
     switch (status) {
         case ComponentStatus::CONNECTED:
-            display.print(F("✓"));
+            display.fillCircle(x + 3, y + 4, 3, SSD1306_WHITE);
             break;
         case ComponentStatus::DISCONNECTED:
-            display.print(F("✗"));
+            display.drawLine(x, y + 1, x + 6, y + 7, SSD1306_WHITE);
+            display.drawLine(x + 6, y + 1, x, y + 7, SSD1306_WHITE);
             break;
         case ComponentStatus::CONNECTING:
-            display.print(F("◇"));
+            display.drawCircle(x + 3, y + 4, 3, SSD1306_WHITE);
             break;
         case ComponentStatus::ERROR:
-            display.print(F("!"));
+            display.fillTriangle(x, y + 7, x + 6, y + 7, x + 3, y + 1, SSD1306_WHITE);
             break;
     }
 }
 
-void OledDisplay::drawStatusText(int x, int y, ComponentStatus status) {
-    display.setCursor(x, y);
-    
-    switch (status) {
-        case ComponentStatus::CONNECTED:
-            display.print(F("OK"));
-            break;
-        case ComponentStatus::DISCONNECTED:
-            display.print(F("NO"));
-            break;
-        case ComponentStatus::CONNECTING:
-            display.print(F(".."));
-            break;
-        case ComponentStatus::ERROR:
-            display.print(F("ER"));
-            break;
+void OledDisplay::drawWifiSignalIcon(int x, int y, int rssi_dbm) {
+    // Classic 4-bar signal gauge, increasing height, bottom-aligned within a
+    // 9px-tall cell. Bars below the strength threshold are simply left
+    // undrawn (a 2px-wide "hollow" rect would look filled anyway at this
+    // scale, so there's no point drawing an outline for them).
+    uint8_t bars;
+    if (rssi_dbm >= -55) bars = 4;
+    else if (rssi_dbm >= -65) bars = 3;
+    else if (rssi_dbm >= -75) bars = 2;
+    else if (rssi_dbm >= -85) bars = 1;
+    else bars = 0;
+
+    static const uint8_t bar_heights[4] = {3, 5, 7, 9};
+    int bar_x = x;
+    for (uint8_t i = 0; i < 4; i++) {
+        if (i < bars) {
+            uint8_t h = bar_heights[i];
+            display.fillRect(bar_x, y + (9 - h), 2, h, SSD1306_WHITE);
+        }
+        bar_x += 3;  // 2px bar + 1px gap
+    }
+}
+
+// ============================================================================
+// HELPER: PAGE-POSITION INDICATOR (replaces the old "[Page X/4]" footer text)
+// ============================================================================
+
+void OledDisplay::drawPageIndicator() {
+    const int dot_spacing = 8;
+    const int dot_radius = 2;
+    int total_width = (PAGE_COUNT - 1) * dot_spacing;
+    int start_x = (SCREEN_WIDTH - total_width) / 2;
+    int y = SCREEN_HEIGHT - 4;
+
+    for (uint8_t i = 0; i < PAGE_COUNT; i++) {
+        int cx = start_x + i * dot_spacing;
+        if (i == current_page) {
+            display.fillCircle(cx, y, dot_radius, SSD1306_WHITE);
+        } else {
+            display.drawCircle(cx, y, dot_radius, SSD1306_WHITE);
+        }
     }
 }
 

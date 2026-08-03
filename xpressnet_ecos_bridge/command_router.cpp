@@ -19,6 +19,11 @@
 #include "utils/memory.h"
 #include "utils/now_ms.h"
 
+// WiFi.RSSI() for SystemStatus - real core only, native tests have no WiFi stack
+#ifdef ARDUINO_ARCH_ESP8266
+#include <ESP8266WiFi.h>
+#endif
+
 // ============================================================================
 // CONSTRUCTOR
 // ============================================================================
@@ -89,9 +94,10 @@ void CommandRouter::handleXpressNetCommand(uint16_t address, uint8_t speed, uint
     // Check echo prevention BEFORE adding to state engine
     if (isEchoCommand(address, LocoSource::XPRESSNET)) {
         DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u speed command (from Ecos)\n", address);
+        echo_prevented_count++;
         return;
     }
-    
+
     // Create/update locomotive state
     LocoState new_state;
     new_state.dcc_address = address;
@@ -129,7 +135,13 @@ void CommandRouter::handleXpressNetCommand(uint16_t address, uint8_t speed, uint
     
     // Broadcast to other protocols
     broadcastCommand(address, new_state, LocoSource::XPRESSNET);
-    
+
+    total_commands_count++;
+    last_command.address = address;
+    last_command.speed = speed;
+    last_command.direction = direction;
+    last_command.source = LocoSource::XPRESSNET;
+
     // Update echo prevention state
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 0;  // SPEED command type
@@ -159,9 +171,10 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
     // Check echo prevention
     if (isEchoCommand(address, LocoSource::XPRESSNET)) {
         DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u function command (from Ecos)\n", address);
+        echo_prevented_count++;
         return;
     }
-    
+
     // Get existing state or create new
     LocoState new_state;
     if (!state_engine.getLoco(address, new_state)) {
@@ -188,7 +201,9 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
     
     // Broadcast to other protocols
     broadcastCommand(address, new_state, LocoSource::XPRESSNET);
-    
+
+    total_commands_count++;
+
     // Update echo prevention
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 1;  // FUNCTION command type
@@ -226,9 +241,10 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
     // Check echo prevention BEFORE updating
     if (isEchoCommand(address, LocoSource::ECOS)) {
         DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u speed command (from XpressNet)\n", address);
+        echo_prevented_count++;
         return;
     }
-    
+
     // Get existing state or create new
     LocoState new_state;
     if (!state_engine.getLoco(address, new_state)) {
@@ -256,7 +272,13 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
     
     // Broadcast to XpressNet (if enabled)
     broadcastCommand(address, new_state, LocoSource::ECOS);
-    
+
+    total_commands_count++;
+    last_command.address = address;
+    last_command.speed = speed;
+    last_command.direction = direction;
+    last_command.source = LocoSource::ECOS;
+
     // Update echo prevention
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 0;  // SPEED
@@ -280,9 +302,10 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
     // Check echo prevention
     if (isEchoCommand(address, LocoSource::ECOS)) {
         DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u function command (from XpressNet)\n", address);
+        echo_prevented_count++;
         return;
     }
-    
+
     // Get existing or create
     LocoState new_state;
     if (!state_engine.getLoco(address, new_state)) {
@@ -305,7 +328,9 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
     
     // Broadcast to XpressNet
     broadcastCommand(address, new_state, LocoSource::ECOS);
-    
+
+    total_commands_count++;
+
     // Update echo prevention
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 1;  // FUNCTION
@@ -484,16 +509,27 @@ SystemStatus CommandRouter::getSystemStatus() const {
     // State engine
     status.active_locos = state_engine.getLocoCount();
 
-    // WiFi (would need WiFi interface - for now, just 0)
-    status.wifi_rssi = 0;  // TODO: Get from WiFi
-    
+    // WiFi signal strength
+    #ifdef ARDUINO_ARCH_ESP8266
+        status.wifi_rssi = WiFi.RSSI();
+    #else
+        status.wifi_rssi = 0;
+    #endif
+
     // Uptime
     status.uptime_ms = now_ms();
-    
+
     // Diagnostics
-    status.total_commands = 0;  // TODO: Track in router
+    status.total_commands = total_commands_count;
+    status.echo_prevented_count = echo_prevented_count;
     status.current_heap_bytes = ESP.getFreeHeap();
-    
+
+    // Last drive command (for display)
+    status.last_command_address = last_command.address;
+    status.last_command_speed = last_command.speed;
+    status.last_command_direction = last_command.direction;
+    status.last_command_source = last_command.source;
+
     return status;
 }
 

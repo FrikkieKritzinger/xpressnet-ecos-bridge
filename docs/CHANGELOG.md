@@ -7,6 +7,112 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — OLED attached: blocking Ecos-connect bug fully explained the "XNet never connects" symptom; display validated and reworked against real hardware**
+- **Trigger**: OLED physically attached for the first time and confirmed
+  initializing. With Ecos deliberately left unreachable for this test, three
+  symptoms appeared together: XNet status never showed "Connected" (neither
+  serial nor OLED), active-loco count stayed 0 despite the MultiMaus actively
+  changing speed, and unplugging the MultiMaus threw err13 requiring a full
+  Wemos power-cycle to clear.
+- **Root cause - single bug explained all three**: `EcosInterface::attemptTcpConnect()`
+  (`ecos_interface.cpp`) called `wifi_client.connect(ECOS_IP, ECOS_PORT)`, which
+  is genuinely blocking on ESP8266 - traced into the core
+  (`ClientContext::connect()`) to confirm it spins in `esp_delay(_timeout_ms, ...)`
+  for up to the full timeout without ever returning to `loop()`. Default
+  timeout is 5000ms. `config.h` already had an `ECOS_TIMEOUT` constant labeled
+  "TCP connection timeout (ms)" but it was dead code - never actually applied
+  to `wifi_client`, so every connect attempt used the ESP8266 core's own
+  5000ms default. With Ecos unreachable, every backoff-scheduled reconnect
+  attempt (5s/10s/20s/60s) froze the *entire* main loop - including
+  `xnet_interface.update()`, which drives XpressNet call-byte polling - for up
+  to 5 seconds at a stretch. `BUS_TIMEOUT` (XpressNet) is also 5000ms, so a
+  single stall was enough to flip XNet back to disconnected almost every time;
+  meanwhile the MultiMaus was polling a master gone completely silent on the
+  bus, hence err13, repeating forever since Ecos never came back up on its own.
+  **Fixed**: wired `ECOS_TIMEOUT` into `wifi_client.setTimeout()` before each
+  connect attempt, and dropped its value from 5000ms to 300ms - real LAN
+  connects complete in single-digit ms, so this only bounds the failure case.
+- **Result, confirmed on real hardware**: reflashed with Ecos still down -
+  MultiMaus attached immediately and active-loco count went to 1 the instant
+  speed changed, both previously-stuck symptoms resolved. Native suite
+  unaffected (`ecos_interface.cpp` is excluded from the native build).
+- **OLED stubbed-data pass**: validating the newly-attached display surfaced
+  several Phase-2-era placeholder fields still on screen - "Devices: 0"
+  (leftover from the device-count-tracking removal, never actually deleted
+  from the display), "IP: 192.168.1.105" and "CPU: 80MHz IRAM: 92%" (both
+  hardcoded literals, not live reads), "Commands: 0"/"Echo Prev: 0" (counters
+  that existed in `SystemStatus` but were always hardcoded to 0 with `// TODO`
+  comments in `CommandRouter::getSystemStatus()`), and a hardcoded fake
+  "Latency: 125ms" that looked real but wasn't. Wired up real IP
+  (`WiFi.localIP()`), real CPU frequency (`getCpuFreqMhz()` from
+  `utils/memory.h`), real WiFi RSSI (`WiFi.RSSI()`, guarded behind
+  `#ifdef ARDUINO_ARCH_ESP8266` so the native build - which has no WiFi stack
+  - still links), a real lifetime command counter and echo-suppressed
+  counter (both incremented at the point each `CommandRouter::handle*Command`
+  method already updates its echo-prevention state), and real last-command
+  info (address/speed/direction). Removed the stale "Devices: 0" line
+  outright rather than wiring it up, since device-count tracking was already
+  a deliberate removal (see "Why No XpressNet Device-Count Tracking?" in
+  `CLAUDE.md`) - this was the incomplete other half of that removal. Fields
+  that still need real plumbing (XNet last-message age - needs exposing
+  through `ProtocolInterface`, which also touches the mock used by native
+  tests; Ecos round-trip latency - needs timestamp correlation on the
+  heartbeat query; per-loco functions on the main page) were left as an
+  honest `N/A`/`(TBD)` rather than invented data.
+- **Latent bug found in passing**: `SystemStatus::last_loco` was a
+  `LocoState*` pointer field, declared but never initialized or set anywhere
+  in `getSystemStatus()` (which builds a fresh stack-local `SystemStatus`
+  each call) - any future code dereferencing it would read garbage stack
+  memory. Removed and replaced with plain `last_command_address/speed/
+  direction/source` fields, which is what the display actually needed anyway.
+- **OLED UI reworked around real hardware constraints**: `drawStatusIcon()`
+  (dead code, unused since an earlier session already replaced it with plain
+  text after its Unicode glyphs - ✓/✗/◇/! - rendered as garbage on the real
+  SSD1306, whose default font only covers ASCII) was replaced with genuinely
+  hand-drawn icons (`fillCircle`/`drawCircle`/`drawLine`/`fillTriangle`/
+  `fillRect` - no font glyphs involved at all this time): a 4-bar WiFi
+  signal-strength gauge (thresholded off real RSSI) and per-interface
+  connection-status icons. Iterated on placement per user feedback: WiFi is
+  global (every page, rightmost corner, since it's ESP8266-level
+  infrastructure, not protocol-specific) while each interface's own
+  connection icon is now page-local - drawn only by that interface's own
+  screen function, not shown on other pages - explicitly establishing the
+  pattern for LocoNet/Z21 once there's no room to show every protocol's
+  status at once. Also replaced the "[Page X/4]" text footer on all 4 pages
+  with a compact centered dot-row indicator, and had to left-align the page
+  titles (previously manually centered with per-page x-offsets) after
+  discovering the longer titles would otherwise run directly into the new
+  icon zone.
+- **Verified**: firmware builds clean for `env:wemos` at each step; native
+  suite 93/93 passing throughout (grew from 91 sometime after the last
+  changelog entry - not investigated, no regressions). Flashed and confirmed
+  working on real hardware after each round of changes.
+- **XNet status flapping to Disconnected between drive commands**: user
+  reported the XNet connection icon showed Connected right after a message
+  but reverted to Disconnected shortly after, well before `BUS_TIMEOUT` (5s)
+  should plausibly apply if the MultiMaus were still actively talking. Root
+  cause: `onGiveLocoInfo()`, `onGiveLocoMM()`, and `onPowerStateChange()`
+  (`xpressnet_interface.cpp`) are all real, successfully-parsed messages
+  received from a device on the bus, but none of them called
+  `markBusActivity()` - only `onLocoDrive128`/`onLocoDriveStepped`/
+  `onLocoFunctionGroup` did. A throttle with a loco selected typically
+  re-polls "give me loco info" regularly just to keep its own display in
+  sync (the same mechanism behind the "stolen icon" behavior noted
+  elsewhere in this file) - none of that traffic counted as bus activity, so
+  the moment the user stopped actively turning the knob (no more drive/
+  function commands), the status timed out to Disconnected after 5s even
+  though the MultiMaus was still there and still talking, just via a message
+  type the code didn't recognize. **Fixed**: added `markBusActivity()` calls
+  to all three handlers. Firmware builds clean, flashed; live re-validation
+  of the fix (confirming status now stays Connected through idle
+  give-loco-info polling) still pending user confirmation on hardware.
+- **Not yet done**: the 5-minute subscription-lifecycle timeout under real
+  timing, the deferred display fields noted above (last-message age, Ecos
+  latency, per-loco functions), and live confirmation of the XNet status-flap
+  fix just described.
+
+---
+
 **2026-07-31 — Ecos-side validation: two real connection bugs found and fixed against a live Ecos**
 - **Trigger**: reverted the two temporary diagnostic aids left active from Phase 4.6's
   XpressNet-only testing (`TEMP_SKIP_ECOS_CONNECT` in `ecos_interface.cpp`,
