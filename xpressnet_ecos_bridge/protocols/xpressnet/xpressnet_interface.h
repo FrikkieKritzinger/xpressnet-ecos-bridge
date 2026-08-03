@@ -75,6 +75,18 @@ public:
     void sendResumeOperation() override;
 
     /**
+     * Push a locomotive's real state to whichever XpressNet slot currently
+     * has it selected, via the library's PushExternalLocoUpdate() - see its
+     * header comment for why a MultiMaus needs this specific call-byte +
+     * unmarked-reply sequence (confirmed live 2026-08-03) rather than the
+     * plain setSpeed()/setFuncNtoM() broadcast to actually refresh its
+     * display while flashing "stolen". No-op if no slot currently
+     * references this address. Only F0-F4 are covered (untested beyond
+     * that group). Called by CommandRouter when Ecos is the source.
+     */
+    void pushLocoStateToOwningSlot(uint16_t address) override;
+
+    /**
      * Get current connection status
      * @return CONNECTED, DISCONNECTED, ERROR
      */

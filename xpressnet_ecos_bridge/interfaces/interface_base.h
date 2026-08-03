@@ -109,6 +109,19 @@ public:
      * previous speed - that stays at 0 until the operator re-throttles it.
      */
     virtual void sendResumeOperation() {}
+
+    /**
+     * Proactively push a locomotive's real current state to whichever
+     * device currently has it selected, if the protocol has that concept
+     * (only XpressNet does, via the vendored master library's per-slot
+     * tracking). No-op by default. Confirmed live (2026-08-03): a plain
+     * sendSpeedCommand()/sendFunctionCommand() broadcast does not reliably
+     * refresh a MultiMaus's displayed values while it's flashing "stolen" -
+     * neither does an addressed reply on its own. What actually works is
+     * reproducing the call-byte-then-reply timing a real throttle's own
+     * transmission has - see XpressNetMaster::PushExternalLocoUpdate().
+     */
+    virtual void pushLocoStateToOwningSlot(uint16_t address) { (void)address; }
 };
 
 // ============================================================================

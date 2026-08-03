@@ -7,6 +7,151 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 5 step 4 confirmed live; step 9 (stolen icon) investigated, fixed, and confirmed; a second real bug found along the way**
+
+- **Serial monitor was resetting the board on every connect.** Discovered
+  because a live-test capture started with `=== XpressNet-Ecos Bridge
+  Starting ===`, wiping StateEngine/address-map state right as the test
+  began. Opening a serial connection to an ESP8266 pulses DTR/RTS - the
+  same wiring used for flash auto-reset. Fixed with `monitor_rts = 0` /
+  `monitor_dtr = 0` in `platformio.ini`'s `env:wemos` section.
+
+- **Step 4 confirmed live**: via Ecos, turning on two different functions
+  one at a time (F1, then F1+F4) correctly left both on - merged bitmap
+  `0x02` then `0x12`, exactly what the `functions_mask` fix from the prior
+  session predicted. The old overwrite bug would have reset the first back
+  off the instant the second event arrived.
+
+- **But the same live test surfaced a much bigger, previously-unknown
+  symptom**: toggling a function on the MultiMaus after the Ecos-side
+  functions had been set caused the *other* Ecos-set function to reset,
+  AND caused speed to zero and direction to invert. First-round log
+  analysis showed this was confounded by an unrelated reboot (the
+  DTR/RTS issue above, discovered mid-investigation) plus a `CommandRouter`
+  new-loco-defaults quirk - but a clean re-test (after fixing the monitor
+  reset) reproduced a real, narrower version: toggling F1 on the MM caused
+  Ecos's *other* function (F4) to silently revert. Root cause: XpressNet's
+  function-group messages are always the *sending device's own full local
+  belief* for that group's bits (F0-F4 together) - never a delta. A
+  MultiMaus's belief for a function set externally by Ecos never gets
+  updated (its *display* can show the right icon, but its own outgoing
+  reports don't reflect it), so the next time it reports that group for
+  any reason, it "rolls back" whatever Ecos set that it never learned
+  about. This reframed what had been filed as a low-priority display quirk
+  (Phase 5 step 9) as a bug with a real state-corruption consequence, and
+  the user asked to reprioritize step 9 immediately after step 4 rather
+  than continuing through steps 5-8 first.
+
+- **Step 9 root-cause investigation** (per the user's own proposal: use two
+  real MultiMaus units and instrument the actual bus traffic, rather than
+  reasoning further from static code):
+  - First attempt: a new `XpressNetMasterClass::PushLocoState()` sent the
+    loco's real state as a *directed* `SetLocoInfoMM` reply (the same
+    message format a MultiMaus gets when it explicitly asks) to whichever
+    slot the library's own `SlotLokUse[]` tracking showed currently owned
+    the address. Live test: no different from the original plain
+    broadcast - the MultiMaus still flashed "stolen" without refreshing
+    its displayed values. Ruled out "reply format" as the deciding factor.
+  - Added temporary `Serial.printf` instrumentation directly into the
+    vendored library's `AddBusySlot()`/`SetBusy()`/`SetLocoBusy()` (removed
+    again once diagnosis was complete) and captured a real MM-to-MM steal:
+    `AddBusySlot(slot=4,...)` → `AddBusySlot(slot=3,...)` → `SetBusy(3)` →
+    `SetLocoBusy` evicting slot 4. Confirmed the library's real busy/evict
+    mechanism, and confirmed `SetLocoBusy()`'s own payload is hardcoded to
+    all-zero speed/functions - yet the user confirmed the "losing"
+    MultiMaus's function/direction display **does** stay accurate during a
+    real steal, with zero `LocoInfo`/`LocoInfoMM` re-poll ever appearing in
+    the capture. The only remaining explanation: a MultiMaus directly
+    overhears the winning throttle's own raw reply on the shared RS485 bus
+    - ordinary peer bus traffic, not anything routed through the master's
+    reply-construction code at all.
+  - Traced the actual UART framing in `XpressNetMasterClass::
+    XNetReadBuffer()`: the first byte of every message a *master*
+    transmits gets the 9th "call-byte" parity bit set, unless that byte is
+    exactly `0x00`, in which case it's silently skipped and the rest of
+    the message goes out as **unmarked** data - which is exactly the
+    format `setSpeed()`/`setFunc0to4()` already use (byte 0 = `0x00`).
+    So the existing plain broadcast was *already* wire-format-identical to
+    a slave's own reply, and still didn't work - meaning the real
+    difference had to be bus **timing/context**, not byte format: a real
+    slave's reply always immediately follows the master's own call-byte
+    addressed to that specific slot; the plain broadcast just rides
+    whatever the round-robin scheduler's next opportunity happens to be.
+  - **User's proposed test, confirmed live**: temporary
+    `TestForceBusy()`/`TestInjectPeerFunc1to4()`/`TestInjectPeerSpeed()`
+    methods that (1) forced busy/stolen via `AddBusySlot()` under an
+    unused fake slot (30), then (2) explicitly sent `[call-byte addressed
+    to the real owning slot][unmarked reply data]` - deliberately
+    reproducing a real slave's own call-byte-then-reply sequence. **This
+    worked** - both MultiMaus units correctly flashed stolen, and the
+    headlight icon (then speed, then direction) genuinely updated on the
+    display, matching real MM-to-MM steal behavior. Extended from
+    functions to speed/direction the same way, also confirmed live.
+
+- **A second, independent bug found via the same live retesting** (not
+  part of the original step 9 diagnosis - discovered while confirming
+  the fix above): using Ecos's below-zero speed-detent to flip direction
+  correctly updated the MultiMaus, but the *next* speed increase from Ecos
+  immediately reverted the MultiMaus's direction back - even though Ecos's
+  own UI still showed the correct, new direction. Root cause:
+  `CommandRouter::handleEcosCommand(address, speed, direction)` always
+  applied *both* speed and direction from every Ecos event, but a real
+  Ecos event frequently reports only one of the two (matching the
+  `EcosReply::has_speed`/`has_direction` flags, which existed and were
+  parsed but never consulted here) - the unreported field silently reset
+  to whatever placeholder value happened to accompany it. Exact same class
+  of bug as step 4's `functions_mask` fix, just for speed/direction
+  instead of functions. Fixed with new `has_speed`/`has_direction`
+  parameters (default `true`, so every existing 3-argument call site is
+  unaffected) - `handleEcosCommand()` now only overwrites the field(s)
+  Ecos actually reported for that event. `EcosInterface::handleReply()`
+  updated to pass `reply.has_speed`/`reply.has_direction` through. This is
+  very likely the real explanation for why the *original* `ReqLocoBusy()`
+  attempt (tried and fully reverted in an earlier session) broke
+  bidirectional propagation after a few cycles - that bug existed
+  then too and was never fixed until now, so it's plausible the busy/evict
+  mechanism itself was never actually the problem.
+
+- **Known, separately-flagged limitation, left on hold**: Ecos's dedicated
+  hardware direction switch doesn't generate any network event on its own
+  - not even an unrecognized one, confirmed by the total absence of any
+  `Ecos:`/`unhandled reply` line correlating with using it in isolation.
+  Only combined with a following speed change (e.g. crossing the
+  zero-speed detent) does a real event reach the bridge. Best guess: Ecos
+  treats the switch as a local UI latch that only gets pushed onto the
+  wire alongside the next speed command, not as an independent property
+  push. The detent-crossing method is a full working substitute (reaches
+  the exact same code path), so this was flagged and parked rather than
+  chased further.
+
+- **Final production implementation** (after the diagnostic-only
+  `PushLocoState`/`TestForceBusy`/`TestInjectPeerFunc1to4`/
+  `TestInjectPeerSpeed` methods and all `Serial.printf` instrumentation
+  were removed): one consolidated `XpressNetMasterClass::
+  PushExternalLocoUpdate(Adr, Steps, Speed, F0to4)` in the vendored
+  library, using a named `XNetExternalControllerSlot` (30) instead of a
+  magic number. `ProtocolInterface::pushLocoStateToOwningSlot()` (new,
+  no-op-by-default virtual, only `XpressNetInterface` overrides it) is
+  called by `CommandRouter::broadcastCommand()` alongside the existing
+  `sendSpeedCommand()`/`sendFunctionCommand()` broadcast whenever Ecos is
+  the source. Scope is deliberately limited to F0-F4 (the group actually
+  tested) - F5-F31 still only go out via the plain broadcast.
+- 2 new `test_command_router` tests for the speed/direction merge fix
+  (`test_router_ecos_speed_only_update_preserves_direction`,
+  `test_router_ecos_direction_only_update_preserves_speed`); 2 more
+  confirming `pushLocoStateToOwningSlot()` is called for Ecos-sourced
+  broadcasts and not XpressNet-sourced ones. Native suite 122/122 passing.
+  No native coverage for `PushExternalLocoUpdate()` itself - same
+  hardware-coupled boundary as the rest of `ecos_interface.cpp`/
+  `xpressnet_interface.cpp`.
+- Final live confirmation, on the cleaned-up `env:wemos` production build
+  (not the `env:debug` build used throughout the investigation): headlight,
+  speed, and direction via Ecos all correctly refresh on the MultiMaus
+  while it shows the "stolen" flash, and the zero-speed-detent direction
+  flip no longer reverts on a subsequent speed change.
+
+---
+
 **2026-08-03 — Boot splash layout: title in the header band, logo below, no divider**
 - User request, unrelated to Phase 5: reworked `OledDisplay::drawBootLogo()`
   so "OmniConnect" sits in the top 16 rows (the same yellow/header band

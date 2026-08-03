@@ -520,7 +520,8 @@ void EcosInterface::handleReply(const EcosReply& reply) {
             // Route to CommandRouter
             if (router) {
                 if (reply.has_speed || reply.has_direction) {
-                    router->handleEcosCommand(dcc_address, reply.speed, reply.direction);
+                    router->handleEcosCommand(dcc_address, reply.speed, reply.direction,
+                                               reply.has_speed, reply.has_direction);
                 }
                 if (reply.has_functions) {
                     router->handleEcosFunctionCommand(dcc_address, reply.functions, reply.functions_mask);

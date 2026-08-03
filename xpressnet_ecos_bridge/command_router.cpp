@@ -215,7 +215,8 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
 // HANDLE ECOS COMMANDS
 // ============================================================================
 
-void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t direction) {
+void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t direction,
+                                       bool has_speed, bool has_direction) {
     /*
      * Process speed/direction update from Ecos
      * 
@@ -250,33 +251,40 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
     if (!state_engine.getLoco(address, new_state)) {
         // New from Ecos
         new_state.dcc_address = address;
-        new_state.speed = speed;
-        new_state.direction = direction;
+        new_state.speed = has_speed ? speed : 0;
+        new_state.direction = has_direction ? direction : 1;
         new_state.functions = 0;
         new_state.subscribed_to_ecos = true;
-        
+
         if (!state_engine.addOrUpdateLoco(address, new_state)) {
             DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u\n", address);
             return;
         }
-        
+
         DEBUG_STATE_PRINTF("New loco from Ecos: %u (marked subscribed)\n", address);
     } else {
-        // Update existing
-        new_state.speed = speed;
-        new_state.direction = direction;
+        // Update existing - only overwrite the field(s) this Ecos event
+        // actually reported. A speed-only event must not silently reset
+        // direction back to whatever default byte accompanied it, and vice
+        // versa - the same class of bug already fixed for function merging.
+        if (has_speed) {
+            new_state.speed = speed;
+        }
+        if (has_direction) {
+            new_state.direction = direction;
+        }
         new_state.subscribed_to_ecos = true;
         new_state.last_source = LocoSource::ECOS;
         state_engine.addOrUpdateLoco(address, new_state);
     }
-    
+
     // Broadcast to XpressNet (if enabled)
     broadcastCommand(address, new_state, LocoSource::ECOS);
 
     total_commands_count++;
     last_command.address = address;
-    last_command.speed = speed;
-    last_command.direction = direction;
+    last_command.speed = new_state.speed;
+    last_command.direction = new_state.direction;
     last_command.source = LocoSource::ECOS;
 
     // Update echo prevention
@@ -531,6 +539,11 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
             DEBUG_PRINTF("Broadcasting Ecos command to XpressNet\n");
             xpressnet->sendSpeedCommand(address, state.speed, state.direction);
             xpressnet->sendFunctionCommand(address, state.functions);
+            // A MultiMaus that already has this loco selected doesn't reliably
+            // apply the plain broadcast above to its own display/button-latch
+            // model - only a directed reply it recognizes as authoritative.
+            // No-op if no XpressNet slot currently has this address selected.
+            xpressnet->pushLocoStateToOwningSlot(address);
         }
         #endif
     }

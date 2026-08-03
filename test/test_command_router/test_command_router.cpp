@@ -261,6 +261,37 @@ void test_router_updates_loco_speed(void) {
     TEST_ASSERT_EQUAL_UINT8(100, state.speed);
 }
 
+void test_router_ecos_speed_only_update_preserves_direction(void) {
+    // A real Ecos event reporting only a new speed (e.g. the throttle knob
+    // moved, direction switch untouched) must not silently reset direction
+    // back to whatever placeholder byte accompanied it - the same class of
+    // bug already fixed for function merging (has_speed/has_direction mirror
+    // functions_mask).
+    CommandRouter router;
+
+    router.handleEcosCommand(100, 0, 0, true, true);    // establish speed=0, dir=0
+    router.handleEcosCommand(100, 50, 0, true, false);  // speed-only: has_direction=false
+
+    LocoState state;
+    router.getStateEngine().getLoco(100, state);
+    TEST_ASSERT_EQUAL_UINT8(50, state.speed);
+    TEST_ASSERT_EQUAL_UINT8(0, state.direction);  // preserved, not reset
+}
+
+void test_router_ecos_direction_only_update_preserves_speed(void) {
+    // Mirror of the above: a direction-only Ecos event must not silently
+    // zero out speed.
+    CommandRouter router;
+
+    router.handleEcosCommand(100, 75, 1, true, true);   // establish speed=75, dir=1
+    router.handleEcosCommand(100, 0, 0, false, true);   // direction-only: has_speed=false
+
+    LocoState state;
+    router.getStateEngine().getLoco(100, state);
+    TEST_ASSERT_EQUAL_UINT8(75, state.speed);  // preserved, not reset
+    TEST_ASSERT_EQUAL_UINT8(0, state.direction);
+}
+
 // ============================================================================
 // TESTS - MULTI-THROTTLE CONSISTENCY
 // ============================================================================
@@ -285,6 +316,31 @@ void test_router_broadcast_ecos_function_to_xpressnet(void) {
 
     TEST_ASSERT_EQUAL_INT(1, xnet_mock.getFunctionCommandCount());
     TEST_ASSERT_EQUAL_UINT32(0x03, xnet_mock.getLastFunctionCommand().functions);
+}
+
+void test_router_ecos_broadcast_also_pushes_to_owning_xpressnet_slot(void) {
+    // A MultiMaus that already has a loco selected doesn't reliably apply a
+    // plain broadcast to its own display/button-latch model - only a
+    // directed reply it recognizes as authoritative (Phase 5 step 9).
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleEcosCommand(100, 90, 1);
+
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getPushLocoStateCallCount());
+    TEST_ASSERT_EQUAL_UINT16(100, xnet_mock.getLastPushedAddress());
+}
+
+void test_router_xpressnet_broadcast_does_not_push_to_ecos(void) {
+    // Ecos has no "slot" concept - the targeted push is XpressNet-only.
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleXpressNetCommand(100, 90, 1);
+
+    TEST_ASSERT_EQUAL_INT(0, ecos_mock.getPushLocoStateCallCount());
 }
 
 // ============================================================================
@@ -608,9 +664,13 @@ int main(void) {
 
     RUN_TEST(test_router_adds_loco_to_state_engine);
     RUN_TEST(test_router_updates_loco_speed);
+    RUN_TEST(test_router_ecos_speed_only_update_preserves_direction);
+    RUN_TEST(test_router_ecos_direction_only_update_preserves_speed);
 
     RUN_TEST(test_router_broadcast_ecos_update_to_xpressnet);
     RUN_TEST(test_router_broadcast_ecos_function_to_xpressnet);
+    RUN_TEST(test_router_ecos_broadcast_also_pushes_to_owning_xpressnet_slot);
+    RUN_TEST(test_router_xpressnet_broadcast_does_not_push_to_ecos);
 
     RUN_TEST(test_router_new_loco_triggers_ecos_subscription);
     RUN_TEST(test_router_repeat_xpressnet_commands_do_not_resubscribe);

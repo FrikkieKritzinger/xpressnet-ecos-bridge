@@ -25,13 +25,12 @@
 > fixed to get here - full dated diagnosis for every one in
 > [docs/CHANGELOG.md](docs/CHANGELOG.md), starting from the 2026-07-30 entry.
 >
-> **Deliberately out of scope for Phase 4.6** (tracked separately - see Future
-> Improvements below): bus-wide emergency stop only acknowledges on the wire,
-> doesn't yet force locos to actually stop; the MultiMaus "stolen icon" display
-> not refreshing when Ecos drives a loco (one fix attempted and reverted -
-> needs careful instrumented retesting, see changelog); a few deferred OLED
-> fields (XNet last-message age, Ecos round-trip latency, per-loco functions
-> on the main page).
+> **Deliberately out of scope for Phase 4.6** (tracked separately as Phase 5
+> steps - see below): bus-wide emergency stop only acknowledging on the wire
+> without forcing locos to stop, and the MultiMaus "stolen icon" not
+> refreshing displayed values - both since fixed in Phase 5 (steps 2 and 9); a
+> few deferred OLED fields (XNet last-message age, Ecos round-trip latency,
+> per-loco functions on the main page) remain open as step 5/8.
 >
 > **Next**: nothing required to close out Phase 4.6 - see "After Phase 4.6"
 > below for the open backlog.
@@ -203,7 +202,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-3 done, step 4 pending live test, 5-10 remaining)
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-4 and 9 done, 5-8 and 10 remaining)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -214,9 +213,12 @@ handles this conveniently on a program track, so it's not currently planned
 at all, not merely deferred.
 
 Ordered by dependency and risk, not just by value - correctness bugs are fixed
-before the display/feature work that would otherwise sit on top of wrong data;
-the riskiest item (5.9, previously caused a live regression) is scheduled once
-everything else gives a clean, tested baseline to attempt it from again.
+before the display/feature work that would otherwise sit on top of wrong data.
+Step 9 (the riskiest item, previously caused a live regression) was originally
+scheduled last, but was deliberately moved up and re-attempted right after
+step 4 (2026-08-03) once live testing of step 4 surfaced a second, more severe
+symptom from the same underlying gap - see step 9 below for the full story and
+why this reordering turned out to be the right call.
 
 1. ✅ **Dead-code cleanup** (2026-08-03) - removed unused `ecosBuildGetCmd()`
    (`protocols/ecos/ecos_protocol.h/.cpp` - its only callers turned out to be
@@ -303,7 +305,7 @@ everything else gives a clean, tested baseline to attempt it from again.
      excluded from the native build, real-hardware/WiFi-coupled - matches
      its existing testing boundary); native suite 112/112 passing
      throughout (config/logic changes elsewhere unaffected).
-4. ⏳ **Ecos function-command merge bug - fixed, pending live test (2026-08-03)**.
+4. ✅ **Ecos function-command merge bug - fixed and confirmed live (2026-08-03)**.
    `EcosReply.functions_mask` was parsed but never consulted anywhere -
    `CommandRouter::handleEcosFunctionCommand` overwrote the *entire*
    function bitmap on every Ecos event instead of merging only the reported
@@ -322,10 +324,14 @@ everything else gives a clean, tested baseline to attempt it from again.
    had zero existing test coverage (no `func[]` parsing tests existed in
    `test_ecos_parser` at all) - added 4 parser tests plus 2
    `test_command_router` merge tests; native suite 118/118 passing.
-   **Needs a live test**: via Ecos (not XpressNet), turn two different
-   functions on one at a time and confirm both show on simultaneously - the
-   old bug would have reset the first back off the instant the second
-   event arrived.
+   **Confirmed live**: via Ecos, turning two different functions on one at a
+   time correctly left both on simultaneously (F1 then F1+F4, merged
+   bitmap `0x02` then `0x12`) - the old bug would have reset the first back
+   off the instant the second event arrived. The live test also surfaced a
+   much bigger, previously-unknown symptom (functions/speed/direction
+   appearing to cross-contaminate on the MultiMaus's display) - see step 9,
+   which turned out to be a separate, deeper issue this step's live test
+   exposed rather than a flaw in the merge fix itself.
 5. **OLED function display** ("Fn: (TBD)" on the main page) - cheaper than
    it looks: `LocoState.functions` is already tracked and already used
    elsewhere (answering throttle LocoInfo requests); it just never got
@@ -344,13 +350,75 @@ everything else gives a clean, tested baseline to attempt it from again.
    XNet "Last Msg" age (needs exposing through `ProtocolInterface`, touching
    the mock used by native tests) and Ecos round-trip latency (needs
    timestamp correlation on the heartbeat query).
-9. **XNet "stolen icon" re-attempt** (highest risk - do last among the
-   smaller items, once everything else gives a clean baseline to work from):
-   the MultiMaus's "stolen" (in-use-elsewhere) icon doesn't visually refresh
-   speed/direction when Ecos drives the loco. A previous attempt using the
-   library's `ReqLocoBusy()` broke bidirectional propagation after a few
-   claim/reclaim cycles and was fully reverted (zero trace left in code) -
-   needs careful, instrumented dual-MultiMaus retesting, not a quick patch.
+9. ✅ **XNet "stolen icon" display refresh - fixed and confirmed live
+   (2026-08-03)**. Moved up and re-attempted right after step 4 (see above)
+   once live testing there showed an Ecos-driven function change getting
+   silently reverted by the MultiMaus's own next report for that same
+   function group - a real, live-observed consequence of this gap, not
+   just a cosmetic one.
+   - **Root cause, found via a real two-MultiMaus bus-instrumented
+     investigation** (temporary `Serial.printf`s added directly to the
+     vendored `XpressNetMaster` library's `AddBusySlot`/`SetBusy`/
+     `SetLocoBusy`, removed again once diagnosed): a genuine MM-to-MM steal
+     keeps both displays in sync because the "losing" MultiMaus directly
+     overhears the "winning" one's own raw reply on the shared RS485 bus -
+     a real slave's reply is unmarked data (no 9th-bit call-byte) sent
+     immediately after the master's call-byte addressed to that slot's own
+     number. Our own `sendSpeedCommand()`/`sendFunctionCommand()`
+     broadcasts (and an addressed `SetLocoInfoMM` reply, tried first and
+     confirmed to make no difference) don't reproduce that same timing, so
+     a MultiMaus flashing "stolen" doesn't trust them enough to refresh its
+     displayed values - it does flash the icon, just without updating what
+     it shows underneath.
+   - **Fix**: new `XpressNetMasterClass::PushExternalLocoUpdate()`
+     (`libraries/XpressNetMaster`) marks the address busy under a
+     dedicated fake slot (`XNetExternalControllerSlot` = 30, evicting
+     whichever real slot currently owns it, exactly as a genuine steal
+     would) and then sends `[call-byte addressed to that slot][unmarked
+     reply data]` for both the F0-F4 function group and speed/direction -
+     i.e. reproducing the exact call-byte-then-reply sequence a real
+     throttle's own transmission has. `CommandRouter::broadcastCommand()`
+     calls this (via `ProtocolInterface::pushLocoStateToOwningSlot()`, a
+     new no-op-by-default virtual, XpressNet-only) alongside the existing
+     broadcast whenever Ecos is the source. **Confirmed live across many
+     cycles**: both MultiMaus units correctly flash stolen, and the
+     headlight/speed/direction values now genuinely refresh on the
+     display, matching a real steal's behavior.
+   - Only F0-F4 are covered (the group this was tested against) - F5-F31
+     still only go out via the plain broadcast and may not refresh a
+     "stolen" MultiMaus's display for those functions. Not yet needed in
+     practice; revisit if a higher function ever shows the same gap.
+   - **A second, independent bug found and fixed during the same live
+     testing**: `CommandRouter::handleEcosCommand()` used to always apply
+     both `speed` and `direction` from every Ecos event, even when Ecos
+     had only reported one of the two (e.g. a pure speed change) - the
+     unreported field silently reset to whatever placeholder value
+     accompanied it, observed live as direction reverting to its old value
+     the instant speed next changed after a direction-only update. Fixed
+     with `has_speed`/`has_direction` parameters (default `true`, so
+     existing 3-argument call sites are unaffected) that make
+     `handleEcosCommand()` only overwrite the field(s) Ecos actually
+     reported - the same class of fix as step 4's `functions_mask`, just
+     for speed/direction. `EcosInterface::handleReply()` now passes
+     `reply.has_speed`/`reply.has_direction` through. 2 new
+     `test_command_router` regression tests. This is very likely also what
+     actually broke the earlier, fully-reverted `ReqLocoBusy()` attempt
+     (tracked in the changelog at the time as "not fully root-caused") -
+     that bug existed then too and was never fixed until now.
+   - **Known, deliberately-parked limitation, unrelated to the above**:
+     Ecos's dedicated hardware direction switch doesn't generate any
+     network event on its own (not even an unrecognized one) - only
+     combined with a following speed change (e.g. crossing the zero-speed
+     detent) does a real event reach the bridge. Best guess: Ecos treats
+     the switch as a local UI latch that only gets pushed onto the wire
+     alongside the next speed command. The detent-crossing method works
+     as a full substitute and reaches every code path the dedicated switch
+     would, so this is flagged and put on hold rather than chased further.
+   - Native suite 122/122 passing (2 new tests from the speed/direction
+     merge fix; the push-mechanism itself has no native coverage, same
+     `ecos_interface.cpp`/hardware-coupled boundary as the rest of that
+     file - `pushLocoStateToOwningSlot()`'s *call site* in
+     `CommandRouter::broadcastCommand()` is covered by mock-based tests).
 10. **Accessory/turnout support** - the single biggest, fully standalone
     item, scheduled last for that reason. Confirmed total absence: no
     accessory concept exists anywhere in `ProtocolInterface` or
@@ -422,9 +490,8 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-3 done, step 4
-  pending live test, 5-10 remaining) - see the dedicated section below for
-  the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-4 and 9 done,
+  5-8 and 10 remaining) - see the dedicated section below for the roadmap.
 
 ---
 
@@ -798,14 +865,26 @@ a program track.
 confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Steps 1-3 are done and confirmed live (step 3, the fake
-outgoing Ecos command queue, took several rounds - a disconnect-detection
-gap, faster 10s detection, and a speed/direction command-order bug all
-found and fixed along the way). Step 4 (Ecos function-command merge bug)
-is implemented - `handleEcosFunctionCommand()` now merges via
-`functions_mask` instead of overwriting the whole bitmap, and a second bug
-in the mask's own type (`uint8_t`, silently truncating any function at F8
-or above) is fixed too - but still needs a live test: via Ecos, turn two
-different functions on one at a time and confirm both stay on. Native
-suite 118/118. Also updated the boot splash layout per request - title
-text in the top 16 rows, logo below, no divider line.
+section above. Steps 1-4 and 9 are now done and confirmed live; 5-8 and 10
+remain. Step 3 (the fake outgoing Ecos command queue) took several rounds -
+a disconnect-detection gap, faster 10s detection, and a speed/direction
+command-order bug all found and fixed along the way. Step 4 (Ecos
+function-command merge bug, `functions_mask` instead of overwriting the
+whole bitmap, plus a `uint8_t`-truncation bug in the mask's own type) is
+confirmed live. Step 9 (MultiMaus "stolen icon" display refresh) was
+deliberately reordered ahead of steps 5-8 once step 4's live test exposed a
+live, real-state consequence of the same gap - root-caused via a real
+two-MultiMaus bus-instrumented investigation (a real slave's reply is
+unmarked wire data immediately following the master's own call-byte to
+that slot; our broadcasts never reproduced that timing) and fixed with a
+new `XpressNetMasterClass::PushExternalLocoUpdate()` in the vendored
+library. A second, independent bug surfaced by the same live testing -
+`CommandRouter::handleEcosCommand()` silently resetting whichever of
+speed/direction Ecos *didn't* report in a given event - is fixed too
+(`has_speed`/`has_direction` parameters, same pattern as step 4's mask).
+Ecos's dedicated direction switch not generating a standalone network
+event is flagged as a known, parked limitation (the zero-speed-detent
+method is a full working substitute). Native suite 122/122. Also fixed
+`platformio.ini`'s serial monitor auto-resetting the board on connect
+(`monitor_rts`/`monitor_dtr = 0`) and updated the boot splash layout per
+request - title text in the top 16 rows, logo below, no divider line.

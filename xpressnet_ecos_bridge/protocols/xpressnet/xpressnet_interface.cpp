@@ -512,6 +512,20 @@ void XpressNetInterface::sendResumeOperation() {
     DEBUG_XNET_PRINTF("XpressNet TX: Resume operation broadcast (Ecos-originated)\n");
 }
 
+void XpressNetInterface::pushLocoStateToOwningSlot(uint16_t address) {
+    if (!isValidDccAddress(address)) {
+        return;
+    }
+
+    uint8_t speed_byte;
+    uint32_t functions;
+    resolveLocoStateForReply(address, speed_byte, functions);
+
+    xnet.PushExternalLocoUpdate(address, Loco128, speed_byte, buildFunctionGroupByte(functions, 1));
+
+    DEBUG_XNET_PRINTF("XpressNet TX: Pushed external update to owning slot (if any) - Addr=%u\n", address);
+}
+
 // ============================================================================
 // OUTGOING FUNCTION GROUP ENCODING (mirrors onLocoFunctionGroup's decode)
 // ============================================================================

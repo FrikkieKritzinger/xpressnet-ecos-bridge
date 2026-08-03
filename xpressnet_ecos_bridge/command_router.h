@@ -66,8 +66,16 @@ public:
      * 1. Update state engine
      * 2. Check echo prevention
      * 3. Broadcast to other protocols
+     *
+     * @param has_speed Whether this Ecos event actually reported a speed
+     *                  value - if false, the loco's existing speed is kept
+     *                  (an Ecos direction-only event must not silently zero
+     *                  speed, same class of bug as the function-merge fix).
+     * @param has_direction Same, for direction - an Ecos speed-only event
+     *                  must not silently reset direction.
      */
-    void handleEcosCommand(uint16_t address, uint8_t speed, uint8_t direction);
+    void handleEcosCommand(uint16_t address, uint8_t speed, uint8_t direction,
+                           bool has_speed = true, bool has_direction = true);
     
     /**
      * Handle incoming function command from Ecos

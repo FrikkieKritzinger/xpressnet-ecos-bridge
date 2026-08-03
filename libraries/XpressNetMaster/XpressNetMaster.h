@@ -109,6 +109,18 @@ next transmission window between 400 microseconds and 500 milliseconds after the
 
 #define ACK_REQ 0x9A	//Acknowledge-Anforderungen beantworten mit 0x20 0x20
 
+//Slot used by PushExternalLocoUpdate() to represent a non-XpressNet
+//controller (e.g. Ecos) claiming an address. A prior attempt used slot 0
+//(SlotLokUse[]'s own "reserved for non XpressNet Device" slot) via
+//ReqLocoBusy() and was reverted after apparent propagation breakage a few
+//cycles in - not fully root-caused at the time, and plausibly the same
+//Ecos speed/direction merge bug fixed 2026-08-03 (CommandRouter::
+//handleEcosCommand), not a problem with claiming a slot per se. Using 30
+//instead of 0 here mainly avoids re-running the exact same untrusted
+//mechanism; confirmed live across many cycles this session with no repeat
+//of that symptom.
+#define XNetExternalControllerSlot 30
+
 // certain global XPressnet status indicators
 #define csNormal 0x00 // Normal Operation Resumed ist eingeschaltet
 #define csEmergencyStop 0x01 // Der Nothalt ist eingeschaltet
@@ -187,6 +199,25 @@ class XpressNetMasterClass
 	void setCVReadValue(uint8_t cvAdr, uint8_t value);	//return a CV data read
 	void setCVNack(void);	//no ACK
 	void setCVNackSC(void); //no ACK Short Circuit
+
+	//Push an externally-sourced (non-XpressNet) loco state change to
+	//whichever real slot currently has this address selected, so that
+	//slot's MultiMaus refreshes its display instead of showing "stolen"
+	//with stale values. A plain setSpeed()/setFuncNtoM() broadcast, or even
+	//an addressed SetLocoInfoMM reply, does NOT reliably refresh a
+	//MultiMaus's displayed values once it's flashing "stolen" - confirmed
+	//live (2026-08-03). What does work: marking the address busy under a
+	//dedicated slot (XNetExternalControllerSlot - evicts whichever real
+	//slot currently owns it, exactly as a genuine steal would), then
+	//sending [call-byte addressed to that slot][unmarked reply data] -
+	//i.e. reproducing the exact call-byte-then-reply timing a real
+	//throttle's own transmission has, which is what a MultiMaus actually
+	//trusts for a display refresh, not just matching the reply's byte
+	//format. No-op if no slot currently references Adr.
+	//Only covers F0-F4 (the group this was tested against) - F5-F31 still
+	//only go out via setFuncNtoM()'s plain broadcast and may not refresh a
+	//"stolen" MultiMaus's display for those functions.
+	void PushExternalLocoUpdate(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4);
 	
 	// public only for easy access by interrupt handlers
 	static inline void handle_RX_interrupt();		//Serial RX Interrupt bearbeiten

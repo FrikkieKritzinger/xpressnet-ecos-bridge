@@ -68,6 +68,11 @@ public:
         resume_operation_call_count++;
     }
 
+    void pushLocoStateToOwningSlot(uint16_t address) override {
+        last_pushed_address = address;
+        push_loco_state_call_count++;
+    }
+
     // ========================================================================
     // TESTING INTERFACE - Verification and control
     // ========================================================================
@@ -94,6 +99,8 @@ public:
     int getUnsubscribeCallCount() const { return unsubscribe_call_count; }
     int getEmergencyStopCallCount() const { return emergency_stop_call_count; }
     int getResumeOperationCallCount() const { return resume_operation_call_count; }
+    int getPushLocoStateCallCount() const { return push_loco_state_call_count; }
+    uint16_t getLastPushedAddress() const { return last_pushed_address; }
     uint16_t getLastSubscribedAddress() const { return last_subscribed_address; }
     uint16_t getLastUnsubscribedAddress() const { return last_unsubscribed_address; }
 
@@ -114,8 +121,10 @@ public:
         unsubscribe_call_count = 0;
         emergency_stop_call_count = 0;
         resume_operation_call_count = 0;
+        push_loco_state_call_count = 0;
         last_subscribed_address = 0;
         last_unsubscribed_address = 0;
+        last_pushed_address = 0;
         last_speed_command = {0, 0, 0, 0};
         last_function_command = {0, 0, 0};
     }
@@ -133,8 +142,10 @@ private:
     int unsubscribe_call_count;
     int emergency_stop_call_count;
     int resume_operation_call_count;
+    int push_loco_state_call_count;
     uint16_t last_subscribed_address;
     uint16_t last_unsubscribed_address;
+    uint16_t last_pushed_address;
 
     // Command history
     SpeedCommand last_speed_command;
