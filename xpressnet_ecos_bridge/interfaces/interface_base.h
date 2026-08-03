@@ -92,6 +92,23 @@ public:
      * No-op by default.
      */
     virtual void unsubscribeFromLoco(uint16_t address) { (void)address; }
+
+    /**
+     * Stop the whole layout, if the protocol has a real system-wide command
+     * for it (e.g. Ecos "set(1, stop)" - the same command its own STOP
+     * button sends). No-op by default. Distinct from setting one
+     * locomotive's speed to 0 - CommandRouter handles that side separately
+     * for every known loco, via sendSpeedCommand().
+     */
+    virtual void sendEmergencyStop() {}
+
+    /**
+     * Resume normal operation after a stop, if the protocol has a real
+     * system-wide command for it (e.g. Ecos "set(1, go)"). No-op by
+     * default. Deliberately does NOT imply restoring any locomotive's
+     * previous speed - that stays at 0 until the operator re-throttles it.
+     */
+    virtual void sendResumeOperation() {}
 };
 
 // ============================================================================

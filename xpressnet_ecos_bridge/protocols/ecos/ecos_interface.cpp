@@ -617,6 +617,32 @@ void EcosInterface::unsubscribeFromLoco(uint16_t address) {
     DEBUG_ECOS_PRINTF("Unsubscribed from loco %u\n", address);
 }
 
+void EcosInterface::sendEmergencyStop() {
+    if (current_status != ComponentStatus::CONNECTED) {
+        return;
+    }
+
+    char cmd_buffer[24];
+    uint16_t len = ecosBuildSystemStopCmd(cmd_buffer, sizeof(cmd_buffer));
+    if (len > 0) {
+        wifi_client.write((uint8_t*)cmd_buffer, len);
+        DEBUG_ECOS_PRINTF("Ecos TX: System stop\n");
+    }
+}
+
+void EcosInterface::sendResumeOperation() {
+    if (current_status != ComponentStatus::CONNECTED) {
+        return;
+    }
+
+    char cmd_buffer[24];
+    uint16_t len = ecosBuildSystemGoCmd(cmd_buffer, sizeof(cmd_buffer));
+    if (len > 0) {
+        wifi_client.write((uint8_t*)cmd_buffer, len);
+        DEBUG_ECOS_PRINTF("Ecos TX: System go\n");
+    }
+}
+
 // ============================================================================
 // COMMAND ROUTER INTEGRATION
 // ============================================================================

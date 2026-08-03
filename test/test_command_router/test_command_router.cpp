@@ -305,6 +305,109 @@ void test_router_expiry_triggers_ecos_unsubscribe(void) {
 }
 
 // ============================================================================
+// TESTS - EMERGENCY STOP / RESUME (Phase 5 step 2)
+// ============================================================================
+
+void test_router_emergency_stop_zeroes_every_known_loco(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleXpressNetCommand(100, 64, 1);
+    router.handleXpressNetCommand(200, 90, 0);
+    router.handleXpressNetCommand(300, 30, 1);
+
+    router.emergencyStopAll();
+
+    LocoState state;
+    router.getStateEngine().getLoco(100, state);
+    TEST_ASSERT_EQUAL_UINT8(0, state.speed);
+    router.getStateEngine().getLoco(200, state);
+    TEST_ASSERT_EQUAL_UINT8(0, state.speed);
+    router.getStateEngine().getLoco(300, state);
+    TEST_ASSERT_EQUAL_UINT8(0, state.speed);
+}
+
+void test_router_emergency_stop_preserves_direction(void) {
+    // Speed goes to 0, but direction is not a safety concern here and
+    // shouldn't be silently changed.
+    CommandRouter router;
+    router.handleXpressNetCommand(100, 64, 0);  // reverse
+
+    router.emergencyStopAll();
+
+    LocoState state;
+    router.getStateEngine().getLoco(100, state);
+    TEST_ASSERT_EQUAL_UINT8(0, state.direction);
+}
+
+void test_router_emergency_stop_broadcasts_zero_speed_to_xpressnet(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleXpressNetCommand(100, 64, 1);
+    xnet_mock.reset();  // clear the count from the setup command above
+
+    router.emergencyStopAll();
+
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getSpeedCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(100, xnet_mock.getLastSpeedCommand().address);
+    TEST_ASSERT_EQUAL_UINT8(0, xnet_mock.getLastSpeedCommand().speed);
+}
+
+void test_router_emergency_stop_sends_single_ecos_system_stop(void) {
+    // Ecos gets one real system-wide stop command, not a per-loco loop.
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleXpressNetCommand(100, 64, 1);
+    router.handleXpressNetCommand(200, 90, 0);
+    router.handleXpressNetCommand(300, 30, 1);
+
+    router.emergencyStopAll();
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getEmergencyStopCallCount());
+}
+
+void test_router_emergency_stop_with_no_known_locos_still_stops_ecos(void) {
+    // A system-wide stop should reach Ecos even if the bridge doesn't
+    // currently know about any locomotive.
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.emergencyStopAll();
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getEmergencyStopCallCount());
+}
+
+void test_router_resume_operation_forwards_to_ecos(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.resumeOperation();
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getResumeOperationCallCount());
+}
+
+void test_router_resume_operation_does_not_touch_loco_speed(void) {
+    // Resuming must never resurrect a previous speed - the operator has to
+    // re-throttle manually. A loco that was never stopped should be
+    // completely unaffected by resumeOperation().
+    CommandRouter router;
+    router.handleXpressNetCommand(100, 50, 1);
+
+    router.resumeOperation();
+
+    LocoState state;
+    router.getStateEngine().getLoco(100, state);
+    TEST_ASSERT_EQUAL_UINT8(50, state.speed);
+}
+
+// ============================================================================
 // TESTS - VALIDATION
 // ============================================================================
 
@@ -405,6 +508,14 @@ int main(void) {
     RUN_TEST(test_router_new_loco_triggers_ecos_subscription);
     RUN_TEST(test_router_repeat_xpressnet_commands_do_not_resubscribe);
     RUN_TEST(test_router_expiry_triggers_ecos_unsubscribe);
+
+    RUN_TEST(test_router_emergency_stop_zeroes_every_known_loco);
+    RUN_TEST(test_router_emergency_stop_preserves_direction);
+    RUN_TEST(test_router_emergency_stop_broadcasts_zero_speed_to_xpressnet);
+    RUN_TEST(test_router_emergency_stop_sends_single_ecos_system_stop);
+    RUN_TEST(test_router_emergency_stop_with_no_known_locos_still_stops_ecos);
+    RUN_TEST(test_router_resume_operation_forwards_to_ecos);
+    RUN_TEST(test_router_resume_operation_does_not_touch_loco_speed);
 
     RUN_TEST(test_router_reject_invalid_address_zero);
     RUN_TEST(test_router_reject_invalid_speed);

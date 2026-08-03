@@ -7,6 +7,57 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 5 step 2: bus-wide E-stop actually stops locos (implemented, pending live test)**
+- **Checked the official Ecos spec before guessing** (`docs/ecos_pc_interface3.pdf`,
+  section 7.1, "Basisobjekt ECoS (id=1)") rather than looping a per-loco
+  `speed[0]` command at Ecos as the Phase 5 plan text originally sketched.
+  The spec documents `set(1, stop)`/`set(1, go)` as literally "equivalent to
+  the STOP/GO button on the Ecos" - a real system-wide command, distinct
+  from any one locomotive's speed. Using this instead of a 50-loco loop is
+  both more correct (matches what a real STOP button does) and cheaper
+  (one command instead of many).
+- **New `ProtocolInterface` methods**: `sendEmergencyStop()`/
+  `sendResumeOperation()`, no-op by default (matching the existing
+  `subscribeToLoco`/`unsubscribeFromLoco` pattern) - only `EcosInterface`
+  overrides them meaningfully, sending `set(1, stop)`/`set(1, go)` via two
+  new `ecos_protocol.h/.cpp` builders (`ecosBuildSystemStopCmd`/
+  `ecosBuildSystemGoCmd`, new `ECOS_OBJECT_BASE_SYSTEM` constant = 1).
+- **New `CommandRouter::emergencyStopAll()`**: iterates every loco in
+  `StateEngine` (via `getLocoByIndex()`), forces speed to 0 (direction left
+  untouched), and broadcasts that to XpressNet directly via
+  `xpressnet->sendSpeedCommand()` - deliberately bypassing the existing
+  single-address `broadcastCommand()`/echo-prevention path, since that
+  machinery tracks one most-recent command at a time and looping 50 locos
+  through it would just thrash `echo_state` pointlessly. Then sends Ecos
+  the one system-wide stop.
+- **New `CommandRouter::resumeOperation()`**: forwards to Ecos's `set(1, go)`
+  but deliberately does *not* restore any loco's previous speed - matches
+  real command-station safety behavior (an operator re-throttling manually
+  after a stop, not a train unexpectedly resuming its old speed the instant
+  power comes back).
+- **Wired into `XpressNetInterface::onPowerStateChange()`**: the existing
+  wire-protocol echo (`xnet.setPower(state)`, fixes the MultiMaus STOP-button
+  display freeze, unchanged from 2026-07-30) now also calls
+  `router->emergencyStopAll()` when `state` has `csEmergencyStop` or
+  `csTrackVoltageOff` set, or `router->resumeOperation()` when `state ==
+  csNormal`. Short-circuit (`csShortCircuit`) and service-mode
+  (`csServiceMode`) bits are deliberately not treated as a stop trigger here -
+  only an explicit e-stop or track-power-off, matching the Phase 5 backlog
+  item's literal wording.
+- **Tests**: 7 new `test_command_router` cases (zeroes every known loco,
+  preserves direction, broadcasts to XpressNet, sends exactly one Ecos
+  system-stop regardless of loco count, still stops Ecos with zero known
+  locos, resume forwards to Ecos, resume never touches loco speed) and 3 new
+  `test_ecos_command_builder` cases for the two new builders.
+  `MockProtocolInterface` extended with call-count tracking for both new
+  methods. Native suite 101/101 passing (up from 91).
+- **Verified**: firmware builds clean, flashed. **Not yet verified**: this is
+  safety-critical behavior that needs a real hardware test - hit STOP on the
+  MultiMaus with a loco moving and confirm it actually halts (not just the
+  display), then GO and confirm no auto-resumed speed.
+
+---
+
 **2026-08-03 — Phase 5 step 1: dead-code cleanup**
 - **`ecosBuildGetCmd()` removed** (`protocols/ecos/ecos_protocol.h/.cpp`) - the
   earlier audit said "zero callers", which was true for production code but

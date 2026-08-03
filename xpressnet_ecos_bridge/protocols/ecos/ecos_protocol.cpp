@@ -61,6 +61,18 @@ uint16_t ecosBuildSetFunctionCmd(char* buffer, uint16_t buffer_size,
     return (len > 0) ? len : 0;
 }
 
+uint16_t ecosBuildSystemStopCmd(char* buffer, uint16_t buffer_size) {
+    if (!buffer || buffer_size < 20) return 0;
+    int len = snprintf(buffer, buffer_size, "set(%u, stop)\n", ECOS_OBJECT_BASE_SYSTEM);
+    return (len > 0) ? len : 0;
+}
+
+uint16_t ecosBuildSystemGoCmd(char* buffer, uint16_t buffer_size) {
+    if (!buffer || buffer_size < 20) return 0;
+    int len = snprintf(buffer, buffer_size, "set(%u, go)\n", ECOS_OBJECT_BASE_SYSTEM);
+    return (len > 0) ? len : 0;
+}
+
 // ============================================================================
 // PROTOCOL PARSING HELPERS
 // ============================================================================

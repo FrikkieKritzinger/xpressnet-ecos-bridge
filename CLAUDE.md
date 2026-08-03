@@ -203,7 +203,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (step 1 of 10 done)
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (step 1 done, step 2 pending live test)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -226,14 +226,24 @@ everything else gives a clean, tested baseline to attempt it from again.
    but harmless and didn't touch the same file). Native suite 91/91 passing
    (down from 93 - the two `ecosBuildGetCmd` tests were removed with it, not
    a regression); firmware builds clean and flashed.
-2. **Bus-wide E-stop actually stops locos** - operating-safety priority.
-   `XpressNetInterface::onPowerStateChange()` currently only echoes the
-   acknowledgment back onto the bus (fixes the MultiMaus STOP-button display
-   freeze from 2026-07-30) but never forces any locomotive to actually stop.
-   Needs a new `CommandRouter` path - iterate all known locos in `StateEngine`
-   and force speed=0 out to both XpressNet and Ecos - rather than the
-   single-address `handleXpressNetCommand` path, plus a decision on how this
-   interacts with Ecos-side state.
+2. ⏳ **Bus-wide E-stop actually stops locos** (2026-08-03, implemented and
+   flashed - **live safety test still pending**). `onPowerStateChange()`'s
+   existing wire-protocol echo is untouched; it now also calls
+   `CommandRouter::emergencyStopAll()` on `csEmergencyStop`/`csTrackVoltageOff`,
+   and `resumeOperation()` on `csNormal`. `emergencyStopAll()` zeroes every
+   known loco's speed in `StateEngine` and broadcasts it to XpressNet
+   (direction untouched), plus sends Ecos one real system-wide stop -
+   `set(1, stop)`, confirmed against the official ESU PC-Interface spec
+   (section 7.1) as "equivalent to the STOP button on the Ecos" - rather
+   than looping a per-loco speed=0 command at it. `resumeOperation()` sends
+   Ecos's matching `set(1, go)` but deliberately does *not* restore any
+   loco's previous speed - the operator must re-throttle manually, matching
+   real command-station safety behavior. 10 new unit tests (7 in
+   `test_command_router`, 3 for the new `ecosBuildSystemStopCmd`/
+   `ecosBuildSystemGoCmd` builders); native suite 101/101 passing.
+   **Needs a real hardware test**: hit STOP on the MultiMaus with a loco
+   moving and confirm it actually stops (not just the display), then GO and
+   confirm no auto-resumed speed.
 3. **Outgoing Ecos command queue is fake** - real correctness bug, not a
    missing feature: `EcosInterface::sendSpeedCommand()`, when disconnected,
    calls `queueOutgoingCommand("", 0)` - its own comment says *"Mark for
@@ -345,8 +355,9 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔧 In progress (step 1 of 10 done) - see
-  the dedicated section below for the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (step 1 done, step 2
+  implemented pending live test) - see the dedicated section below for the
+  roadmap.
 
 ---
 
@@ -720,5 +731,8 @@ a program track.
 confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Step 1 (dead-code cleanup) is done; next up is step 2
-(bus-wide E-stop actually stopping locos).
+section above. Step 1 (dead-code cleanup) is done. Step 2 (bus-wide E-stop
+actually stopping locos) is implemented, unit-tested (101/101 native),
+flashed - **but still needs a real hardware safety test**: confirm STOP on
+the MultiMaus actually halts a moving loco (not just the display), and that
+GO afterward doesn't auto-resume any previous speed.

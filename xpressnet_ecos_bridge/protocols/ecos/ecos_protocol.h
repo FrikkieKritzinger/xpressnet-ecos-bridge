@@ -22,6 +22,11 @@
 // Locomotive manager: querying this object lists all locomotives with their addresses
 #define ECOS_OBJECT_LOCOMOTIVE_MANAGER  10
 
+// Base ECoS object - set(1, stop)/set(1, go) are "equivalent to the STOP/GO
+// button on the Ecos" (official ESU PC-Interface spec, section 7.1), a real
+// system-wide command distinct from setting any one locomotive's speed.
+#define ECOS_OBJECT_BASE_SYSTEM         1
+
 // ============================================================================
 // ECOS COMMAND FORMAT CONSTANTS
 // ============================================================================
@@ -128,6 +133,28 @@ uint16_t ecosBuildSetDirectionCmd(char* buffer, uint16_t buffer_size,
  */
 uint16_t ecosBuildSetFunctionCmd(char* buffer, uint16_t buffer_size,
                                 uint16_t object_id, uint8_t function_index, uint8_t state);
+
+/**
+ * Build the system-wide stop command - "equivalent to the STOP button on
+ * the Ecos" (official spec). Stops the whole layout, not just one loco.
+ * Returns: "set(1, stop)\n"
+ *
+ * @param buffer Destination for the command string
+ * @param buffer_size Size of the destination buffer
+ * @return Number of bytes written, or 0 if buffer too small
+ */
+uint16_t ecosBuildSystemStopCmd(char* buffer, uint16_t buffer_size);
+
+/**
+ * Build the system-wide resume command - "equivalent to the GO button on
+ * the Ecos" (official spec).
+ * Returns: "set(1, go)\n"
+ *
+ * @param buffer Destination for the command string
+ * @param buffer_size Size of the destination buffer
+ * @return Number of bytes written, or 0 if buffer too small
+ */
+uint16_t ecosBuildSystemGoCmd(char* buffer, uint16_t buffer_size);
 
 // ============================================================================
 // PROTOCOL PARSING HELPERS

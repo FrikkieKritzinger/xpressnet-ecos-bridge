@@ -90,6 +90,20 @@ public:
     void unsubscribeFromLoco(uint16_t address) override;
 
     /**
+     * Send the real Ecos system-wide stop command ("set(1, stop)" - the
+     * same command its own STOP button sends). Called by CommandRouter on
+     * a bus-wide XpressNet emergency-stop/track-power-off request.
+     */
+    void sendEmergencyStop() override;
+
+    /**
+     * Send the real Ecos system-wide resume command ("set(1, go)").
+     * Called by CommandRouter when XpressNet signals normal operation
+     * resumed.
+     */
+    void sendResumeOperation() override;
+
+    /**
      * Set reference to command router (called after construction)
      * @param router Pointer to CommandRouter instance
      */

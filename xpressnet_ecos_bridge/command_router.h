@@ -73,7 +73,28 @@ public:
      * Handle incoming function command from Ecos
      */
     void handleEcosFunctionCommand(uint16_t address, uint32_t functions);
-    
+
+    /**
+     * Bus-wide emergency stop / track power off. Forces every known loco's
+     * speed to 0 (in StateEngine and broadcast to XpressNet), plus sends
+     * Ecos its own real system-wide stop command. Called by XpressNetInterface
+     * when the bus signals an emergency stop or track power off.
+     *
+     * Deliberately bypasses the single-address broadcastCommand()/echo-
+     * prevention path - that machinery tracks one most-recent command at a
+     * time and would just get thrashed by iterating every loco here.
+     */
+    void emergencyStopAll();
+
+    /**
+     * Resume normal operation after an emergency stop / track power off.
+     * Forwards to Ecos's own system-wide resume command. Deliberately does
+     * NOT restore any locomotive's previous speed - matches real
+     * command-station safety behavior, the operator must re-throttle
+     * manually.
+     */
+    void resumeOperation();
+
     /**
      * Periodic housekeeping
      * - Check for inactive locos

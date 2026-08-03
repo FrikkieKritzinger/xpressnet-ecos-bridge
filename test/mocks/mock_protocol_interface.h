@@ -60,6 +60,14 @@ public:
         unsubscribe_call_count++;
     }
 
+    void sendEmergencyStop() override {
+        emergency_stop_call_count++;
+    }
+
+    void sendResumeOperation() override {
+        resume_operation_call_count++;
+    }
+
     // ========================================================================
     // TESTING INTERFACE - Verification and control
     // ========================================================================
@@ -84,6 +92,8 @@ public:
     int getFunctionCommandCount() const { return function_command_count; }
     int getSubscribeCallCount() const { return subscribe_call_count; }
     int getUnsubscribeCallCount() const { return unsubscribe_call_count; }
+    int getEmergencyStopCallCount() const { return emergency_stop_call_count; }
+    int getResumeOperationCallCount() const { return resume_operation_call_count; }
     uint16_t getLastSubscribedAddress() const { return last_subscribed_address; }
     uint16_t getLastUnsubscribedAddress() const { return last_unsubscribed_address; }
 
@@ -102,6 +112,8 @@ public:
         function_command_count = 0;
         subscribe_call_count = 0;
         unsubscribe_call_count = 0;
+        emergency_stop_call_count = 0;
+        resume_operation_call_count = 0;
         last_subscribed_address = 0;
         last_unsubscribed_address = 0;
         last_speed_command = {0, 0, 0, 0};
@@ -119,6 +131,8 @@ private:
     int function_command_count;
     int subscribe_call_count;
     int unsubscribe_call_count;
+    int emergency_stop_call_count;
+    int resume_operation_call_count;
     uint16_t last_subscribed_address;
     uint16_t last_unsubscribed_address;
 

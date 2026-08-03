@@ -381,6 +381,20 @@ void XpressNetInterface::onPowerStateChange(uint8_t state) {
 
     DEBUG_XNET_PRINTF("XpressNet: Power state change request - state=0x%02x, echoing acknowledgment\n", state);
     xnet.setPower(state);
+
+    if (!router) {
+        return;
+    }
+
+    // csEmergencyStop/csTrackVoltageOff mean "stop moving"; csNormal means
+    // resumed. Short-circuit/service-mode bits aren't treated as a stop
+    // request here - this only reacts to an explicit e-stop or track-power-
+    // off, matching the Phase 5 backlog item this implements.
+    if (state == csNormal) {
+        router->resumeOperation();
+    } else if (state & (csEmergencyStop | csTrackVoltageOff)) {
+        router->emergencyStopAll();
+    }
 }
 
 void XpressNetInterface::onLocoFunctionGroup(uint16_t address, uint8_t group, uint8_t bits) {

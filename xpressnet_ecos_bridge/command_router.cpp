@@ -339,6 +339,51 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
 }
 
 // ============================================================================
+// EMERGENCY STOP / RESUME
+// ============================================================================
+
+void CommandRouter::emergencyStopAll() {
+    int count = state_engine.getLocoCount();
+    DEBUG_STATE_PRINTF("Emergency stop: forcing %d loco(s) to speed 0\n", count);
+
+    for (int i = 0; i < count; i++) {
+        LocoState* loco = state_engine.getLocoByIndex(i);
+        if (!loco) {
+            continue;
+        }
+
+        loco->speed = 0;
+
+        #if ENABLE_XPRESSNET
+        if (xpressnet != nullptr) {
+            xpressnet->sendSpeedCommand(loco->dcc_address, 0, loco->direction);
+        }
+        #endif
+    }
+
+    // Ecos gets one real system-wide stop command, not a per-loco loop -
+    // "equivalent to the STOP button on the Ecos" per the official spec.
+    #if ENABLE_ECOS_LAN
+    if (ecos != nullptr) {
+        ecos->sendEmergencyStop();
+    }
+    #endif
+}
+
+void CommandRouter::resumeOperation() {
+    DEBUG_STATE_PRINT("Resume operation requested\n");
+
+    // Deliberately NOT restoring any loco's previous speed here - matches
+    // real command-station safety behavior, the operator must re-throttle
+    // manually after a stop.
+    #if ENABLE_ECOS_LAN
+    if (ecos != nullptr) {
+        ecos->sendResumeOperation();
+    }
+    #endif
+}
+
+// ============================================================================
 // PERIODIC HOUSEKEEPING
 // ============================================================================
 
