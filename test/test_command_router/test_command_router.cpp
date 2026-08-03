@@ -317,7 +317,7 @@ void test_router_emergency_stop_zeroes_every_known_loco(void) {
     router.handleXpressNetCommand(200, 90, 0);
     router.handleXpressNetCommand(300, 30, 1);
 
-    router.emergencyStopAll();
+    router.emergencyStopAll(LocoSource::XPRESSNET);
 
     LocoState state;
     router.getStateEngine().getLoco(100, state);
@@ -334,7 +334,7 @@ void test_router_emergency_stop_preserves_direction(void) {
     CommandRouter router;
     router.handleXpressNetCommand(100, 64, 0);  // reverse
 
-    router.emergencyStopAll();
+    router.emergencyStopAll(LocoSource::XPRESSNET);
 
     LocoState state;
     router.getStateEngine().getLoco(100, state);
@@ -349,7 +349,7 @@ void test_router_emergency_stop_broadcasts_zero_speed_to_xpressnet(void) {
     router.handleXpressNetCommand(100, 64, 1);
     xnet_mock.reset();  // clear the count from the setup command above
 
-    router.emergencyStopAll();
+    router.emergencyStopAll(LocoSource::XPRESSNET);
 
     TEST_ASSERT_EQUAL_INT(1, xnet_mock.getSpeedCommandCount());
     TEST_ASSERT_EQUAL_UINT16(100, xnet_mock.getLastSpeedCommand().address);
@@ -366,7 +366,7 @@ void test_router_emergency_stop_sends_single_ecos_system_stop(void) {
     router.handleXpressNetCommand(200, 90, 0);
     router.handleXpressNetCommand(300, 30, 1);
 
-    router.emergencyStopAll();
+    router.emergencyStopAll(LocoSource::XPRESSNET);
 
     TEST_ASSERT_EQUAL_INT(1, ecos_mock.getEmergencyStopCallCount());
 }
@@ -378,7 +378,7 @@ void test_router_emergency_stop_with_no_known_locos_still_stops_ecos(void) {
     MockProtocolInterface ecos_mock;
     router.setEcosInterface(&ecos_mock);
 
-    router.emergencyStopAll();
+    router.emergencyStopAll(LocoSource::XPRESSNET);
 
     TEST_ASSERT_EQUAL_INT(1, ecos_mock.getEmergencyStopCallCount());
 }
@@ -388,7 +388,7 @@ void test_router_resume_operation_forwards_to_ecos(void) {
     MockProtocolInterface ecos_mock;
     router.setEcosInterface(&ecos_mock);
 
-    router.resumeOperation();
+    router.resumeOperation(LocoSource::XPRESSNET);
 
     TEST_ASSERT_EQUAL_INT(1, ecos_mock.getResumeOperationCallCount());
 }
@@ -400,11 +400,85 @@ void test_router_resume_operation_does_not_touch_loco_speed(void) {
     CommandRouter router;
     router.handleXpressNetCommand(100, 50, 1);
 
-    router.resumeOperation();
+    router.resumeOperation(LocoSource::XPRESSNET);
 
     LocoState state;
     router.getStateEngine().getLoco(100, state);
     TEST_ASSERT_EQUAL_UINT8(50, state.speed);
+}
+
+// ============================================================================
+// TESTS - EMERGENCY STOP / RESUME BIDIRECTIONALITY (real gap found live:
+// XNet-triggered stop/go reached Ecos correctly, but Ecos-triggered stop/go
+// never reached XNet/the MultiMaus at all - Ecos was never subscribed to its
+// own base object's status events)
+// ============================================================================
+
+void test_router_emergency_stop_from_xpressnet_does_not_reecho_to_xpressnet(void) {
+    // XpressNet already knows about its own stop request (onPowerStateChange
+    // echoes it directly) - CommandRouter shouldn't tell it again.
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.emergencyStopAll(LocoSource::XPRESSNET);
+
+    TEST_ASSERT_EQUAL_INT(0, xnet_mock.getEmergencyStopCallCount());
+}
+
+void test_router_emergency_stop_from_ecos_reaches_xpressnet(void) {
+    // The real gap: an operator hitting STOP directly on the Ecos must
+    // still propagate to XpressNet throttles.
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.emergencyStopAll(LocoSource::ECOS);
+
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getEmergencyStopCallCount());
+}
+
+void test_router_emergency_stop_from_ecos_does_not_reecho_to_ecos(void) {
+    // Ecos already knows about its own stop (it's the one that sent the
+    // event) - re-sending set(1, stop) back to it would be redundant and,
+    // if Ecos re-emitted the event each time, a real feedback loop.
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.emergencyStopAll(LocoSource::ECOS);
+
+    TEST_ASSERT_EQUAL_INT(0, ecos_mock.getEmergencyStopCallCount());
+}
+
+void test_router_resume_from_ecos_reaches_xpressnet(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.resumeOperation(LocoSource::ECOS);
+
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getResumeOperationCallCount());
+}
+
+void test_router_resume_from_ecos_does_not_reecho_to_ecos(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.resumeOperation(LocoSource::ECOS);
+
+    TEST_ASSERT_EQUAL_INT(0, ecos_mock.getResumeOperationCallCount());
+}
+
+void test_router_resume_from_xpressnet_does_not_reecho_to_xpressnet(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.resumeOperation(LocoSource::XPRESSNET);
+
+    TEST_ASSERT_EQUAL_INT(0, xnet_mock.getResumeOperationCallCount());
 }
 
 // ============================================================================
@@ -516,6 +590,13 @@ int main(void) {
     RUN_TEST(test_router_emergency_stop_with_no_known_locos_still_stops_ecos);
     RUN_TEST(test_router_resume_operation_forwards_to_ecos);
     RUN_TEST(test_router_resume_operation_does_not_touch_loco_speed);
+
+    RUN_TEST(test_router_emergency_stop_from_xpressnet_does_not_reecho_to_xpressnet);
+    RUN_TEST(test_router_emergency_stop_from_ecos_reaches_xpressnet);
+    RUN_TEST(test_router_emergency_stop_from_ecos_does_not_reecho_to_ecos);
+    RUN_TEST(test_router_resume_from_ecos_reaches_xpressnet);
+    RUN_TEST(test_router_resume_from_ecos_does_not_reecho_to_ecos);
+    RUN_TEST(test_router_resume_from_xpressnet_does_not_reecho_to_xpressnet);
 
     RUN_TEST(test_router_reject_invalid_address_zero);
     RUN_TEST(test_router_reject_invalid_speed);

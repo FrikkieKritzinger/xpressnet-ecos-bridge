@@ -391,9 +391,9 @@ void XpressNetInterface::onPowerStateChange(uint8_t state) {
     // request here - this only reacts to an explicit e-stop or track-power-
     // off, matching the Phase 5 backlog item this implements.
     if (state == csNormal) {
-        router->resumeOperation();
+        router->resumeOperation(LocoSource::XPRESSNET);
     } else if (state & (csEmergencyStop | csTrackVoltageOff)) {
-        router->emergencyStopAll();
+        router->emergencyStopAll(LocoSource::XPRESSNET);
     }
 }
 
@@ -500,6 +500,16 @@ void XpressNetInterface::sendFunctionCommand(uint16_t address, uint32_t function
     xnet.setFunc21to28(address, buildFunctionGroupByte(functions, 0x05));
 
     DEBUG_XNET_PRINTF("XpressNet TX: Functions - Addr=%u Fn=0x%08lx\n", address, (unsigned long)functions);
+}
+
+void XpressNetInterface::sendEmergencyStop() {
+    xnet.setPower(csEmergencyStop);
+    DEBUG_XNET_PRINTF("XpressNet TX: Emergency stop broadcast (Ecos-originated)\n");
+}
+
+void XpressNetInterface::sendResumeOperation() {
+    xnet.setPower(csNormal);
+    DEBUG_XNET_PRINTF("XpressNet TX: Resume operation broadcast (Ecos-originated)\n");
 }
 
 // ============================================================================

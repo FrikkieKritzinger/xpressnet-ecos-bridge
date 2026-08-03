@@ -76,24 +76,32 @@ public:
 
     /**
      * Bus-wide emergency stop / track power off. Forces every known loco's
-     * speed to 0 (in StateEngine and broadcast to XpressNet), plus sends
-     * Ecos its own real system-wide stop command. Called by XpressNetInterface
-     * when the bus signals an emergency stop or track power off.
+     * speed to 0 (in StateEngine and broadcast to XpressNet), plus tells
+     * whichever side didn't originate the request about the global stop -
+     * Ecos gets its real system-wide stop command, XpressNet gets a bus
+     * broadcast - so the stop propagates bidirectionally regardless of
+     * which device (a throttle or Ecos itself) triggered it.
+     *
+     * @param source Which protocol originated this request - that side is
+     *               NOT re-notified (it already knows/acknowledged this
+     *               itself), only the other one is.
      *
      * Deliberately bypasses the single-address broadcastCommand()/echo-
      * prevention path - that machinery tracks one most-recent command at a
      * time and would just get thrashed by iterating every loco here.
      */
-    void emergencyStopAll();
+    void emergencyStopAll(LocoSource source);
 
     /**
      * Resume normal operation after an emergency stop / track power off.
-     * Forwards to Ecos's own system-wide resume command. Deliberately does
+     * Tells whichever side didn't originate the request. Deliberately does
      * NOT restore any locomotive's previous speed - matches real
      * command-station safety behavior, the operator must re-throttle
      * manually.
+     *
+     * @param source Which protocol originated this request - not re-notified.
      */
-    void resumeOperation();
+    void resumeOperation(LocoSource source);
 
     /**
      * Periodic housekeeping

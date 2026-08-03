@@ -462,6 +462,102 @@ void test_ecos_parse_addr_value(void) {
     TEST_ASSERT_EQUAL_UINT16(100, reply.dcc_address);
 }
 
+void test_ecos_parse_system_status_stop_event(void) {
+    // Base ECoS object (id=1) pushing an unsolicited STOP event - the
+    // real-world trigger for Phase 5 step 2's Ecos-to-XpressNet direction
+    // (an operator hitting STOP directly on the Ecos, not via a throttle).
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 1>\n1 Status[STOP]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_EQUAL_UINT16(1, reply.object_id);
+    TEST_ASSERT_TRUE(reply.has_system_status);
+    TEST_ASSERT_EQUAL_INT(EcosReply::SYSTEM_STATUS_STOP, reply.system_status);
+}
+
+void test_ecos_parse_system_status_go_event(void) {
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 1>\n1 Status[GO]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_TRUE(reply.has_system_status);
+    TEST_ASSERT_EQUAL_INT(EcosReply::SYSTEM_STATUS_GO, reply.system_status);
+}
+
+void test_ecos_parse_system_status_lowercase_key_and_value(void) {
+    // Real hardware's exact casing was unconfirmed against the spec's
+    // documented example ("Status[val]") - matching must not depend on it.
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 1>\n1 status[stop]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_TRUE(reply.has_system_status);
+    TEST_ASSERT_EQUAL_INT(EcosReply::SYSTEM_STATUS_STOP, reply.system_status);
+}
+
+void test_ecos_parse_system_status_shutdown_event(void) {
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 1>\n1 Status[SHUTDOWN]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_TRUE(reply.has_system_status);
+    TEST_ASSERT_EQUAL_INT(EcosReply::SYSTEM_STATUS_SHUTDOWN, reply.system_status);
+}
+
+void test_ecos_parse_unrelated_reply_has_no_system_status(void) {
+    // A normal loco reply must not accidentally set has_system_status.
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<REPLY get(100, view)>\n100 speed[64]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_FALSE(reply.has_system_status);
+}
+
 // ============================================================================
 // TEST RUNNER
 // ============================================================================
@@ -493,6 +589,12 @@ int main(void) {
     RUN_TEST(test_ecos_parse_direction_value);
     RUN_TEST(test_ecos_parse_multiple_values);
     RUN_TEST(test_ecos_parse_addr_value);
+
+    RUN_TEST(test_ecos_parse_system_status_stop_event);
+    RUN_TEST(test_ecos_parse_system_status_go_event);
+    RUN_TEST(test_ecos_parse_system_status_lowercase_key_and_value);
+    RUN_TEST(test_ecos_parse_system_status_shutdown_event);
+    RUN_TEST(test_ecos_parse_unrelated_reply_has_no_system_status);
 
     return UNITY_END();
 }

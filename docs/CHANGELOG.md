@@ -7,6 +7,60 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 5 step 2 follow-up: Ecos→XpressNet direction, three real bugs found via live testing**
+- **Trigger**: user tested the E-stop implementation live. XNet→Ecos direction
+  worked immediately (MultiMaus STOP/GO reaches Ecos). But hitting STOP or GO
+  directly on the Ecos itself never reached the MultiMaus at all - a real,
+  legitimate gap the user caught that the original implementation didn't cover.
+- **Root cause 1 - never subscribed to Ecos's own status at all**: the bridge
+  only ever subscribed to individual locomotives; nothing subscribed to the
+  base ECoS object (id=1), which the official spec (section 7.1) documents as
+  supporting `request(1, view)` for exactly this kind of global run-state
+  change. Fixed: `EcosInterface::attemptTcpConnect()` now sends
+  `request(1, view)` alongside the existing address-map query. New
+  `EcosReply::SystemStatus` field + parser support for the `Status[STOP/GO/
+  SHUTDOWN]` property on object 1, and a `CommandRouter::emergencyStopAll()`/
+  `resumeOperation()` signature change to take a `LocoSource source` parameter -
+  whichever side originated the request is not re-notified (avoids both
+  redundant echoes and, critically, a feedback loop back to Ecos). New
+  `XpressNetInterface::sendEmergencyStop()`/`sendResumeOperation()` overrides
+  broadcast `csEmergencyStop`/`csNormal` onto the bus for the Ecos-originated
+  case, mirroring what `onPowerStateChange()` already does for the
+  XNet-originated case.
+- **Root cause 2 - the subscribe request was silently never sent at all**:
+  live re-test showed no change - not even a hint of anything on the serial
+  monitor when hitting Ecos's physical buttons. Root cause:
+  `ecosBuildRequestCmd()` requires `buffer_size >= 60` and silently returns 0
+  below that (no error) - the new subscribe code used a 40-byte buffer while
+  every other call site in `ecos_interface.cpp` already correctly uses 80.
+  The `request(1, view)` command was therefore never actually transmitted;
+  Ecos had no reason to ever notify us of anything. Fixed by matching the
+  established 80-byte convention, plus added a debug print confirming the
+  subscribe actually got sent (or a build failure) so this class of silent
+  failure is visible next time.
+- **Root cause 3 - unconfirmed property casing**: with the buffer fixed and
+  confirmed sent (verified via serial log - no error reply), still zero
+  activity when pressing Ecos's physical buttons. Rather than guess at a
+  second unverified casing assumption (having just been bitten by one),
+  added a diagnostic fallback in `handleReply()` logging *any* reply/event
+  with an object ID that doesn't match a known handler, instead of silently
+  vanishing with zero trace - and made the `status` key and `stop`/`go`/
+  `shutdown` values match case-insensitively (via a small `equalsIgnoreCase()`
+  helper, avoiding `strcasecmp`/`_stricmp` portability differences between
+  the ESP8266 toolchain and native/MinGW test builds), since the spec's
+  documented example casing (`Status[val]`) was never independently
+  confirmed against real hardware.
+- **Result, confirmed live**: both directions now work - MultiMaus STOP/GO
+  reaches Ecos, and Ecos's own STOP/GO now reaches the MultiMaus.
+- **Tests**: 6 new `test_command_router` cases for the bidirectional
+  skip-logic (each direction reaches the other side, neither re-echoes to
+  its own origin), 5 new `test_ecos_parser` cases (STOP/GO/SHUTDOWN event
+  parsing, lowercase-casing variant, confirms a normal loco reply doesn't
+  false-positive `has_system_status`). Native suite 112/112 passing
+  (up from 101 before this follow-up).
+
+---
+
 **2026-08-03 — Phase 5 step 2: bus-wide E-stop actually stops locos (implemented, pending live test)**
 - **Checked the official Ecos spec before guessing** (`docs/ecos_pc_interface3.pdf`,
   section 7.1, "Basisobjekt ECoS (id=1)") rather than looping a per-loco

@@ -32,6 +32,17 @@ struct EcosReply {
         EVENT = 2       // Unsolicited notification from Ecos
     };
 
+    // Ecos's global run state - property "Status" on the base ECoS object
+    // (id=1), e.g. "1 Status[STOP]". Distinct from any one locomotive's
+    // speed - this is the system-wide equivalent of the Ecos's own STOP/GO
+    // buttons (official spec, section 7.1).
+    enum SystemStatus {
+        SYSTEM_STATUS_UNKNOWN = 0,
+        SYSTEM_STATUS_STOP = 1,
+        SYSTEM_STATUS_GO = 2,
+        SYSTEM_STATUS_SHUTDOWN = 3
+    };
+
     Kind kind;                      // REPLY, EVENT, or UNKNOWN
     uint16_t object_id;             // Object ID from <EVENT> or body lines
     uint16_t dcc_address;           // Locomotive DCC address (0 if not present)
@@ -43,6 +54,8 @@ struct EcosReply {
     uint8_t functions_mask;         // Which function bits were actually set in this reply
                                     // (so we don't overwrite unset functions when backfilling)
 
+    SystemStatus system_status;     // Valid only if has_system_status
+
     int16_t end_code;               // Code from <END> marker (0=OK, 1=error, -1=not parsed)
     char end_text[32];              // Text from <END>, e.g., "OK" or "ERR"
 
@@ -51,11 +64,13 @@ struct EcosReply {
     bool has_direction;
     bool has_dcc_address;
     bool has_functions;
+    bool has_system_status;
 
     EcosReply() : kind(UNKNOWN), object_id(0), dcc_address(0), speed(0),
-                 direction(0), functions(0), functions_mask(0), end_code(-1),
+                 direction(0), functions(0), functions_mask(0),
+                 system_status(SYSTEM_STATUS_UNKNOWN), end_code(-1),
                  has_speed(false), has_direction(false), has_dcc_address(false),
-                 has_functions(false) {
+                 has_functions(false), has_system_status(false) {
         end_text[0] = '\0';
     }
 };

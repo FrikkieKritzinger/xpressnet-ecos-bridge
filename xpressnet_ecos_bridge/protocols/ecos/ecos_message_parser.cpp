@@ -12,6 +12,26 @@
 #include <Arduino.h>
 
 // ============================================================================
+// HELPERS
+// ============================================================================
+
+// Case-insensitive ASCII compare - avoids depending on strcasecmp/_stricmp,
+// whose availability differs between the ESP8266 toolchain and native/MinGW
+// test builds. Used for the "Status" property, since its real casing on
+// physical Ecos hardware hasn't been independently confirmed against the
+// spec's documented example.
+static bool equalsIgnoreCase(const char* a, const char* b) {
+    while (*a && *b) {
+        char ca = (*a >= 'A' && *a <= 'Z') ? (*a - 'A' + 'a') : *a;
+        char cb = (*b >= 'A' && *b <= 'Z') ? (*b - 'A' + 'a') : *b;
+        if (ca != cb) return false;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+// ============================================================================
 // CONSTRUCTOR / RESET
 // ============================================================================
 
@@ -268,6 +288,25 @@ void EcosMessageParser::parsePropertyLine(const char* line, EcosReply& reply) {
                     reply.functions_mask |= (1 << fn_index);
                     reply.has_functions = true;
                 }
+            }
+        }
+        else if (equalsIgnoreCase(key, "status")) {
+            // Base ECoS object (id=1) global run state - "equivalent to the
+            // STOP/GO button on the Ecos" per the official spec (section
+            // 7.1). Case-insensitive on both key and value - the spec's own
+            // example shows "Status[val]" but real hardware's exact casing
+            // (for the key and for STOP/GO/SHUTDOWN) hasn't been
+            // independently confirmed, and getting bitten by an unverified
+            // casing assumption once already this investigation is enough.
+            if (equalsIgnoreCase(value, "stop")) {
+                reply.system_status = EcosReply::SYSTEM_STATUS_STOP;
+                reply.has_system_status = true;
+            } else if (equalsIgnoreCase(value, "go")) {
+                reply.system_status = EcosReply::SYSTEM_STATUS_GO;
+                reply.has_system_status = true;
+            } else if (equalsIgnoreCase(value, "shutdown")) {
+                reply.system_status = EcosReply::SYSTEM_STATUS_SHUTDOWN;
+                reply.has_system_status = true;
             }
         }
         // Ignore unknown keys (e.g., "name", "protocol", etc.)

@@ -342,9 +342,10 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
 // EMERGENCY STOP / RESUME
 // ============================================================================
 
-void CommandRouter::emergencyStopAll() {
+void CommandRouter::emergencyStopAll(LocoSource source) {
     int count = state_engine.getLocoCount();
-    DEBUG_STATE_PRINTF("Emergency stop: forcing %d loco(s) to speed 0\n", count);
+    DEBUG_STATE_PRINTF("Emergency stop: forcing %d loco(s) to speed 0 (source=%s)\n",
+                       count, locoSourceToString(source));
 
     for (int i = 0; i < count; i++) {
         LocoState* loco = state_engine.getLocoByIndex(i);
@@ -354,6 +355,9 @@ void CommandRouter::emergencyStopAll() {
 
         loco->speed = 0;
 
+        // Per-loco speed sync always runs regardless of source - every
+        // throttle's displayed speed for whatever loco it has selected
+        // needs updating either way.
         #if ENABLE_XPRESSNET
         if (xpressnet != nullptr) {
             xpressnet->sendSpeedCommand(loco->dcc_address, 0, loco->direction);
@@ -361,24 +365,42 @@ void CommandRouter::emergencyStopAll() {
         #endif
     }
 
-    // Ecos gets one real system-wide stop command, not a per-loco loop -
-    // "equivalent to the STOP button on the Ecos" per the official spec.
+    // The system-wide stop only goes to whichever side didn't already
+    // originate it - Ecos gets one real system-wide stop command (not a
+    // per-loco loop - "equivalent to the STOP button on the Ecos" per the
+    // official spec), XpressNet gets a bus broadcast. Skipping the
+    // originating side avoids re-telling it something it already knows;
+    // for XpressNet specifically it also avoids a second, redundant
+    // xnet.setPower() call on top of the one onPowerStateChange() already
+    // sent as its wire-protocol echo.
     #if ENABLE_ECOS_LAN
-    if (ecos != nullptr) {
+    if (source != LocoSource::ECOS && ecos != nullptr) {
         ecos->sendEmergencyStop();
+    }
+    #endif
+
+    #if ENABLE_XPRESSNET
+    if (source != LocoSource::XPRESSNET && xpressnet != nullptr) {
+        xpressnet->sendEmergencyStop();
     }
     #endif
 }
 
-void CommandRouter::resumeOperation() {
-    DEBUG_STATE_PRINT("Resume operation requested\n");
+void CommandRouter::resumeOperation(LocoSource source) {
+    DEBUG_STATE_PRINTF("Resume operation requested (source=%s)\n", locoSourceToString(source));
 
     // Deliberately NOT restoring any loco's previous speed here - matches
     // real command-station safety behavior, the operator must re-throttle
     // manually after a stop.
     #if ENABLE_ECOS_LAN
-    if (ecos != nullptr) {
+    if (source != LocoSource::ECOS && ecos != nullptr) {
         ecos->sendResumeOperation();
+    }
+    #endif
+
+    #if ENABLE_XPRESSNET
+    if (source != LocoSource::XPRESSNET && xpressnet != nullptr) {
+        xpressnet->sendResumeOperation();
     }
     #endif
 }

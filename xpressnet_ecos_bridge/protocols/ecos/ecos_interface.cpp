@@ -204,6 +204,26 @@ void EcosInterface::attemptTcpConnect() {
         // Kick off address map query
         queryAddressMap();
 
+        // Subscribe to the base ECoS object's own global run state (STOP/GO/
+        // SHUTDOWN), so an operator hitting STOP/GO directly on the Ecos
+        // itself propagates back to XpressNet - not just the other
+        // direction. See handleReply()'s ECOS_OBJECT_BASE_SYSTEM branch.
+        // Real bug found on hardware 2026-08-03: this used a 40-byte buffer,
+        // but ecosBuildRequestCmd() requires >= 60 bytes and silently
+        // returns 0 (no error) below that - the request was never actually
+        // sent, so Ecos had no reason to ever notify us of anything. Every
+        // other ecosBuildRequestCmd()/ecosBuildReleaseCmd() call site in
+        // this file already uses 80 bytes; this one just didn't match.
+        char cmd_buffer[80];
+        uint16_t len = ecosBuildRequestCmd(cmd_buffer, sizeof(cmd_buffer),
+                                          ECOS_OBJECT_BASE_SYSTEM, ECOS_MODE_VIEW);
+        if (len > 0) {
+            wifi_client.write((uint8_t*)cmd_buffer, len);
+            DEBUG_ECOS_PRINTF("Ecos TX: Subscribed to system status (object 1)\n");
+        } else {
+            DEBUG_ECOS_PRINTF("Ecos: ERROR - failed to build system status subscribe request\n");
+        }
+
         DEBUG_ECOS_PRINTF("Ecos TCP connected!\n");
     } else {
         current_status = ComponentStatus::DISCONNECTED;
@@ -441,6 +461,26 @@ void EcosInterface::handleReply(const EcosReply& reply) {
         return;
     }
 
+    // Handle the base ECoS object's own global run state (STOP/GO/SHUTDOWN) -
+    // an operator hitting STOP/GO directly on the Ecos itself, not via a
+    // throttle. Routes into the same CommandRouter path XpressNet-triggered
+    // stops use, tagged with LocoSource::ECOS so it doesn't get echoed back
+    // to Ecos as a redundant set(1, stop)/set(1, go).
+    if (reply.object_id == ECOS_OBJECT_BASE_SYSTEM && reply.has_system_status) {
+        if (router) {
+            if (reply.system_status == EcosReply::SYSTEM_STATUS_GO) {
+                DEBUG_ECOS_PRINTF("Ecos: system status GO\n");
+                router->resumeOperation(LocoSource::ECOS);
+            } else {
+                // STOP and SHUTDOWN both mean "not running" - treat SHUTDOWN
+                // as a stop too, safer to halt locos than to ignore it.
+                DEBUG_ECOS_PRINTF("Ecos: system status STOP/SHUTDOWN\n");
+                router->emergencyStopAll(LocoSource::ECOS);
+            }
+        }
+        return;
+    }
+
     // Handle queryObjects response (address map population)
     if (reply.has_dcc_address && reply.object_id > 0 && !reply.has_speed) {
         // This looks like a queryObjects result (object ID + DCC address, no speed/dir/functions)
@@ -483,6 +523,19 @@ void EcosInterface::handleReply(const EcosReply& reply) {
                 }
             }
         }
+        return;
+    }
+
+    // Diagnostic fallback: something arrived with a real object ID but
+    // didn't match any handler above (address map, loco state, system
+    // status). Previously this just silently vanished with zero trace -
+    // added after the 2026-08-03 investigation into Ecos-triggered STOP/GO
+    // not reaching XpressNet, to make any future silently-dropped
+    // reply/event visible instead of indistinguishable from "nothing arrived
+    // at all".
+    if (reply.object_id > 0) {
+        DEBUG_ECOS_PRINTF("Ecos: unhandled reply/event for object %u (end_code=%d)\n",
+                          reply.object_id, reply.end_code);
     }
 }
 

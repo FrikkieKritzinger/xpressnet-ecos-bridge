@@ -61,6 +61,20 @@ public:
     void sendFunctionCommand(uint16_t address, uint32_t functions) override;
 
     /**
+     * Broadcast emergency-stop state onto the XpressNet bus (xnet.setPower()).
+     * Called by CommandRouter when Ecos-side is the one that requested the
+     * stop, so XpressNet throttles learn about it the same way they would
+     * if a throttle had requested it directly.
+     */
+    void sendEmergencyStop() override;
+
+    /**
+     * Broadcast normal-operation-resumed state onto the XpressNet bus.
+     * Called by CommandRouter when Ecos-side requested the resume.
+     */
+    void sendResumeOperation() override;
+
+    /**
      * Get current connection status
      * @return CONNECTED, DISCONNECTED, ERROR
      */
