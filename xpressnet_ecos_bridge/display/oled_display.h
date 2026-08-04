@@ -131,6 +131,15 @@ private:
     void drawEcosScreen();
     void drawErrorPopup();
     void drawBootLogo();
+
+    /**
+     * Build a comma-separated list of active function numbers (e.g.
+     * "0,3,7") into buf, truncated with "..." if it would overflow
+     * buf_size - real layouts rarely have more than a handful of
+     * functions on at once, so this stays short in practice. Writes
+     * "none" if functions == 0. Always null-terminates within buf_size.
+     */
+    static void buildActiveFunctionsLabel(uint32_t functions, char* buf, size_t buf_size);
     
     // Header icons - hand-drawn shapes only, never font glyphs (the SSD1306
     // default font has no Unicode checkmark/X glyphs; confirmed to render

@@ -7,6 +7,64 @@ here. Newest entries first.
 
 ---
 
+**2026-08-03 — Phase 5 step 5: OLED function display, two real bugs found along the way**
+
+- **The feature**: replaced the main OLED page's "Fn: (TBD)" placeholder
+  with a comma-separated list of active function numbers (e.g. "0,3,7").
+  Design discussion up front: the main page's blue content area only has
+  room for 4 lines total (Heap/Mem, Last Loco, Speed/Dir, Fn), each ~12px
+  tall, leaving one 128px-wide line (~21 characters) for functions - not
+  enough to show 32 individual on/off indicators legibly. Considered three
+  options: (1) a hex bitmask (`0x00000012`) - rejected, not human-readable
+  at a glance; (2) a comma-separated list of only the *active* function
+  numbers - chosen, since real layouts rarely have more than a handful of
+  functions on at once, keeping it both short and genuinely readable; (3) a
+  dedicated 5th OLED page with a proper grid using the full ~48px blue area
+  - more useful "at a glance" but a real feature in its own right, not this
+  step's "cheap" scope - deferred rather than done now.
+- **Implementation**: `OledDisplay::buildActiveFunctionsLabel()` builds the
+  list into a fixed 18-byte buffer (17 usable chars + null, matching the
+  line's ~21-char width minus the 4-char "Fn: " prefix), truncating with
+  "..." if it overflows. New `SystemStatus.last_command_functions` /
+  `CommandRouter::LastCommandInfo.functions` thread `LocoState.functions`
+  (already tracked, already used to answer throttle LocoInfo requests)
+  through to the display layer.
+- **Real gap found and fixed in the same pass**: only speed commands ever
+  updated `last_command` at all - `handleXpressNetFunctionCommand()` and
+  `handleEcosFunctionCommand()` never touched it. That meant a pure
+  function-only interaction (e.g. toggling a headlight, arguably the most
+  common real interaction with a loco) never updated the OLED's "Last:
+  Loco X / Spd/Dir" fields at all, and would have made the new Fn field
+  similarly blind to function-only changes if left as-is. User caught this
+  during design discussion and asked for it to be fixed in the same pass
+  rather than filed as follow-up work. Fixed by making all four command
+  handlers (`handleXpressNetCommand`, `handleXpressNetFunctionCommand`,
+  `handleEcosCommand`, `handleEcosFunctionCommand`) consistently update
+  `last_command.address/speed/direction/functions/source` from the fully
+  resolved `new_state`, not just the two speed-command paths.
+- **Live testing caught a second real bug**: with 9+ functions active, the
+  displayed list silently stopped after 8 entries with no "..." shown at
+  all - looked like a hard cutoff, not a truncation. Root cause:
+  `buildActiveFunctionsLabel()`'s original version only checked whether
+  there was room to append "..." *after* already failing to fit the next
+  entry - by which point the entries already written could have filled the
+  buffer right up to (but not including) room for a 3-character ellipsis,
+  leaving nothing left to signal truncation with. Fixed by reserving 3
+  bytes for a potential "..." unconditionally before filling entries (only
+  actually appended if truncation turns out to be needed), so truncation
+  is now always signaled correctly regardless of exactly where the cutoff
+  lands. Confirmed live on real hardware after the fix.
+- 4 new `test_command_router` tests confirming all four handlers correctly
+  surface `last_command_functions` (covering both the "speed command
+  preserves existing functions" and "function command updates last_command
+  at all" cases); native suite 126/126 passing.
+  `buildActiveFunctionsLabel()` itself has no native coverage - lives in
+  `oled_display.cpp`, excluded from the native build like the rest of the
+  display layer (verified live on real hardware instead, matching that
+  file's existing testing boundary).
+
+---
+
 **2026-08-03 — Phase 5 step 4 confirmed live; step 9 (stolen icon) investigated, fixed, and confirmed; a second real bug found along the way**
 
 - **Serial monitor was resetting the board on every connect.** Discovered

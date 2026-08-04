@@ -175,6 +175,7 @@ private:
         uint16_t address = 0;
         uint8_t speed = 0;
         uint8_t direction = 0;
+        uint32_t functions = 0;
         LocoSource source = LocoSource::UNKNOWN;
     };
     LastCommandInfo last_command;

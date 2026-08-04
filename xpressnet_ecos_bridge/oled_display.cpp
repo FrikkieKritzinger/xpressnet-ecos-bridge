@@ -7,6 +7,7 @@
  */
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -185,6 +186,56 @@ void OledDisplay::update(const SystemStatus& status) {
     display.display();
 }
 
+void OledDisplay::buildActiveFunctionsLabel(uint32_t functions, char* buf, size_t buf_size) {
+    if (buf_size == 0) {
+        return;
+    }
+    buf[0] = '\0';
+
+    if (functions == 0) {
+        strncpy(buf, "none", buf_size);
+        buf[buf_size - 1] = '\0';
+        return;
+    }
+
+    // Reserve room for a trailing "..." (3 chars) + null terminator
+    // upfront, so there's always room to signal truncation instead of
+    // silently dropping the entry that didn't quite fit (real bug: the
+    // original version only checked for ellipsis room *after* failing to
+    // fit the next entry, by which point the buffer could already be full).
+    size_t ellipsis_reserve = (buf_size > 4) ? 3 : 0;
+    size_t usable = buf_size - 1 - ellipsis_reserve;
+
+    size_t used = 0;
+    bool first = true;
+    bool truncated = false;
+    for (uint8_t fn = 0; fn < DCC_FUNCTION_COUNT; fn++) {
+        if (!(functions & (1UL << fn))) {
+            continue;
+        }
+
+        char entry[5];  // ",31\0" worst case
+        int entry_len = snprintf(entry, sizeof(entry), first ? "%u" : ",%u", fn);
+        if (entry_len < 0) {
+            break;
+        }
+
+        if (used + (size_t)entry_len > usable) {
+            truncated = true;
+            break;
+        }
+
+        memcpy(buf + used, entry, entry_len);
+        used += entry_len;
+        first = false;
+    }
+
+    buf[used] = '\0';
+    if (truncated && ellipsis_reserve > 0) {
+        strcat(buf, "...");
+    }
+}
+
 // ============================================================================
 // PAGE 0: MAIN SCREEN - Live Status
 // ============================================================================
@@ -238,9 +289,18 @@ void OledDisplay::drawMainScreen() {
         display.print(F("Spd: -- Dir: --"));
     }
 
-    // Functions (TBD - not yet tracked in SystemStatus, deferred)
+    // Functions - comma-separated list of active function numbers,
+    // truncated with "..." if it overflows the line's ~17 usable
+    // characters after the "Fn: " prefix (see buildActiveFunctionsLabel()).
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
-    display.print(F("Fn: (TBD)"));
+    display.print(F("Fn: "));
+    if (current_status.last_command_address > 0) {
+        char fn_label[18];
+        buildActiveFunctionsLabel(current_status.last_command_functions, fn_label, sizeof(fn_label));
+        display.print(fn_label);
+    } else {
+        display.print(F("--"));
+    }
 }
 
 // ============================================================================

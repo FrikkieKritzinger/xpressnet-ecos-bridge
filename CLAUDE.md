@@ -202,7 +202,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-4 and 9 done, 5-8 and 10 remaining)
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-5 and 9 done, 6-8 and 10 remaining)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -332,12 +332,37 @@ why this reordering turned out to be the right call.
    appearing to cross-contaminate on the MultiMaus's display) - see step 9,
    which turned out to be a separate, deeper issue this step's live test
    exposed rather than a flaw in the merge fix itself.
-5. **OLED function display** ("Fn: (TBD)" on the main page) - cheaper than
-   it looks: `LocoState.functions` is already tracked and already used
-   elsewhere (answering throttle LocoInfo requests); it just never got
-   threaded through `SystemStatus`/`CommandRouter::getSystemStatus()` to the
-   display layer. Doing this right after step 4 means the data it displays
-   is already trustworthy.
+5. ✅ **OLED function display - implemented and confirmed live (2026-08-03)**.
+   Replaced the main page's "Fn: (TBD)" placeholder with a comma-separated
+   list of active function numbers (e.g. "0,3,7"), truncated with "..." if
+   it overflows the line's ~17 usable characters
+   (`OledDisplay::buildActiveFunctionsLabel()`) - a hex bitmask was
+   considered and rejected (not human-readable at a glance); a full
+   dedicated grid page was considered too (would use the ~48px blue area
+   properly) but deferred as a separate, bigger feature rather than this
+   "cheap" step's scope. `LocoState.functions` was already tracked; new
+   `SystemStatus.last_command_functions` threads it through
+   `CommandRouter::getSystemStatus()`.
+   - **Real gap found and fixed in the same pass**: only speed commands
+     ever updated `last_command` at all - `handleXpressNetFunctionCommand()`
+     and `handleEcosFunctionCommand()` never touched it, so a pure function
+     toggle (e.g. flipping a headlight, the most common real interaction)
+     wouldn't have updated the OLED's "Last:" fields at all. Fixed by
+     making all four command handlers consistently update
+     `last_command.address/speed/direction/functions/source`.
+   - **First live test caught a real truncation bug**: with 9+ functions
+     active, the list silently stopped after 8 with no "..." at all -
+     `buildActiveFunctionsLabel()` only checked for room to append "..."
+     *after* failing to fit the next entry, by which point the buffer
+     could already be completely full. Fixed by reserving 3 bytes for a
+     potential "..." upfront (before filling entries), so truncation is
+     always signaled correctly. Confirmed live.
+   - 4 new `test_command_router` tests (all four handlers correctly
+     surface `last_command_functions`); native suite 126/126 passing.
+     `buildActiveFunctionsLabel()` itself has no native coverage - lives in
+     `oled_display.cpp`, excluded from the native build like the rest of
+     the display layer (verified live on real hardware instead, matching
+     that file's existing testing boundary).
 6. **`notifyXNetgiveLocoFunc` handler** - a MultiMaus function-status
    request, unimplemented; same shape as `onGiveLocoMM` (which is handled) -
    same function-handling code path as steps 4-5, same category of gap as
@@ -490,8 +515,8 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-4 and 9 done,
-  5-8 and 10 remaining) - see the dedicated section below for the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-5 and 9 done,
+  6-8 and 10 remaining) - see the dedicated section below for the roadmap.
 
 ---
 
@@ -865,8 +890,18 @@ a program track.
 confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Steps 1-4 and 9 are now done and confirmed live; 5-8 and 10
-remain. Step 3 (the fake outgoing Ecos command queue) took several rounds -
+section above. Steps 1-5 and 9 are now done and confirmed live; 6-8 and 10
+remain. Step 5 (OLED function display) replaced the main page's "Fn: (TBD)"
+placeholder with a comma-separated list of active functions, truncated with
+"..." if it overflows the line - a hex bitmask was rejected as not
+human-readable, a full dedicated grid page deferred as a bigger separate
+feature. Found and fixed two real bugs along the way: only speed commands
+were updating the OLED's "last command" fields at all (function-only
+commands never did, so a pure headlight toggle wouldn't show up), and the
+truncation logic only checked for room to add "..." *after* already failing
+to fit the next entry, sometimes leaving no room left to signal truncation
+at all - fixed by reserving that room upfront. Native suite 126/126. Step 3
+(the fake outgoing Ecos command queue) took several rounds -
 a disconnect-detection gap, faster 10s detection, and a speed/direction
 command-order bug all found and fixed along the way. Step 4 (Ecos
 function-command merge bug, `functions_mask` instead of overwriting the

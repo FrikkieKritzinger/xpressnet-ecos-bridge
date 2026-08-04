@@ -623,6 +623,55 @@ void test_router_surfaces_xnet_status_in_system_status(void) {
     TEST_ASSERT_EQUAL_INT((int)ComponentStatus::CONNECTED, (int)status.xnet_status);
 }
 
+void test_router_xpressnet_speed_command_surfaces_existing_functions(void) {
+    // A speed-only command must not blank out functions already known for
+    // that loco - last_command_functions should reflect current state.
+    CommandRouter router;
+    router.handleXpressNetFunctionCommand(100, 0x05);  // F0, F2 on
+    router.handleXpressNetCommand(100, 64, 1);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT16(100, status.last_command_address);
+    TEST_ASSERT_EQUAL_UINT32(0x05, status.last_command_functions);
+}
+
+void test_router_xpressnet_function_command_updates_last_command(void) {
+    // Real gap found 2026-08-03: pure function commands never updated
+    // last_command at all (only speed commands did), so a function-only
+    // interaction (e.g. toggling a headlight) wouldn't show up as "last
+    // command" on the OLED at all.
+    CommandRouter router;
+    router.handleXpressNetCommand(100, 50, 1);
+    router.handleXpressNetFunctionCommand(100, 0x01);  // F0 on
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT16(100, status.last_command_address);
+    TEST_ASSERT_EQUAL_UINT8(50, status.last_command_speed);
+    TEST_ASSERT_EQUAL_UINT32(0x01, status.last_command_functions);
+}
+
+void test_router_ecos_speed_command_surfaces_existing_functions(void) {
+    CommandRouter router;
+    router.handleEcosFunctionCommand(100, 0x02, 0x02);  // F1 on
+    router.handleEcosCommand(100, 64, 1);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT16(100, status.last_command_address);
+    TEST_ASSERT_EQUAL_UINT32(0x02, status.last_command_functions);
+}
+
+void test_router_ecos_function_command_updates_last_command(void) {
+    // Same gap as the XpressNet side, Ecos direction.
+    CommandRouter router;
+    router.handleEcosCommand(100, 50, 1);
+    router.handleEcosFunctionCommand(100, 0x01, 0x01);  // F0 on
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT16(100, status.last_command_address);
+    TEST_ASSERT_EQUAL_UINT8(50, status.last_command_speed);
+    TEST_ASSERT_EQUAL_UINT32(0x01, status.last_command_functions);
+}
+
 #if ENABLE_DEBUG
 void test_router_debug_print_echo_state_does_not_crash(void) {
     // Smoke test for debugPrintEchoState(), covering both its
@@ -696,6 +745,11 @@ int main(void) {
 
     RUN_TEST(test_router_surfaces_ecos_status_in_system_status);
     RUN_TEST(test_router_surfaces_xnet_status_in_system_status);
+
+    RUN_TEST(test_router_xpressnet_speed_command_surfaces_existing_functions);
+    RUN_TEST(test_router_xpressnet_function_command_updates_last_command);
+    RUN_TEST(test_router_ecos_speed_command_surfaces_existing_functions);
+    RUN_TEST(test_router_ecos_function_command_updates_last_command);
 
     #if ENABLE_DEBUG
     RUN_TEST(test_router_debug_print_echo_state_does_not_crash);

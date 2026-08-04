@@ -120,6 +120,7 @@ struct SystemStatus {
     uint16_t last_command_address;
     uint8_t last_command_speed;
     uint8_t last_command_direction;
+    uint32_t last_command_functions;
     LocoSource last_command_source;
 };
 

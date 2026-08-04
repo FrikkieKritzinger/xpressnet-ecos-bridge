@@ -140,6 +140,7 @@ void CommandRouter::handleXpressNetCommand(uint16_t address, uint8_t speed, uint
     last_command.address = address;
     last_command.speed = speed;
     last_command.direction = direction;
+    last_command.functions = new_state.functions;
     last_command.source = LocoSource::XPRESSNET;
 
     // Update echo prevention state
@@ -203,6 +204,11 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
     broadcastCommand(address, new_state, LocoSource::XPRESSNET);
 
     total_commands_count++;
+    last_command.address = address;
+    last_command.speed = new_state.speed;
+    last_command.direction = new_state.direction;
+    last_command.functions = new_state.functions;
+    last_command.source = LocoSource::XPRESSNET;
 
     // Update echo prevention
     echo_state.last_loco_address = address;
@@ -285,6 +291,7 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
     last_command.address = address;
     last_command.speed = new_state.speed;
     last_command.direction = new_state.direction;
+    last_command.functions = new_state.functions;
     last_command.source = LocoSource::ECOS;
 
     // Update echo prevention
@@ -345,6 +352,11 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
     broadcastCommand(address, new_state, LocoSource::ECOS);
 
     total_commands_count++;
+    last_command.address = address;
+    last_command.speed = new_state.speed;
+    last_command.direction = new_state.direction;
+    last_command.functions = new_state.functions;
+    last_command.source = LocoSource::ECOS;
 
     // Update echo prevention
     echo_state.last_loco_address = address;
@@ -615,6 +627,7 @@ SystemStatus CommandRouter::getSystemStatus() const {
     status.last_command_address = last_command.address;
     status.last_command_speed = last_command.speed;
     status.last_command_direction = last_command.direction;
+    status.last_command_functions = last_command.functions;
     status.last_command_source = last_command.source;
 
     return status;
