@@ -551,6 +551,13 @@ void XpressNetInterface::pushLocoStateToOwningSlot(uint16_t address) {
     DEBUG_XNET_PRINTF("XpressNet TX: Pushed external update to owning slot (if any) - Addr=%u\n", address);
 }
 
+unsigned long XpressNetInterface::getLastMessageAgeMs() const {
+    if (last_message_time == 0) {
+        return NO_TIMESTAMP;
+    }
+    return millis() - last_message_time;
+}
+
 // ============================================================================
 // OUTGOING FUNCTION GROUP ENCODING (mirrors onLocoFunctionGroup's decode)
 // ============================================================================

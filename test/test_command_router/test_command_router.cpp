@@ -623,6 +623,45 @@ void test_router_surfaces_xnet_status_in_system_status(void) {
     TEST_ASSERT_EQUAL_INT((int)ComponentStatus::CONNECTED, (int)status.xnet_status);
 }
 
+void test_router_surfaces_xnet_last_message_age(void) {
+    // Phase 5 step 8: getSystemStatus() reads xpressnet->getLastMessageAgeMs()
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    xnet_mock.setLastMessageAgeMs(4200);
+    router.setXpressNetInterface(&xnet_mock);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT32(4200, status.xnet_last_message_age_ms);
+}
+
+void test_router_xnet_last_message_age_defaults_to_no_timestamp(void) {
+    // No XpressNet interface set at all - distinct from "interface set but
+    // never received a message yet" (which the mock/real interface itself
+    // already defaults to NO_TIMESTAMP for).
+    CommandRouter router;
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT32(ProtocolInterface::NO_TIMESTAMP, status.xnet_last_message_age_ms);
+}
+
+void test_router_surfaces_ecos_heartbeat_latency(void) {
+    // Phase 5 step 8: getSystemStatus() reads ecos->getLastHeartbeatLatencyMs()
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    ecos_mock.setHeartbeatLatencyMs(37);
+    router.setEcosInterface(&ecos_mock);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT32(37, status.ecos_heartbeat_latency_ms);
+}
+
+void test_router_ecos_heartbeat_latency_defaults_to_no_timestamp(void) {
+    CommandRouter router;
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT32(ProtocolInterface::NO_TIMESTAMP, status.ecos_heartbeat_latency_ms);
+}
+
 void test_router_xpressnet_speed_command_surfaces_existing_functions(void) {
     // A speed-only command must not blank out functions already known for
     // that loco - last_command_functions should reflect current state.
@@ -745,6 +784,10 @@ int main(void) {
 
     RUN_TEST(test_router_surfaces_ecos_status_in_system_status);
     RUN_TEST(test_router_surfaces_xnet_status_in_system_status);
+    RUN_TEST(test_router_surfaces_xnet_last_message_age);
+    RUN_TEST(test_router_xnet_last_message_age_defaults_to_no_timestamp);
+    RUN_TEST(test_router_surfaces_ecos_heartbeat_latency);
+    RUN_TEST(test_router_ecos_heartbeat_latency_defaults_to_no_timestamp);
 
     RUN_TEST(test_router_xpressnet_speed_command_surfaces_existing_functions);
     RUN_TEST(test_router_xpressnet_function_command_updates_last_command);

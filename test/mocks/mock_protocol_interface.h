@@ -13,7 +13,10 @@
 
 class MockProtocolInterface : public ProtocolInterface {
 public:
-    MockProtocolInterface() : current_status(ComponentStatus::DISCONNECTED) {
+    MockProtocolInterface()
+        : current_status(ComponentStatus::DISCONNECTED),
+          mock_last_message_age_ms(NO_TIMESTAMP),
+          mock_heartbeat_latency_ms(NO_TIMESTAMP) {
         reset();
     }
 
@@ -73,6 +76,14 @@ public:
         push_loco_state_call_count++;
     }
 
+    unsigned long getLastMessageAgeMs() const override {
+        return mock_last_message_age_ms;
+    }
+
+    unsigned long getLastHeartbeatLatencyMs() const override {
+        return mock_heartbeat_latency_ms;
+    }
+
     // ========================================================================
     // TESTING INTERFACE - Verification and control
     // ========================================================================
@@ -110,6 +121,8 @@ public:
 
     // Manual status control for testing
     void setStatus(ComponentStatus status) { current_status = status; }
+    void setLastMessageAgeMs(unsigned long age_ms) { mock_last_message_age_ms = age_ms; }
+    void setHeartbeatLatencyMs(unsigned long latency_ms) { mock_heartbeat_latency_ms = latency_ms; }
 
     // Reset all tracking
     void reset() {
@@ -132,6 +145,8 @@ public:
 private:
     // State
     ComponentStatus current_status;
+    unsigned long mock_last_message_age_ms;
+    unsigned long mock_heartbeat_latency_ms;
 
     // Call tracking
     bool begin_called;

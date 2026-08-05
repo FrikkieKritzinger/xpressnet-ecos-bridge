@@ -598,13 +598,30 @@ SystemStatus CommandRouter::getSystemStatus() const {
     #endif
     
     #if ENABLE_ECOS_LAN
-    status.ecos_status = (ecos != nullptr) ? 
-                         ecos->getStatus() : 
+    status.ecos_status = (ecos != nullptr) ?
+                         ecos->getStatus() :
                          ComponentStatus::DISCONNECTED;
     #else
     status.ecos_status = ComponentStatus::DISCONNECTED;
     #endif
-    
+
+    // Deferred OLED fields (Phase 5 step 8)
+    #if ENABLE_XPRESSNET
+    status.xnet_last_message_age_ms = (xpressnet != nullptr) ?
+                         xpressnet->getLastMessageAgeMs() :
+                         ProtocolInterface::NO_TIMESTAMP;
+    #else
+    status.xnet_last_message_age_ms = ProtocolInterface::NO_TIMESTAMP;
+    #endif
+
+    #if ENABLE_ECOS_LAN
+    status.ecos_heartbeat_latency_ms = (ecos != nullptr) ?
+                         ecos->getLastHeartbeatLatencyMs() :
+                         ProtocolInterface::NO_TIMESTAMP;
+    #else
+    status.ecos_heartbeat_latency_ms = ProtocolInterface::NO_TIMESTAMP;
+    #endif
+
     // State engine
     status.active_locos = state_engine.getLocoCount();
 

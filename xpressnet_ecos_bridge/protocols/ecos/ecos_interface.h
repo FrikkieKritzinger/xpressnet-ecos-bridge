@@ -105,6 +105,20 @@ public:
     void sendResumeOperation() override;
 
     /**
+     * Round-trip latency (ms) of the most recently completed address-map
+     * query, for OLED display. Measured from queryAddressMap() writing the
+     * request to the first reply entry handleReply() sees for it - not a
+     * per-request-ID correlation, but address-map queries only ever
+     * overlap with themselves (heartbeat and the less-frequent scheduled
+     * refresh both call the same queryAddressMap()), so "most recent send,
+     * first reply seen since" is an honest round-trip measurement in
+     * practice. Returns NO_TIMESTAMP if no round-trip has completed yet.
+     */
+    unsigned long getLastHeartbeatLatencyMs() const override {
+        return last_heartbeat_latency_ms;
+    }
+
+    /**
      * Set reference to command router (called after construction)
      * @param router Pointer to CommandRouter instance
      */
@@ -133,7 +147,9 @@ private:
 
     AddressMapEntry address_map[MAX_ECOS_OBJECTS];
     uint16_t address_map_count;
-    unsigned long address_map_last_refresh;
+    unsigned long address_map_last_refresh;  // also doubles as "query sent at" for latency below
+    bool awaiting_query_reply;
+    unsigned long last_heartbeat_latency_ms;
 
     /**
      * Find Ecos object ID for a DCC address

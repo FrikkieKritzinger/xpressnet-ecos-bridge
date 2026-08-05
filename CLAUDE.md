@@ -202,7 +202,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-7 and 9 done, 8 and 10 remaining)
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-9 done, only 10 remaining)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -422,10 +422,35 @@ why this reordering turned out to be the right call.
    - No native test coverage added - `ecos_interface.cpp` is excluded from
      the native build (hardware-coupled), same existing testing boundary
      as the rest of this file; native suite unaffected, 126/126 passing.
-8. **Deferred OLED display fields** (lower-stakes polish, no dependencies):
-   XNet "Last Msg" age (needs exposing through `ProtocolInterface`, touching
-   the mock used by native tests) and Ecos round-trip latency (needs
-   timestamp correlation on the heartbeat query).
+8. ✅ **Deferred OLED display fields - implemented and confirmed live
+   (2026-08-05)**. Both `ProtocolInterface::getLastMessageAgeMs()` and
+   `getLastHeartbeatLatencyMs()` (new virtuals, `NO_TIMESTAMP` sentinel
+   default) thread real values into `SystemStatus`/
+   `CommandRouter::getSystemStatus()`, replacing the XNet page's
+   "Last Msg: N/A" and the Ecos page's "Latency: N/A" placeholders.
+   - **XNet "Last Msg" age**: `XpressNetInterface` already tracked
+     `last_message_time` internally (for `BUS_TIMEOUT`) - just needed
+     exposing. Displayed as elapsed seconds.
+   - **Ecos round-trip latency**: `EcosInterface` already set
+     `address_map_last_refresh = millis()` when sending a query, but never
+     read it back anywhere - reused it as the "sent at" timestamp instead
+     of adding a new field. New `awaiting_query_reply` flag, set in
+     `queryAddressMap()` right after writing the request, cleared in
+     `handleReply()`'s address-map-entry branch on the first reply entry
+     seen since - not a per-request-ID correlation, but address-map
+     queries only ever overlap with themselves (both the 5s heartbeat and
+     the less-frequent scheduled refresh call the same
+     `queryAddressMap()`), so "most recent send, first reply since" is an
+     honest measurement in practice. Displayed as milliseconds.
+   - Both fields default to a `NO_TIMESTAMP` sentinel
+     (`(unsigned long)-1`) rather than `0`, since `0` is a legitimate real
+     value for both age and latency.
+   - 4 new `test_command_router` tests (each field surfaced correctly when
+     present, and correctly defaults to `NO_TIMESTAMP` when no interface is
+     set) using new `MockProtocolInterface` setters; native suite 130/130
+     passing. `oled_display.cpp` itself has no native coverage - excluded
+     from the native build like the rest of the display layer, confirmed
+     live on real hardware instead.
 9. ✅ **XNet "stolen icon" display refresh - fixed and confirmed live
    (2026-08-03)**. Moved up and re-attempted right after step 4 (see above)
    once live testing there showed an Ecos-driven function change getting
@@ -566,8 +591,8 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-7 and 9 done,
-  8 and 10 remaining) - see the dedicated section below for the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-9 done, only step
+  10 remaining) - see the dedicated section below for the roadmap.
 
 ---
 
@@ -941,20 +966,17 @@ a program track.
 confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Steps 1-7 and 9 are done; 8 and 10 remain. Full narrative
-detail for every step lives in `docs/CHANGELOG.md` (dated entries); this
-section is intentionally just current status.
+section above. **Steps 1-9 are done - only step 10 (accessory/turnout
+support) remains**, and it's the single biggest, fully standalone item,
+deliberately scheduled last. Full narrative detail for every step lives in
+`docs/CHANGELOG.md` (dated entries); this section is intentionally just
+current status.
 
-Most recent: **step 7** (function command reconnect-queue parity) fixed and
-confirmed live - `sendFunctionCommand()` now queues via a new
-`queuePendingFunctionQuery()` instead of silently dropping the command when
-the Ecos object ID isn't known yet, mirroring `sendSpeedCommand()`'s
-existing queue. Confirmed by disconnecting Ecos, toggling two functions,
-reconnecting - both correctly landed instead of being lost. **Step 6**
-(`notifyXNetgiveLocoFunc` handler) is implemented but verified by code
-review + clean builds only - real MultiMaus hardware uses a different
-request type and never triggers this path, confirmed by testing. **Step 9**
-(MultiMaus "stolen icon" refresh) and **step 5** (OLED function display)
-were confirmed live in prior sessions - see the dedicated Phase 5 step
-entries above for what each one covers. Native suite 126/126 passing;
-`env:native` and `env:wemos` both build clean.
+Most recent: **step 8** (deferred OLED display fields) implemented and
+confirmed live - XNet's "Last Msg" age and Ecos's round-trip latency both
+replaced their "N/A" placeholders with real values, via two new
+`ProtocolInterface` virtuals (`getLastMessageAgeMs()`/
+`getLastHeartbeatLatencyMs()`, `NO_TIMESTAMP` sentinel default) threaded
+through `SystemStatus`. Both reused timestamps the interfaces already
+tracked internally rather than adding new bookkeeping. Native suite
+130/130 passing; `env:native` and `env:wemos` both build clean.

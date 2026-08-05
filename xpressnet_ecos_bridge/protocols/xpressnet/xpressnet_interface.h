@@ -87,6 +87,15 @@ public:
     void pushLocoStateToOwningSlot(uint16_t address) override;
 
     /**
+     * Milliseconds since the last real bus message was received (any
+     * successfully-parsed callback, not just drive commands), for OLED
+     * "Last Msg" age display. Reuses last_message_time - the same
+     * timestamp BUS_TIMEOUT already keys off. Returns NO_TIMESTAMP if no
+     * message has been received yet this boot.
+     */
+    unsigned long getLastMessageAgeMs() const override;
+
+    /**
      * Get current connection status
      * @return CONNECTED, DISCONNECTED, ERROR
      */

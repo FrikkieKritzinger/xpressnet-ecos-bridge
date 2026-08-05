@@ -33,6 +33,8 @@ EcosInterface::EcosInterface()
       router(nullptr),
       address_map_count(0),
       address_map_last_refresh(0),
+      awaiting_query_reply(false),
+      last_heartbeat_latency_ms(NO_TIMESTAMP),
       pending_query_count(0),
       echo_queue_head(0),
       echo_queue_tail(0),
@@ -297,6 +299,7 @@ void EcosInterface::queryAddressMap() {
 
     if (len > 0) {
         wifi_client.write((uint8_t*)cmd_buffer, len);
+        awaiting_query_reply = true;
     }
 
     address_map_last_refresh = millis();
@@ -537,6 +540,14 @@ void EcosInterface::handleReply(const EcosReply& reply) {
     // Handle queryObjects response (address map population)
     if (reply.has_dcc_address && reply.object_id > 0 && !reply.has_speed) {
         // This looks like a queryObjects result (object ID + DCC address, no speed/dir/functions)
+        if (awaiting_query_reply) {
+            // First entry back since we last sent a query - see
+            // getLastHeartbeatLatencyMs()'s comment for why this is an
+            // honest round-trip measurement despite not correlating by
+            // request ID.
+            last_heartbeat_latency_ms = millis() - address_map_last_refresh;
+            awaiting_query_reply = false;
+        }
         addAddressMapEntry(reply.dcc_address, reply.object_id);
         DEBUG_ECOS_PRINTF("Address map: DCC %u → Ecos ID %u\n", reply.dcc_address, reply.object_id);
         return;

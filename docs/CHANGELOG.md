@@ -7,6 +7,75 @@ here. Newest entries first.
 
 ---
 
+**2026-08-05 — Phase 5 step 8: deferred OLED display fields, confirmed live (Phase 5 steps 1-9 now all done)**
+
+- **XNet "Last Msg" age**: `XpressNetInterface` already tracked
+  `last_message_time` (`millis()`-stamped on every successfully-parsed bus
+  callback via `markBusActivity()`, the same field `BUS_TIMEOUT` already
+  keys off) - it just wasn't exposed anywhere outside the class. Added
+  `getLastMessageAgeMs() const override` returning `millis() -
+  last_message_time`, or `NO_TIMESTAMP` if no message has been received
+  yet this boot (`last_message_time == 0`).
+- **Ecos round-trip latency**: `EcosInterface::queryAddressMap()` already
+  set `address_map_last_refresh = millis()` on every send, but nothing
+  ever read it back - reused it as the "query sent at" timestamp instead
+  of introducing a new field. New `awaiting_query_reply` bool, set `true`
+  right after `queryAddressMap()` successfully writes the request bytes.
+  `handleReply()`'s existing address-map-entry branch (the one that logs
+  "Address map: DCC X → Ecos ID Y") now checks this flag: on the *first*
+  entry seen since the flag was set, computes `last_heartbeat_latency_ms =
+  millis() - address_map_last_refresh` and clears the flag, so later
+  entries in the same multi-loco reply don't keep recomputing (and
+  shrinking) the same measurement. Not a per-request-ID correlation - but
+  address-map queries only ever come from two sources (the 5s heartbeat
+  and the far less frequent scheduled full refresh), both calling the
+  exact same `queryAddressMap()`, so "most recent send, first reply since"
+  is an honest round-trip measurement in practice, not an approximation
+  that could attribute one query's reply to a different one.
+- **New `ProtocolInterface` virtuals**: `getLastMessageAgeMs()` and
+  `getLastHeartbeatLatencyMs()`, both no-op-by-default returning a new
+  `NO_TIMESTAMP` sentinel constant (`(unsigned long)-1`) - `0` was
+  deliberately not used as "no value yet", since `0` is a legitimate real
+  measurement for both age (message just arrived) and latency (an
+  implausibly fast reply, but not impossible to represent honestly).
+  Documented on the interface as to *why* only one side of the bridge
+  meaningfully implements each: XpressNet's bus-quiet signal doesn't have
+  an Ecos equivalent (Ecos's own TCP connection state already covers
+  "are we connected" directly), and Ecos's request/reply heartbeat cycle
+  doesn't have an XpressNet equivalent (bus polling isn't a
+  request/reply shape in the same way).
+- **`CommandRouter::getSystemStatus()`** populates
+  `SystemStatus.xnet_last_message_age_ms`/`ecos_heartbeat_latency_ms` from
+  the two new virtuals, guarded by the same `#if ENABLE_XPRESSNET`/
+  `#if ENABLE_ECOS_LAN` + null-pointer-check pattern already used for
+  `xnet_status`/`ecos_status`.
+- **OLED display**: replaced the XNet page's "Last Msg: N/A" with elapsed
+  seconds (`Xs`) and the Ecos page's "Latency: N/A" with milliseconds
+  (`Xms`), falling back to "N/A" when the underlying value is
+  `NO_TIMESTAMP`.
+- **Confirmed live**: both the XNet page's "Last Msg" and the Ecos page's
+  "Latency" showed real, non-"N/A" values on real hardware after
+  reconnecting and letting at least one heartbeat cycle complete.
+- 4 new `test_command_router` tests using two new `MockProtocolInterface`
+  setters (`setLastMessageAgeMs()`/`setHeartbeatLatencyMs()`) - covering
+  both "value surfaced correctly when an interface is set" and "defaults
+  to `NO_TIMESTAMP` when no interface is set" for each field. Native suite
+  130/130 passing. `oled_display.cpp` itself has no native coverage -
+  excluded from the native build like the rest of the display layer,
+  confirmed live on real hardware instead, matching that file's existing
+  testing boundary.
+- **This closes out Phase 5 steps 1-9** - only step 10 (accessory/turnout
+  support, the single biggest standalone item) remains on the Phase 5
+  roadmap.
+- Unrelated to the firmware itself: hit the same COM4 "Access is denied"
+  serial-tooling flakiness seen earlier this week when flashing for this
+  step - resolved by a hard reboot of the Wemos board itself (not the PC
+  this time), with no python process on the host holding the port at all,
+  suggesting the fault was on the device/USB-enumeration side rather than
+  a stuck host process.
+
+---
+
 **2026-08-05 — Phase 5 step 7: function command reconnect-queue parity, confirmed live**
 
 - **The gap**: `EcosInterface::sendFunctionCommand()` silently dropped the

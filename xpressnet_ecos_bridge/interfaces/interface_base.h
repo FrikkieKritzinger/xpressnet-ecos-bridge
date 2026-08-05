@@ -122,6 +122,27 @@ public:
      * transmission has - see XpressNetMaster::PushExternalLocoUpdate().
      */
     virtual void pushLocoStateToOwningSlot(uint16_t address) { (void)address; }
+
+    /**
+     * Milliseconds since the last real message was received from this
+     * protocol's peer device(s), for OLED "Last Msg" age display. No-op by
+     * default, returning NO_TIMESTAMP (no message ever received yet).
+     * Currently only XpressNet overrides this - a MultiMaus/throttle going
+     * quiet is a real, ambiguous "is anyone out there?" signal on a shared
+     * bus in a way Ecos's own TCP connection state already covers directly.
+     */
+    static const unsigned long NO_TIMESTAMP = (unsigned long)-1;
+    virtual unsigned long getLastMessageAgeMs() const { return NO_TIMESTAMP; }
+
+    /**
+     * Round-trip latency (ms) of the most recently completed heartbeat
+     * query/reply cycle, for OLED display. No-op by default, returning
+     * NO_TIMESTAMP (no heartbeat round-trip completed yet). Currently only
+     * Ecos overrides this - XpressNet's bus polling doesn't have an
+     * equivalent "we sent a query, here's when the reply came back"
+     * request/reply shape to measure.
+     */
+    virtual unsigned long getLastHeartbeatLatencyMs() const { return NO_TIMESTAMP; }
 };
 
 // ============================================================================

@@ -391,10 +391,15 @@ void OledDisplay::drawXpressNetScreen() {
     display.print(current_status.active_locos);
     display.print(F(" locos"));
 
-    // Last message timing - deferred: needs last-message-age exposed through
-    // ProtocolInterface (touches the mock used by native tests too)
+    // Last message timing
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
-    display.print(F("Last Msg: N/A"));
+    display.print(F("Last Msg: "));
+    if (current_status.xnet_last_message_age_ms == ProtocolInterface::NO_TIMESTAMP) {
+        display.print(F("N/A"));
+    } else {
+        display.print(current_status.xnet_last_message_age_ms / 1000);
+        display.print(F("s"));
+    }
 
     // Command counter
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
@@ -446,11 +451,15 @@ void OledDisplay::drawEcosScreen() {
     display.print(current_status.active_locos);
     display.print(F(" locos"));
     
-    // Latency - deferred: needs round-trip timestamp correlation on the
-    // heartbeat query, not wired up yet. N/A is honest; a fixed fake number
-    // wasn't.
+    // Latency
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
-    display.print(F("Latency: N/A"));
+    display.print(F("Latency: "));
+    if (current_status.ecos_heartbeat_latency_ms == ProtocolInterface::NO_TIMESTAMP) {
+        display.print(F("N/A"));
+    } else {
+        display.print(current_status.ecos_heartbeat_latency_ms);
+        display.print(F("ms"));
+    }
 }
 
 // ============================================================================

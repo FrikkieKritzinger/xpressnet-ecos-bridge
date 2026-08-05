@@ -122,6 +122,11 @@ struct SystemStatus {
     uint8_t last_command_direction;
     uint32_t last_command_functions;
     LocoSource last_command_source;
+
+    // Deferred OLED fields (Phase 5 step 8) - (unsigned long)-1 means
+    // "no value yet" (see ProtocolInterface::NO_TIMESTAMP)
+    unsigned long xnet_last_message_age_ms;
+    unsigned long ecos_heartbeat_latency_ms;
 };
 
 // ============================================================================
