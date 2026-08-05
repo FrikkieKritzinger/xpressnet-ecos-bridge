@@ -7,6 +7,61 @@ here. Newest entries first.
 
 ---
 
+**2026-08-05 — Phase 5 step 6: `notifyXNetgiveLocoFunc` handler, verified by code review only**
+
+- **The gap**: XpressNet header `0xE3`, `data1=0x09` is a standard Lenz
+  throttle request asking the master to report a locomotive's F13-F28
+  function status - distinct from `data1=0x00` (F0-F12, answered by
+  `onGiveLocoInfo`) and `data1=0xF0` (MultiMaus's own proprietary combined
+  request, answered by `onGiveLocoMM`). Traced the vendored
+  `XpressNetMaster` library's RX dispatch (`XpressNetMaster.cpp`'s `0xE3`
+  switch block) to confirm this exact mapping. The library calls the weak
+  symbol `notifyXNetgiveLocoFunc` for a `0x09` request, which this project
+  had never implemented, so the library silently dropped it (falls through
+  to `default: unknown()`).
+- **The fix**: new `XpressNetInterface::onGiveLocoFunc(uint8_t user_ops,
+  uint16_t address)`, mirroring `onGiveLocoInfo`/`onGiveLocoMM` exactly -
+  `markBusActivity()` (a real parsed request counts as bus activity, same
+  reasoning as the other two), `resolveLocoStateForReply()` for current
+  function state, then reply. The reply method itself,
+  `XpressNetMasterClass::SetFktStatus(UserOps, F13to20, F21to28)`, already
+  existed in the vendored library (`0xE3`/`0x52` wire format, matching the
+  `0x50`/`0x51` "function type" replies the library already sends inline
+  for related sub-commands `0x07`/`0x08`) - it had simply never been called
+  from any of our code before. `buildFunctionGroupByte()`'s existing
+  `0x04`/`0x05` group cases (F13-F20/F21-F28) already covered exactly the
+  byte layout `SetFktStatus()` needs. New free-function glue
+  (`notifyXNetgiveLocoFunc()`) added alongside the existing
+  `notifyXNetgiveLocoInfo()`/`notifyXNetgiveLocoMM()` wrappers.
+- **Could not get a live trigger, and that's expected**: real MultiMaus
+  hardware uses the combined `0xF0` request instead of the standard
+  `0x00`+`0x09` pair, so this specific request type doesn't fire during
+  normal MultiMaus usage. Confirmed by exercising a MultiMaus through a
+  full range of function toggles (groups 1, 4, and 5 - i.e. F0-F4 and both
+  F13-F28 halves) with `DEBUG_XPRESSNET=1`: zero `onGiveLocoFunc`/
+  `SetFktStatus` activity in the log, while every one of those toggles was
+  correctly received via the already-proven `onLocoFunctionGroup` path in
+  the same capture - ruling out "nothing reached the bridge at all" as the
+  explanation. Verified instead by code review (identical, proven pattern)
+  and clean builds: `env:native` 126/126 (unaffected - this file is
+  excluded from the native build, same hardware-coupled boundary as the
+  rest of `xpressnet_interface.cpp`) and `env:wemos` builds clean.
+- **Unrelated serial-tooling friction this session**, resolved by a full
+  PC reboot rather than any firmware change: background `platformio device
+  monitor` captures intermittently stayed empty despite the process
+  running and consuming CPU; `Stop-Process -Force` and even a WMI
+  `Terminate` call sometimes failed to kill the python process
+  immediately (return code 2/"Access Denied", though it would eventually
+  die); COM4 repeatedly returned `PermissionError(13, 'Access is denied')`
+  even with no visible python process holding it; one capture (before the
+  reboot) showed 11,000+ lines of a single repeating 12-byte fragment
+  ("cos ID 1004"), almost certainly a corrupted/backlogged buffer dump
+  rather than a real firmware busy-loop - nothing in this step's code
+  touches timing, the heartbeat, or the address-map print path at all.
+  Confirmed clean and back to normal pacing after the reboot.
+
+---
+
 **2026-08-03 — Phase 5 step 5: OLED function display, two real bugs found along the way**
 
 - **The feature**: replaced the main OLED page's "Fn: (TBD)" placeholder

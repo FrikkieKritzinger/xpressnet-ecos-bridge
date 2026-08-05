@@ -202,7 +202,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-5 and 9 done, 6-8 and 10 remaining)
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-6 and 9 done, 7-8 and 10 remaining)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -363,10 +363,32 @@ why this reordering turned out to be the right call.
      `oled_display.cpp`, excluded from the native build like the rest of
      the display layer (verified live on real hardware instead, matching
      that file's existing testing boundary).
-6. **`notifyXNetgiveLocoFunc` handler** - a MultiMaus function-status
-   request, unimplemented; same shape as `onGiveLocoMM` (which is handled) -
-   same function-handling code path as steps 4-5, same category of gap as
-   the LocoInfo bug fixed 2026-07-30.
+6. ✅ **`notifyXNetgiveLocoFunc` handler - implemented, verified by code
+   review + clean builds only (2026-08-05)**. XpressNet header `0xE3`,
+   `data1=0x09` is a standard Lenz throttle request for a loco's F13-F28
+   status, distinct from `onGiveLocoInfo` (F0-F12, `0x00`) and
+   `onGiveLocoMM` (MultiMaus's own combined request, `0xF0`) - previously
+   unimplemented, so the library silently dropped it. New
+   `XpressNetInterface::onGiveLocoFunc()` mirrors the existing two handlers
+   exactly (`markBusActivity()`, `resolveLocoStateForReply()`) and replies
+   via the vendored library's `SetFktStatus()` - a method that already
+   existed for exactly this reply but had never been called from our code.
+   - **Could not get a live trigger**: real MultiMaus hardware uses the
+     combined `0xF0` request instead of the standard `0x00`+`0x09` pair, so
+     with only MultiMaus units to test against, this specific request type
+     never fires in practice - confirmed by exercising a MultiMaus through
+     a full range of function toggles (groups 1/4/5, i.e. F0-F4 and
+     F13-F28) and finding zero `onGiveLocoFunc` activity in the debug log,
+     while the already-working `onLocoFunctionGroup` path correctly
+     received every one of those toggles. Not a sign the fix is wrong -
+     just an untriggerable path with this hardware. Verified instead by
+     code review (identical pattern to the two already-proven handlers)
+     and clean `env:native` (126/126) + `env:wemos` builds.
+   - This session's serial-monitor tooling was also unusually unreliable
+     (stuck/zombie python processes not responding to normal or
+     WMI-forced termination, intermittent "Access is denied" on the COM
+     port, one capture showing a garbled repeating-fragment artifact) -
+     resolved by a full PC reboot, unrelated to any firmware change here.
 7. **Function command reconnect-queue parity** - `sendFunctionCommand()`
    currently just drops the command if the Ecos object ID isn't known yet,
    unlike `sendSpeedCommand()` which queues via `queuePendingQuery()`. Same
@@ -515,8 +537,8 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-5 and 9 done,
-  6-8 and 10 remaining) - see the dedicated section below for the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-6 and 9 done,
+  7-8 and 10 remaining) - see the dedicated section below for the roadmap.
 
 ---
 
@@ -886,12 +908,22 @@ a program track.
 
 ---
 
-**Last Updated**: 2026-08-03. **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-08-05. **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Steps 1-5 and 9 are now done and confirmed live; 6-8 and 10
-remain. Step 5 (OLED function display) replaced the main page's "Fn: (TBD)"
+section above. Steps 1-6 and 9 are now done; 7-8 and 10 remain. Step 6
+(`notifyXNetgiveLocoFunc` handler for XpressNet's F13-F28 status request,
+`0xE3`/`0x09`) mirrors the already-proven `onGiveLocoInfo`/`onGiveLocoMM`
+pattern and replies via the library's pre-existing but previously-unused
+`SetFktStatus()` - verified by code review and clean builds only, since
+real MultiMaus hardware uses a different combined request (`0xF0`) and
+never triggers this code path; confirmed the already-working
+`onLocoFunctionGroup` path correctly received a full range of function
+toggles in the same test, so this genuinely can't be exercised with the
+hardware on hand rather than being an overlooked bug. Steps 1-5 and 9 were
+confirmed live in the prior session. Step 5 (OLED function display) replaced
+the main page's "Fn: (TBD)"
 placeholder with a comma-separated list of active functions, truncated with
 "..." if it overflows the line - a hex bitmask was rejected as not
 human-readable, a full dedicated grid page deferred as a bigger separate

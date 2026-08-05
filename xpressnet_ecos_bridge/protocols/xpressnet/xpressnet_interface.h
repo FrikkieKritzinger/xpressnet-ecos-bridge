@@ -166,6 +166,20 @@ public:
     void onGiveLocoMM(uint8_t user_ops, uint16_t address);
 
     /**
+     * Handle a throttle's request for a locomotive's F13-F28 function
+     * state (XpressNet header 0xE3, data1=0x09 - distinct from both
+     * onGiveLocoInfo's F0-F12 reply and onGiveLocoMM's MultiMaus-specific
+     * combined reply; a standard Lenz throttle can request this
+     * separately). Answers via the library's SetFktStatus(), which already
+     * existed but was never called since this request type was previously
+     * unimplemented and silently dropped.
+     * @param user_ops Requesting device's XpressNet slot - the reply is
+     *                 addressed back to this specific device
+     * @param address DCC address being queried
+     */
+    void onGiveLocoFunc(uint8_t user_ops, uint16_t address);
+
+    /**
      * Handle a track-power/emergency-stop state change request (e.g. the
      * MultiMaus's physical STOP button). The library only updates its own
      * internal state and fires this callback - it never automatically

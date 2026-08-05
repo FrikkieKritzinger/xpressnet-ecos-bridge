@@ -62,6 +62,12 @@ void notifyXNetgiveLocoMM(uint8_t UserOps, uint16_t Address) {
     }
 }
 
+void notifyXNetgiveLocoFunc(uint8_t UserOps, uint16_t Address) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onGiveLocoFunc(UserOps, Address);
+    }
+}
+
 void notifyXNetPower(uint8_t State) {
     if (g_xnet_instance) {
         g_xnet_instance->onPowerStateChange(State);
@@ -373,6 +379,25 @@ void XpressNetInterface::onGiveLocoMM(uint8_t user_ops, uint16_t address) {
                         buildFunctionGroupByte(functions, 0x04)); // F13-F20
 
     DEBUG_XNET_PRINTF("XpressNet TX: LocoInfoMM reply - Addr=%u (declaring 128-step)\n", address);
+}
+
+void XpressNetInterface::onGiveLocoFunc(uint8_t user_ops, uint16_t address) {
+    if (!isValidDccAddress(address)) {
+        return;
+    }
+
+    // See onGiveLocoInfo() - a real parsed request from a device on the bus.
+    markBusActivity();
+
+    uint8_t speed_byte;
+    uint32_t functions;
+    resolveLocoStateForReply(address, speed_byte, functions);
+
+    xnet.SetFktStatus(user_ops,
+                       buildFunctionGroupByte(functions, 0x04),   // F13-F20
+                       buildFunctionGroupByte(functions, 0x05));  // F21-F28
+
+    DEBUG_XNET_PRINTF("XpressNet TX: FktStatus reply (F13-F28) - Addr=%u\n", address);
 }
 
 void XpressNetInterface::onPowerStateChange(uint8_t state) {
