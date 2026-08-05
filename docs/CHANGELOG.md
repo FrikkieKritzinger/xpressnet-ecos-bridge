@@ -7,6 +7,62 @@ here. Newest entries first.
 
 ---
 
+**2026-08-05 — Phase 5 step 7: function command reconnect-queue parity, confirmed live**
+
+- **The gap**: `EcosInterface::sendFunctionCommand()` silently dropped the
+  command entirely if the Ecos object ID wasn't known yet (`obj_id == 0` -
+  either the address hadn't appeared in the map yet, or Ecos was
+  disconnected and the map had been cleared) - unlike `sendSpeedCommand()`,
+  which queues via `queuePendingQuery()` (the Phase 5 step 3 fix from
+  2026-08-03). Same category of gap as step 3, just never applied to the
+  function-command path.
+- **A second, related gap found while reading the code**:
+  `sendFunctionCommand()` still had an `if (current_status != CONNECTED)
+  return;` guard at the very top of the function - the exact pattern step 3
+  deliberately *removed* from `sendSpeedCommand()`, with the reasoning "a
+  master must keep transmitting regardless" (queuing already handles
+  disconnection gracefully, since `address_map_count` naturally clears to 0
+  on disconnect, making `findEcosObjectId()` return 0 and routing correctly
+  into the queue). As written, function commands issued while Ecos was
+  fully disconnected were dropped before ever reaching the queue-or-send
+  logic at all - not just when the address was merely unresolved while
+  still connected.
+- **The fix**: `PendingQuery` extended with `uint32_t functions` and two
+  bools (`has_speed_direction`, `has_functions` - the existing bare
+  `speed`/`direction` fields kept their names but are now only applied when
+  `has_speed_direction` is set). Upserting by address is preserved and
+  extended: a speed change and a function change queued for the same loco
+  while disconnected now merge into *one* entry (only the relevant
+  has_-flag gets set) instead of each type fighting over the small
+  `MAX_PENDING_QUERIES` buffer independently. New
+  `queuePendingFunctionQuery()` mirrors the existing `queuePendingQuery()`.
+  `flushPendingQueries()` now checks each entry's flags and only replays
+  the field(s) that entry actually has queued - sending both
+  unconditionally would have reintroduced the exact class of bug fixed in
+  step 9 (`CommandRouter::handleEcosCommand()`'s `has_speed`/
+  `has_direction` fix): a pure function-only queued entry would have also
+  sent a placeholder speed=0/direction=1, and vice versa.
+  `sendFunctionCommand()` itself now calls `queuePendingFunctionQuery()`
+  when `obj_id == 0` instead of returning, and the stale `current_status`
+  guard was removed to match `sendSpeedCommand()`.
+- **Confirmed live**: disconnected Ecos by unplugging its LAN cable,
+  toggled two functions on a MultiMaus while disconnected, reconnected
+  Ecos - both functions correctly landed on Ecos once it came back online,
+  instead of being silently lost as they would have been before this fix.
+- Debug-log verification of this specific test was attempted but the
+  serial-monitor capture got corrupted by the same kind of garbled-noise
+  artifact seen earlier in the day (see the step 6 entry below) - the
+  user's direct hardware observation (both functions correctly present on
+  Ecos after reconnect) was treated as the real evidence instead of
+  re-chasing a working log capture, since it's an unambiguous, directly
+  observed pass/fail result.
+- No native test coverage added - `ecos_interface.cpp` is excluded from the
+  native build (hardware-coupled), same existing testing boundary as the
+  rest of this file. Native suite unaffected, 126/126 passing; both
+  `env:native` and `env:wemos` build clean.
+
+---
+
 **2026-08-05 — Phase 5 step 6: `notifyXNetgiveLocoFunc` handler, verified by code review only**
 
 - **The gap**: XpressNet header `0xE3`, `data1=0x09` is a standard Lenz

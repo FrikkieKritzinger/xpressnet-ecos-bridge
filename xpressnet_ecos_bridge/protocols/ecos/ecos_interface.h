@@ -161,19 +161,37 @@ private:
         uint16_t address;
         uint8_t speed;
         uint8_t direction;
+        uint32_t functions;
+        bool has_speed_direction;  // whether speed/direction should be flushed
+        bool has_functions;        // whether functions should be flushed
     };
 
     PendingQuery pending_queries[MAX_PENDING_QUERIES];
     uint16_t pending_query_count;
 
     /**
-     * Queue a command for an address whose Ecos object ID isn't known yet
-     * When address map is updated, these are processed
+     * Queue a speed/direction command for an address whose Ecos object ID
+     * isn't known yet. Upserts by address - if a function command for the
+     * same address is already queued, this only updates the speed/
+     * direction fields, leaving the queued functions untouched. When the
+     * address map is updated, these are processed by flushPendingQueries().
      */
     void queuePendingQuery(uint16_t address, uint8_t speed, uint8_t direction);
 
     /**
-     * Process all pending queries whose addresses are now in the map
+     * Queue a function command for an address whose Ecos object ID isn't
+     * known yet. Upserts by address - mirrors queuePendingQuery(), just for
+     * functions instead of speed/direction, so a speed change and a
+     * function change queued for the same loco while disconnected merge
+     * into one entry instead of competing for the small pending-query
+     * buffer.
+     */
+    void queuePendingFunctionQuery(uint16_t address, uint32_t functions);
+
+    /**
+     * Process all pending queries whose addresses are now in the map -
+     * replays only the field(s) each entry actually has queued
+     * (has_speed_direction/has_functions), not both unconditionally.
      */
     void flushPendingQueries();
 

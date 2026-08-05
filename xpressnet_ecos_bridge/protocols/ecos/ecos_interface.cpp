@@ -350,6 +350,7 @@ void EcosInterface::queuePendingQuery(uint16_t address, uint8_t speed, uint8_t d
         if (pending_queries[i].address == address) {
             pending_queries[i].speed = speed;
             pending_queries[i].direction = direction;
+            pending_queries[i].has_speed_direction = true;
             return;
         }
     }
@@ -362,6 +363,34 @@ void EcosInterface::queuePendingQuery(uint16_t address, uint8_t speed, uint8_t d
     pending_queries[pending_query_count].address = address;
     pending_queries[pending_query_count].speed = speed;
     pending_queries[pending_query_count].direction = direction;
+    pending_queries[pending_query_count].functions = 0;
+    pending_queries[pending_query_count].has_speed_direction = true;
+    pending_queries[pending_query_count].has_functions = false;
+    pending_query_count++;
+}
+
+void EcosInterface::queuePendingFunctionQuery(uint16_t address, uint32_t functions) {
+    // Mirrors queuePendingQuery() - see its comments for why upserting by
+    // address matters here too.
+    for (uint16_t i = 0; i < pending_query_count; i++) {
+        if (pending_queries[i].address == address) {
+            pending_queries[i].functions = functions;
+            pending_queries[i].has_functions = true;
+            return;
+        }
+    }
+
+    if (pending_query_count >= MAX_PENDING_QUERIES) {
+        DEBUG_ECOS_PRINTF("Pending query queue full\n");
+        return;
+    }
+
+    pending_queries[pending_query_count].address = address;
+    pending_queries[pending_query_count].speed = 0;
+    pending_queries[pending_query_count].direction = 1;
+    pending_queries[pending_query_count].functions = functions;
+    pending_queries[pending_query_count].has_speed_direction = false;
+    pending_queries[pending_query_count].has_functions = true;
     pending_query_count++;
 }
 
@@ -376,29 +405,49 @@ void EcosInterface::flushPendingQueries() {
         uint16_t obj_id = findEcosObjectId(pending_queries[i].address);
 
         if (obj_id > 0) {
-            // We now have the object ID, send the queued command. Direction
-            // before speed - see sendSpeedCommand() for why: real hardware
-            // testing 2026-08-03 showed sending speed first meant a
-            // genuine direction change landed correctly but speed read back
-            // as stale/0, consistent with Ecos building the real combined
-            // DCC packet from a not-yet-updated speed cache at the moment
-            // it processes a direction change. Direction was also captured
-            // in PendingQuery but never actually sent here at all until
-            // this same investigation - only speed was ever replayed.
+            // We now have the object ID, send the queued command(s) - only
+            // the field(s) this entry actually has queued, not both
+            // unconditionally (an entry queued from a pure function change
+            // must not also send a placeholder speed=0/dir=1, and vice
+            // versa).
             char cmd_buffer[80];
-            uint16_t len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].direction);
-            if (len > 0) {
-                wifi_client.write((uint8_t*)cmd_buffer, len);
+
+            if (pending_queries[i].has_speed_direction) {
+                // Direction before speed - see sendSpeedCommand() for why:
+                // real hardware testing 2026-08-03 showed sending speed
+                // first meant a genuine direction change landed correctly
+                // but speed read back as stale/0, consistent with Ecos
+                // building the real combined DCC packet from a
+                // not-yet-updated speed cache at the moment it processes a
+                // direction change.
+                uint16_t len = ecosBuildSetDirectionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].direction);
+                if (len > 0) {
+                    wifi_client.write((uint8_t*)cmd_buffer, len);
+                }
+
+                len = ecosBuildSetSpeedCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].speed);
+                if (len > 0) {
+                    wifi_client.write((uint8_t*)cmd_buffer, len);
+                    addToEchoQueue(pending_queries[i].address, ECHO_TYPE_SPEED, pending_queries[i].speed);
+                }
+
+                DEBUG_ECOS_PRINTF("Ecos TX: Flushed queued speed/direction for loco %u (speed=%u dir=%u)\n",
+                                  pending_queries[i].address, pending_queries[i].speed, pending_queries[i].direction);
             }
 
-            len = ecosBuildSetSpeedCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].speed);
-            if (len > 0) {
-                wifi_client.write((uint8_t*)cmd_buffer, len);
-                addToEchoQueue(pending_queries[i].address, ECHO_TYPE_SPEED, pending_queries[i].speed);
-            }
+            if (pending_queries[i].has_functions) {
+                // Same per-bit approach as sendFunctionCommand().
+                for (uint8_t fn = 0; fn < 32; fn++) {
+                    uint8_t state = (pending_queries[i].functions >> fn) & 1;
+                    uint16_t len = ecosBuildSetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, fn, state);
+                    if (len > 0) {
+                        wifi_client.write((uint8_t*)cmd_buffer, len);
+                    }
+                }
 
-            DEBUG_ECOS_PRINTF("Ecos TX: Flushed queued command for loco %u (speed=%u dir=%u)\n",
-                              pending_queries[i].address, pending_queries[i].speed, pending_queries[i].direction);
+                DEBUG_ECOS_PRINTF("Ecos TX: Flushed queued functions for loco %u = 0x%08x\n",
+                                  pending_queries[i].address, pending_queries[i].functions);
+            }
             // Don't add to remaining (discard this entry)
         } else {
             // Still don't have object ID, keep it in the buffer
@@ -606,14 +655,18 @@ void EcosInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t di
 }
 
 void EcosInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
-    if (current_status != ComponentStatus::CONNECTED) {
-        return;
-    }
-
+    // See sendSpeedCommand() - a master must keep transmitting regardless
+    // of connection state; no special "not connected" case is needed since
+    // address_map_count is always 0 while disconnected, so obj_id naturally
+    // comes back 0 below and routes into the same queue used for "loco not
+    // resolved yet" while connected. Real gap found in codebase audit
+    // 2026-08-05: this used to return early here, silently dropping any
+    // function command issued before the address map was populated or
+    // while Ecos was disconnected, unlike sendSpeedCommand() which queues.
     uint16_t obj_id = findEcosObjectId(address);
 
     if (obj_id == 0) {
-        // Unknown address, can't send yet
+        queuePendingFunctionQuery(address, functions);
         return;
     }
 

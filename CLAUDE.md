@@ -202,7 +202,7 @@ of this file instead.
 
 ---
 
-## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-6 and 9 done, 7-8 and 10 remaining)
+## 🎯 Phase 5: Feature Completion 🔧 IN PROGRESS (steps 1-7 and 9 done, 8 and 10 remaining)
 
 Goal: finish and harden the existing XpressNet+Ecos feature set - real bugs
 found during a full codebase audit (2026-08-03) plus every item deliberately
@@ -389,10 +389,39 @@ why this reordering turned out to be the right call.
      WMI-forced termination, intermittent "Access is denied" on the COM
      port, one capture showing a garbled repeating-fragment artifact) -
      resolved by a full PC reboot, unrelated to any firmware change here.
-7. **Function command reconnect-queue parity** - `sendFunctionCommand()`
-   currently just drops the command if the Ecos object ID isn't known yet,
-   unlike `sendSpeedCommand()` which queues via `queuePendingQuery()`. Same
-   Ecos-side function-command code path as steps 3-4-6.
+7. ✅ **Function command reconnect-queue parity - fixed and confirmed live
+   (2026-08-05)**. `EcosInterface::sendFunctionCommand()` used to silently
+   drop the command entirely if the Ecos object ID wasn't known yet
+   (disconnected, or address not yet in the map) - unlike
+   `sendSpeedCommand()`, which queues via `queuePendingQuery()` (the step 3
+   fix). A second, related gap found in the same pass:
+   `sendFunctionCommand()` still had an `if (current_status != CONNECTED)
+   return;` guard at the top - the exact pattern step 3 deliberately
+   removed from `sendSpeedCommand()`, since a master should keep
+   transmitting regardless and `findEcosObjectId()` already naturally
+   returns 0 while disconnected (address map clears on disconnect),
+   routing correctly into the queue.
+   - **Fix**: `PendingQuery` extended with `functions`/`has_functions`
+     fields alongside the existing `speed`/`direction` (now
+     `has_speed_direction`), so a speed change and a function change
+     queued for the same loco while disconnected merge into one upserted
+     entry instead of competing for the small `MAX_PENDING_QUERIES`
+     buffer - same upsert-by-address pattern already used for speed.
+     New `queuePendingFunctionQuery()` mirrors `queuePendingQuery()`.
+     `flushPendingQueries()` now replays only the field(s) each entry
+     actually has queued (not both unconditionally, which would send a
+     placeholder speed=0/dir=1 alongside a pure function-only queued
+     entry, or vice versa - same class of bug as step 9's
+     `has_speed`/`has_direction` fix). `sendFunctionCommand()` itself
+     queues via `queuePendingFunctionQuery()` on `obj_id == 0` instead of
+     returning.
+   - **Confirmed live**: disconnected Ecos (unplugged its LAN cable),
+     toggled two functions on the MultiMaus while disconnected, reconnected
+     Ecos - both functions correctly landed on Ecos once it came back
+     online, instead of being silently lost as before.
+   - No native test coverage added - `ecos_interface.cpp` is excluded from
+     the native build (hardware-coupled), same existing testing boundary
+     as the rest of this file; native suite unaffected, 126/126 passing.
 8. **Deferred OLED display fields** (lower-stakes polish, no dependencies):
    XNet "Last Msg" age (needs exposing through `ProtocolInterface`, touching
    the mock used by native tests) and Ecos round-trip latency (needs
@@ -537,8 +566,8 @@ All disabled features = zero compiled code overhead.
   tests were removed). Full step-by-step history in the changelog.
 - **Phase 4.6 (Hardware Procedures)**: ✅ Complete - see the dedicated section
   above for what was validated and the remaining backlog.
-- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-6 and 9 done,
-  7-8 and 10 remaining) - see the dedicated section below for the roadmap.
+- **Phase 5 (Feature Completion)**: 🔧 In progress (steps 1-7 and 9 done,
+  8 and 10 remaining) - see the dedicated section below for the roadmap.
 
 ---
 
@@ -912,46 +941,20 @@ a program track.
 confirmed on real hardware. **Phase 5 (Feature Completion) is in progress**,
 a 10-step ordered roadmap from a full codebase audit of everything deferred
 or stubbed in the existing XpressNet+Ecos feature set - see the dedicated
-section above. Steps 1-6 and 9 are now done; 7-8 and 10 remain. Step 6
-(`notifyXNetgiveLocoFunc` handler for XpressNet's F13-F28 status request,
-`0xE3`/`0x09`) mirrors the already-proven `onGiveLocoInfo`/`onGiveLocoMM`
-pattern and replies via the library's pre-existing but previously-unused
-`SetFktStatus()` - verified by code review and clean builds only, since
-real MultiMaus hardware uses a different combined request (`0xF0`) and
-never triggers this code path; confirmed the already-working
-`onLocoFunctionGroup` path correctly received a full range of function
-toggles in the same test, so this genuinely can't be exercised with the
-hardware on hand rather than being an overlooked bug. Steps 1-5 and 9 were
-confirmed live in the prior session. Step 5 (OLED function display) replaced
-the main page's "Fn: (TBD)"
-placeholder with a comma-separated list of active functions, truncated with
-"..." if it overflows the line - a hex bitmask was rejected as not
-human-readable, a full dedicated grid page deferred as a bigger separate
-feature. Found and fixed two real bugs along the way: only speed commands
-were updating the OLED's "last command" fields at all (function-only
-commands never did, so a pure headlight toggle wouldn't show up), and the
-truncation logic only checked for room to add "..." *after* already failing
-to fit the next entry, sometimes leaving no room left to signal truncation
-at all - fixed by reserving that room upfront. Native suite 126/126. Step 3
-(the fake outgoing Ecos command queue) took several rounds -
-a disconnect-detection gap, faster 10s detection, and a speed/direction
-command-order bug all found and fixed along the way. Step 4 (Ecos
-function-command merge bug, `functions_mask` instead of overwriting the
-whole bitmap, plus a `uint8_t`-truncation bug in the mask's own type) is
-confirmed live. Step 9 (MultiMaus "stolen icon" display refresh) was
-deliberately reordered ahead of steps 5-8 once step 4's live test exposed a
-live, real-state consequence of the same gap - root-caused via a real
-two-MultiMaus bus-instrumented investigation (a real slave's reply is
-unmarked wire data immediately following the master's own call-byte to
-that slot; our broadcasts never reproduced that timing) and fixed with a
-new `XpressNetMasterClass::PushExternalLocoUpdate()` in the vendored
-library. A second, independent bug surfaced by the same live testing -
-`CommandRouter::handleEcosCommand()` silently resetting whichever of
-speed/direction Ecos *didn't* report in a given event - is fixed too
-(`has_speed`/`has_direction` parameters, same pattern as step 4's mask).
-Ecos's dedicated direction switch not generating a standalone network
-event is flagged as a known, parked limitation (the zero-speed-detent
-method is a full working substitute). Native suite 122/122. Also fixed
-`platformio.ini`'s serial monitor auto-resetting the board on connect
-(`monitor_rts`/`monitor_dtr = 0`) and updated the boot splash layout per
-request - title text in the top 16 rows, logo below, no divider line.
+section above. Steps 1-7 and 9 are done; 8 and 10 remain. Full narrative
+detail for every step lives in `docs/CHANGELOG.md` (dated entries); this
+section is intentionally just current status.
+
+Most recent: **step 7** (function command reconnect-queue parity) fixed and
+confirmed live - `sendFunctionCommand()` now queues via a new
+`queuePendingFunctionQuery()` instead of silently dropping the command when
+the Ecos object ID isn't known yet, mirroring `sendSpeedCommand()`'s
+existing queue. Confirmed by disconnecting Ecos, toggling two functions,
+reconnecting - both correctly landed instead of being lost. **Step 6**
+(`notifyXNetgiveLocoFunc` handler) is implemented but verified by code
+review + clean builds only - real MultiMaus hardware uses a different
+request type and never triggers this path, confirmed by testing. **Step 9**
+(MultiMaus "stolen icon" refresh) and **step 5** (OLED function display)
+were confirmed live in prior sessions - see the dedicated Phase 5 step
+entries above for what each one covers. Native suite 126/126 passing;
+`env:native` and `env:wemos` both build clean.
