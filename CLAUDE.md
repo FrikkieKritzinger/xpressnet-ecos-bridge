@@ -657,6 +657,9 @@ All disabled features = zero compiled code overhead.
   verified by code review only; step 10 is v1-scoped, Ecos→XpressNet and a
   dedicated display page deliberately deferred) - see the dedicated section
   below for the full roadmap.
+- **Phase 6 (Future Improvements)**: 📋 Planned, not started - ordered
+  6-item roadmap (EEPROM, web config UI, OTA, Z21, LocoNet, TBD) - see the
+  dedicated section below.
 
 ---
 
@@ -1018,19 +1021,31 @@ rather than completed, since it served no design purpose.
 
 ---
 
-## Future Improvements (Beyond Phase 5)
+## 🎯 Phase 6: Future Improvements 📋 PLANNED (not started)
 
-Bus-wide E-stop, accessory/turnout control, and advanced function mapping are
-now tracked as ordered Phase 5 steps (see above), not here. CV/programming-track
-support was audited during Phase 5 planning but pulled out entirely - not
-currently planned, since the user's Ecos already handles this conveniently on
-a program track.
+Ordered and agreed 2026-08-14. CV/programming-track support was audited
+during Phase 5 planning but pulled out entirely - not currently planned,
+since the user's Ecos already handles this conveniently on a program track.
 
-- EEPROM storage of WiFi credentials and Ecos IP
-- Web-based configuration UI
-- OTA (over-the-air) firmware updates
-- LocoNet support (parallel to XpressNet)
-- Z21 LAN protocol support
+1. ⬜ **EEPROM storage** - persist settings across reboots/reflashes instead
+   of compile-time-only `config.h` values. Candidates: WiFi SSID/password,
+   Ecos IP, `XPRESSNET_BUS_TIMEOUT` (already flagged in `config.h` as a
+   per-layout judgment call worth retuning without a reflash), protocol
+   enable flags (`ENABLE_LOCONET`/`ENABLE_Z21_LAN` once built), debug
+   flags. Explicitly NOT for hardware-fixed constants (pins, baud rate,
+   buffer sizes) - those stay compile-time. Deliberately sequenced before
+   the web UI below so it has real persistence to write to from day one,
+   not RAM-only edits that vanish on reboot.
+2. ⬜ **Web-based configuration UI** - backed by the EEPROM storage from
+   step 1.
+3. ⬜ **OTA (over-the-air) firmware updates**
+4. ⬜ **Z21 LAN protocol support** - for WLANmaus
+5. ⬜ **LocoNet support** - parallel to XpressNet
+6. ⬜ **TBD** - deliberately left open; revisit once steps 1-5 are further
+   along and it's clearer what's still missing. Accessory/turnout v2
+   (Ecos-sourced changes reaching XpressNet, plus a dedicated OLED page -
+   deliberately parked during Phase 5 step 10) is the leading candidate but
+   not committed to yet.
 
 ---
 
@@ -1042,18 +1057,13 @@ see the dedicated section above. Full narrative detail for every step lives
 in `docs/CHANGELOG.md` (dated entries); this section is intentionally just
 current status.
 
-Most recent: **step 10** (accessory/turnout support) implemented and
-confirmed live, scoped to v1 (XpressNet → Ecos only; the reverse direction
-and a dedicated display page deliberately deferred - see the step 10 entry
-above for why). Two real bugs found and fixed via live testing: an
-addressing offset traced to the official Lenz XpressNet spec's own
-`(turnout_number-1)/4` formula (a documented protocol convention, not a
-MultiMaus quirk), and inverted straight/diverging port letters. A risky
-diagnostic detour (temporary `Serial.printf()`s inside the vendored
-library's time-critical bus dispatch, which froze real XpressNet
-communication) was fully reverted before the actual root cause was found
-from spec text instead. Native suite 138/138 passing; `env:native` and
-`env:wemos` both build clean.
+Most recent: Phase 5 closed out entirely (all 10 steps, confirmed live
+except step 6 - code review only), tagged `v0.5.0-phase5-complete` and
+pushed. **Phase 6 (Future Improvements) is now planned** (see the
+dedicated section above) - an ordered 6-item roadmap agreed 2026-08-14:
+EEPROM storage, web-based config UI, OTA updates, Z21 LAN, LocoNet, and a
+deliberately open 6th slot. Nothing implemented yet - next session should
+start with step 1 (EEPROM storage) unless redirected.
 
 With Phase 5 complete, there's no active roadmap item right now - see
 "Future Improvements" above for longer-term, not-yet-scheduled ideas
