@@ -89,6 +89,20 @@ public:
     void handleEcosFunctionCommand(uint16_t address, uint32_t functions, uint32_t functions_mask);
 
     /**
+     * Handle an accessory/turnout command (Phase 5 step 10, v1: XpressNet
+     * source only - a throttle threw a turnout). Forwards to Ecos via
+     * ProtocolInterface::sendAccessoryCommand() and records it as the
+     * single most recent accessory command for OLED display. No
+     * StateEngine/expiry involved - accessories aren't ephemeral the way
+     * locos are, and v1 doesn't track per-address state at all, only "the
+     * last one commanded."
+     * @param address DCC accessory address
+     * @param diverging false = straight, true = diverging
+     * @param source Only LocoSource::XPRESSNET does anything in v1
+     */
+    void handleAccessoryCommand(uint16_t address, bool diverging, LocoSource source);
+
+    /**
      * Bus-wide emergency stop / track power off. Forces every known loco's
      * speed to 0 (in StateEngine and broadcast to XpressNet), plus tells
      * whichever side didn't originate the request about the global stop -
@@ -179,6 +193,15 @@ private:
         LocoSource source = LocoSource::UNKNOWN;
     };
     LastCommandInfo last_command;
+
+    // Last accessory/turnout command, for display (Phase 5 step 10, v1 -
+    // no per-address tracking, just the single most recent one, matching
+    // the OLED's "Last accessory" line)
+    struct LastAccessoryInfo {
+        uint16_t address = 0;
+        bool diverging = false;
+    };
+    LastAccessoryInfo last_accessory;
 
     // Periodic task tracking
     unsigned long last_expiry_check = 0;

@@ -143,6 +143,22 @@ public:
      * request/reply shape to measure.
      */
     virtual unsigned long getLastHeartbeatLatencyMs() const { return NO_TIMESTAMP; }
+
+    /**
+     * Send an accessory/turnout command (Phase 5 step 10, v1: XpressNet ->
+     * Ecos only - no Ecos-sourced accessory path exists yet). No-op by
+     * default; only Ecos overrides this so far. Protocol-specific pulse
+     * timing (if any) is handled by the concrete implementation - Ecos's
+     * own set(11, switch[...]) is a single complete command, it generates
+     * the real DCC activate/deactivate pulse on its own side, so no pulse
+     * state machine is needed here.
+     * @param address DCC accessory address
+     * @param diverging false = straight, true = diverging
+     */
+    virtual void sendAccessoryCommand(uint16_t address, bool diverging) {
+        (void)address;
+        (void)diverging;
+    }
 };
 
 // ============================================================================

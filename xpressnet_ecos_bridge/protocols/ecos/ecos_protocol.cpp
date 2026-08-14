@@ -73,6 +73,19 @@ uint16_t ecosBuildSystemGoCmd(char* buffer, uint16_t buffer_size) {
     return (len > 0) ? len : 0;
 }
 
+uint16_t
+ecosBuildSetAccessoryCmd(char* buffer, uint16_t buffer_size, uint16_t address, bool diverging) {
+    if (!buffer || buffer_size < 30) return 0;
+    // Port letter confirmed live 2026-08-05 against real hardware - the
+    // spec's own example doesn't spell out g/r's meaning, and the initial
+    // context-inferred guess (g=straight, r=diverging) turned out to be
+    // backwards: a real MultiMaus's "straight"/"diverging" showed up
+    // inverted on the Ecos side until swapped to this mapping.
+    int len = snprintf(buffer, buffer_size, "set(%u, switch[DCC%u%c])\n",
+                        ECOS_OBJECT_ACCESSORY_MANAGER, address, diverging ? 'g' : 'r');
+    return (len > 0) ? len : 0;
+}
+
 // ============================================================================
 // PROTOCOL PARSING HELPERS
 // ============================================================================

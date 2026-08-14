@@ -84,6 +84,12 @@ public:
         return mock_heartbeat_latency_ms;
     }
 
+    void sendAccessoryCommand(uint16_t address, bool diverging) override {
+        last_accessory_command.address = address;
+        last_accessory_command.diverging = diverging;
+        accessory_command_count++;
+    }
+
     // ========================================================================
     // TESTING INTERFACE - Verification and control
     // ========================================================================
@@ -101,6 +107,11 @@ public:
         unsigned long timestamp_ms;
     };
 
+    struct AccessoryCommand {
+        uint16_t address;
+        bool diverging;
+    };
+
     // Query call history
     bool wasBeginCalled() const { return begin_called; }
     int getUpdateCallCount() const { return update_call_count; }
@@ -111,6 +122,7 @@ public:
     int getEmergencyStopCallCount() const { return emergency_stop_call_count; }
     int getResumeOperationCallCount() const { return resume_operation_call_count; }
     int getPushLocoStateCallCount() const { return push_loco_state_call_count; }
+    int getAccessoryCommandCount() const { return accessory_command_count; }
     uint16_t getLastPushedAddress() const { return last_pushed_address; }
     uint16_t getLastSubscribedAddress() const { return last_subscribed_address; }
     uint16_t getLastUnsubscribedAddress() const { return last_unsubscribed_address; }
@@ -118,6 +130,7 @@ public:
     // Get last commands sent
     const SpeedCommand& getLastSpeedCommand() const { return last_speed_command; }
     const FunctionCommand& getLastFunctionCommand() const { return last_function_command; }
+    const AccessoryCommand& getLastAccessoryCommand() const { return last_accessory_command; }
 
     // Manual status control for testing
     void setStatus(ComponentStatus status) { current_status = status; }
@@ -135,11 +148,13 @@ public:
         emergency_stop_call_count = 0;
         resume_operation_call_count = 0;
         push_loco_state_call_count = 0;
+        accessory_command_count = 0;
         last_subscribed_address = 0;
         last_unsubscribed_address = 0;
         last_pushed_address = 0;
         last_speed_command = {0, 0, 0, 0};
         last_function_command = {0, 0, 0};
+        last_accessory_command = {0, false};
     }
 
 private:
@@ -158,6 +173,7 @@ private:
     int emergency_stop_call_count;
     int resume_operation_call_count;
     int push_loco_state_call_count;
+    int accessory_command_count;
     uint16_t last_subscribed_address;
     uint16_t last_unsubscribed_address;
     uint16_t last_pushed_address;
@@ -165,6 +181,7 @@ private:
     // Command history
     SpeedCommand last_speed_command;
     FunctionCommand last_function_command;
+    AccessoryCommand last_accessory_command;
 };
 
 #endif  // MOCK_PROTOCOL_INTERFACE_H

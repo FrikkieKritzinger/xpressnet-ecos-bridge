@@ -212,6 +212,31 @@ public:
      */
     void onLocoFunctionGroup(uint16_t address, uint8_t group, uint8_t bits);
 
+    /**
+     * Handle an accessory/turnout command (XpressNet header 0x52/0x53,
+     * "Accessory Decoder operation request"). Real hardware testing
+     * 2026-08-05 confirmed a MultiMaus always sends a fresh command on
+     * every button press - even re-selecting a state it already believes
+     * it's in - so this can safely forward every activate edge without
+     * needing to track "did this actually change" itself. The library
+     * sends both an activate (data bit3=1) and, a moment later, a
+     * deactivate (bit3=0) for the same press; only the activate edge is
+     * forwarded - Ecos's own set(11, switch[...]) is a single complete
+     * command and generates the real DCC pulse timing on its own side, so
+     * there's nothing useful to do with the deactivate half here. Also
+     * applies a real, confirmed +1 correction to the address - a
+     * MultiMaus transmits the user-entered DCC address minus 1 on the
+     * wire, while Ecos's own addressing matches the wire value directly,
+     * so +1 reconstructs the address the operator actually intended.
+     * @param address Raw DCC accessory address as resolved by the library
+     *                from the decoder+port bytes (wire value, one less
+     *                than what the operator entered on the MultiMaus)
+     * @param data Raw wire byte: 0000 ABBP (A=activate, BB=decoder port,
+     *             P=straight(0)/diverging(1) - BB is redundant with what's
+     *             already folded into address)
+     */
+    void onTurnoutCommand(uint16_t address, uint8_t data);
+
 private:
     // Hardware state
     ComponentStatus current_status;         // CONNECTED, DISCONNECTED, ERROR

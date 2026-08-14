@@ -171,6 +171,67 @@ void test_router_ecos_function_command_partial_update_can_clear_a_bit(void) {
 }
 
 // ============================================================================
+// TESTS - ACCESSORY / TURNOUT COMMANDS (Phase 5 step 10, v1)
+// ============================================================================
+
+void test_router_accessory_command_forwards_to_ecos(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(5, true, LocoSource::XPRESSNET);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getAccessoryCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(5, ecos_mock.getLastAccessoryCommand().address);
+    TEST_ASSERT_TRUE(ecos_mock.getLastAccessoryCommand().diverging);
+}
+
+void test_router_accessory_command_straight_forwards_correctly(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(5, false, LocoSource::XPRESSNET);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getAccessoryCommandCount());
+    TEST_ASSERT_FALSE(ecos_mock.getLastAccessoryCommand().diverging);
+}
+
+void test_router_accessory_command_from_ecos_does_not_forward_anywhere(void) {
+    // v1 is XpressNet -> Ecos only - no Ecos-sourced accessory path exists
+    // yet. Included as a regression guard for when that's added later.
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleAccessoryCommand(5, true, LocoSource::ECOS);
+
+    TEST_ASSERT_EQUAL_INT(0, xnet_mock.getAccessoryCommandCount());
+}
+
+void test_router_accessory_command_rejects_invalid_address(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(0, true, LocoSource::XPRESSNET);
+
+    TEST_ASSERT_EQUAL_INT(0, ecos_mock.getAccessoryCommandCount());
+}
+
+void test_router_accessory_command_surfaces_in_system_status(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(5, true, LocoSource::XPRESSNET);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT16(5, status.last_accessory_address);
+    TEST_ASSERT_TRUE(status.last_accessory_diverging);
+}
+
+// ============================================================================
 // TESTS - ECHO PREVENTION
 // ============================================================================
 
@@ -744,6 +805,12 @@ int main(void) {
     RUN_TEST(test_router_ecos_function_command_updates_existing_loco);
     RUN_TEST(test_router_ecos_function_command_merges_partial_update);
     RUN_TEST(test_router_ecos_function_command_partial_update_can_clear_a_bit);
+
+    RUN_TEST(test_router_accessory_command_forwards_to_ecos);
+    RUN_TEST(test_router_accessory_command_straight_forwards_correctly);
+    RUN_TEST(test_router_accessory_command_from_ecos_does_not_forward_anywhere);
+    RUN_TEST(test_router_accessory_command_rejects_invalid_address);
+    RUN_TEST(test_router_accessory_command_surfaces_in_system_status);
 
     RUN_TEST(test_router_echo_prevention_opposite_source_suppressed);
     RUN_TEST(test_router_echo_prevention_reverse_direction_suppressed);

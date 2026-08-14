@@ -782,6 +782,19 @@ void EcosInterface::sendResumeOperation() {
     }
 }
 
+void EcosInterface::sendAccessoryCommand(uint16_t address, bool diverging) {
+    if (current_status != ComponentStatus::CONNECTED) {
+        return;
+    }
+
+    char cmd_buffer[40];
+    uint16_t len = ecosBuildSetAccessoryCmd(cmd_buffer, sizeof(cmd_buffer), address, diverging);
+    if (len > 0) {
+        wifi_client.write((uint8_t*)cmd_buffer, len);
+        DEBUG_ECOS_PRINTF("Ecos TX: Accessory %u -> %s\n", address, diverging ? "diverging" : "straight");
+    }
+}
+
 // ============================================================================
 // COMMAND ROUTER INTEGRATION
 // ============================================================================

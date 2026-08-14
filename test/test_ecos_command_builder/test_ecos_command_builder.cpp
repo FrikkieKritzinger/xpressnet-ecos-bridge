@@ -180,6 +180,26 @@ void test_ecos_build_system_stop_rejects_undersized_buffer(void) {
     TEST_ASSERT_EQUAL_INT(0, len);
 }
 
+void test_ecos_build_accessory_straight(void) {
+    // Port letter confirmed live 2026-08-05 - r=straight, g=diverging
+    // (the initial spec-inferred guess was backwards)
+    int len = ecosBuildSetAccessoryCmd(cmd_buffer, sizeof(cmd_buffer), 5, false);
+    TEST_ASSERT_TRUE(len > 0);
+    TEST_ASSERT_EQUAL_STRING("set(11, switch[DCC5r])\n", cmd_buffer);
+}
+
+void test_ecos_build_accessory_diverging(void) {
+    int len = ecosBuildSetAccessoryCmd(cmd_buffer, sizeof(cmd_buffer), 5, true);
+    TEST_ASSERT_TRUE(len > 0);
+    TEST_ASSERT_EQUAL_STRING("set(11, switch[DCC5g])\n", cmd_buffer);
+}
+
+void test_ecos_build_accessory_rejects_undersized_buffer(void) {
+    char tiny_buffer[5];
+    int len = ecosBuildSetAccessoryCmd(tiny_buffer, sizeof(tiny_buffer), 5, false);
+    TEST_ASSERT_EQUAL_INT(0, len);
+}
+
 // ============================================================================
 // TESTS - COMMAND FORMAT
 // ============================================================================
@@ -260,6 +280,9 @@ int main(void) {
     RUN_TEST(test_ecos_build_system_stop);
     RUN_TEST(test_ecos_build_system_go);
     RUN_TEST(test_ecos_build_system_stop_rejects_undersized_buffer);
+    RUN_TEST(test_ecos_build_accessory_straight);
+    RUN_TEST(test_ecos_build_accessory_diverging);
+    RUN_TEST(test_ecos_build_accessory_rejects_undersized_buffer);
 
     RUN_TEST(test_ecos_command_includes_trailing_newline);
 

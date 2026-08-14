@@ -127,6 +127,11 @@ struct SystemStatus {
     // "no value yet" (see ProtocolInterface::NO_TIMESTAMP)
     unsigned long xnet_last_message_age_ms;
     unsigned long ecos_heartbeat_latency_ms;
+
+    // Last accessory/turnout command processed (0 address = none yet), for
+    // display (Phase 5 step 10, v1)
+    uint16_t last_accessory_address;
+    bool last_accessory_diverging;
 };
 
 // ============================================================================

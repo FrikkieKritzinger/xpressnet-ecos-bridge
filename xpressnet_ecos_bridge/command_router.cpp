@@ -366,6 +366,37 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
 }
 
 // ============================================================================
+// ACCESSORY / TURNOUT COMMANDS
+// ============================================================================
+
+void CommandRouter::handleAccessoryCommand(uint16_t address, bool diverging, LocoSource source) {
+    DEBUG_PRINTF("Accessory: Addr=%u -> %s (source=%d)\n",
+                 address, diverging ? "diverging" : "straight", (int)source);
+
+    if (!isValidDccAddress(address)) {
+        DEBUG_PRINTF("ERROR: Invalid accessory address: %u\n", address);
+        return;
+    }
+
+    last_accessory.address = address;
+    last_accessory.diverging = diverging;
+
+    // v1: XpressNet -> Ecos only. No Ecos-sourced accessory path exists
+    // yet, and no echo prevention is needed for that reason - Ecos has no
+    // way to report an accessory change back to us in v1 that could ever
+    // loop back to XpressNet.
+    if (source == LocoSource::XPRESSNET) {
+        #if ENABLE_ECOS_LAN
+        if (ecos != nullptr) {
+            ecos->sendAccessoryCommand(address, diverging);
+        }
+        #endif
+    }
+
+    total_commands_count++;
+}
+
+// ============================================================================
 // EMERGENCY STOP / RESUME
 // ============================================================================
 
@@ -646,6 +677,10 @@ SystemStatus CommandRouter::getSystemStatus() const {
     status.last_command_direction = last_command.direction;
     status.last_command_functions = last_command.functions;
     status.last_command_source = last_command.source;
+
+    // Last accessory command (Phase 5 step 10, v1)
+    status.last_accessory_address = last_accessory.address;
+    status.last_accessory_diverging = last_accessory.diverging;
 
     return status;
 }

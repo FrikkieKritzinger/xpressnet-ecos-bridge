@@ -7,6 +7,140 @@ here. Newest entries first.
 
 ---
 
+**2026-08-05 — Phase 5 step 10: accessory/turnout support v1, confirmed live (Phase 5 now fully complete)**
+
+- **Scope decision, made before writing any code**: the original roadmap
+  description for step 10 mentioned "new interface methods, accessory
+  state storage, routing, Ecos-side switch/turnout protocol support, and a
+  display page" without committing to a direction. A design discussion
+  landed on splitting this into v1 (XpressNet → Ecos only) and a
+  deliberately deferred v2 (Ecos → XpressNet, plus a dedicated OLED
+  page) - **v2 was explicitly marked on hold, not a near-term follow-up**.
+  Reasoning: v2 would require fully replicating the loco-parity
+  address-map + per-accessory `request(id, view)` subscription
+  infrastructure a second time (confirmed against the official ESU spec,
+  section 7.12 "Listenobjekt Schaltartikel" - itself marked "(in Planung)"
+  in ESU's own documentation), for a benefit that's purely cosmetic
+  (keeping a throttle-side display in sync) - real hardware testing
+  confirmed a MultiMaus's accessory keyboard always transmits a fresh
+  command on every button press regardless of what it currently believes
+  the turnout's state is (three repeated presses of the same direction in
+  a row each produced a full, identical activate→deactivate message
+  pair), so there's no functional gap without v2, only possible display
+  staleness on a UI that itself doesn't persistently track state anyway
+  (confirmed live: the MultiMaus's own turnout icon shows both routes
+  active by default, briefly shows the just-commanded direction, then
+  reverts to "both active" after a few seconds - it has nothing to
+  compare a redundant press against, which is likely *why* it never
+  suppresses one). Also decided against a dedicated OLED accessory page -
+  without v2 the bridge only ever knows what it last commanded, not
+  Ecos-confirmed truth, so a single "Last accessory: addr X → Str/Div"
+  line on the main page (symmetric to the existing loco line) is a more
+  honest scope than a page that would otherwise imply live status.
+
+- **Cheap pre-implementation test, before committing to any design**:
+  rather than build the real feature on an untested assumption, a
+  temporary logging-only `notifyXNetTrnt`/`notifyXNetTrntInfo` (no
+  routing, no CommandRouter/Ecos involvement) was added to watch what a
+  real MultiMaus actually transmits. Confirmed live: pressing "straight"
+  three times in a row on the same turnout produced three complete,
+  identical activate→deactivate pairs (`0x88`→`0x80` each time) - no
+  suppression of a "redundant" press. This is the same
+  research-before-code pattern used successfully earlier this project
+  (e.g. the step 9 investigation's temporary library instrumentation).
+
+- **Implementation**:
+  - `ProtocolInterface::sendAccessoryCommand(address, diverging)` (new,
+    no-op-by-default virtual) - only `EcosInterface` overrides it in v1.
+  - `XpressNetInterface::onTurnoutCommand(address, data)` wired to the
+    vendored library's `notifyXNetTrnt` (header `0x52`/`0x53`, "Accessory
+    Decoder operation request" - previously unimplemented, silently
+    dropped by the library). Reacts only on the activate edge (data
+    bit3=1); the deactivate half (bit3=0, sent by the MultiMaus a moment
+    later for the same press) is ignored - Ecos's own
+    `set(11, switch[...])` is a single complete command and generates the
+    real DCC pulse timing on its own side, so there's nothing to do with
+    a separate deactivate signal on our end.
+  - `CommandRouter::handleAccessoryCommand(address, diverging, source)`
+    (new) - no `StateEngine`/expiry involvement, since accessories aren't
+    ephemeral the way locos are and v1 only tracks the single most recent
+    command, not a per-address table. Forwards to Ecos only when
+    `source == LocoSource::XPRESSNET` (v1 has no Ecos-sourced path).
+  - `EcosInterface::sendAccessoryCommand()` builds
+    `set(11, switch[DCC<address><port>])` via new
+    `ecosBuildSetAccessoryCmd()`, sent directly against a new
+    `ECOS_OBJECT_ACCESSORY_MANAGER` (id=11, official ESU spec section
+    7.4) - no per-accessory object ID lookup or address-map needed at
+    all, unlike locomotives, since this command form addresses by
+    protocol+address+port directly. No-op while disconnected, matching
+    `sendEmergencyStop()`/`sendResumeOperation()`'s existing pattern - a
+    point-in-time command like this doesn't have obvious value queued for
+    whenever a reconnect eventually happens, unlike locomotive state.
+  - OLED: new "Last accessory: addr X → Str/Div" line added to the main
+    page (there was unused vertical space below the existing 4 lines -
+    `LINE_HEIGHT_SMALL` is 8px, not the ~12px assumed during Phase 5 step
+    5's design discussion, so a 5th line fits comfortably within the
+    64px display).
+
+- **Bug 1, found via live testing: accessory address off by one.**
+  MultiMaus address 3 arrived at Ecos as address 2, consistently (address
+  2 → arrived as 1). Traced to the **official Lenz XpressNet
+  specification** (`libraries/XpressNetMaster/extras/XpressNet V4_0.pdf`,
+  section 3.38 "Schaltbefehl"), which explicitly defines the wire-level
+  address field as `(Weichennummer-1) / 4` ("(turnout number - 1) / 4") -
+  a real, documented 0-vs-1-indexing convention specific to accessory
+  addressing (confirmed distinct from locomotive addressing, which has no
+  such offset anywhere in this project). The vendored library's existing
+  bit-recombination formula for this command
+  (`(data1 << 2) | port_bits`, i.e. `data1 × 4 + port_bits`) already
+  reverses the spec's "divide by 4, keep remainder separately" split
+  (`floor(x/4)×4 + (x mod 4) = x` for any integer x, per Data 2's own
+  documented meaning - "the two LSBs of the turnout address that were
+  lost during the division by 4") - so what reaches `onTurnoutCommand()`
+  is exactly `turnout_number - 1`, and a `+1` correction there
+  reconstructs the address the operator actually intended, applied before
+  the value reaches either the OLED display or the Ecos command. Verified
+  this is spec-mandated behavior every compliant XpressNet device must
+  implement, not a MultiMaus-specific quirk that would break
+  interoperability with other DCC controllers - any correctly-built
+  XpressNet receiver has to perform this same conversion.
+- **Bug 2, found via the same live testing: straight/diverging inverted.**
+  The initial port-letter mapping (`g`=straight, `r`=diverging) was a
+  context-inferred guess, since the official Ecos spec's own example
+  (`set(11, switch[MOT10r])`) doesn't spell out what the letters mean.
+  Real hardware showed the opposite - corrected to `r`=straight,
+  `g`=diverging.
+- **A risky diagnostic detour during the address investigation, fully
+  reverted**: to see the raw wire bytes directly, temporary
+  `Serial.printf()` calls were added inside the vendored library's
+  `XNetAnalyseReceived()` dispatch switch (cases `0x52`/`0x53`) - this
+  froze real XpressNet bus communication, observed as the MultiMaus
+  showing "err13". Root cause: `Serial.printf()` at 115200 baud is slow
+  enough (several milliseconds for a short string) to blow XpressNet's
+  tight response-time budget when it executes inside the actual
+  message-dispatch hot path, unlike the earlier-established pattern of
+  printing from within a *callback* (which had worked without incident
+  earlier in the same test session) - stacking a second print on top of
+  an already-present one is what tipped it over. Fully reverted via
+  `git checkout` before any further work (confirmed byte-identical to the
+  last commit), and the addressing question was root-caused afterward
+  from the official spec text instead of further hardware-touching
+  diagnostics - worth remembering for future hardware debugging:
+  diagnostic prints inside a library's own time-critical dispatch path
+  are meaningfully riskier than prints inside the higher-level callback
+  layer, even though both look similar at first glance.
+- 8 new tests (5 `test_command_router` covering forwarding, address
+  validation, `LocoSource::ECOS` correctly not forwarding in v1, and
+  `SystemStatus` surfacing; 3 `test_ecos_command_builder` covering the
+  builder's straight/diverging output and undersized-buffer rejection).
+  Native suite 138/138 passing. `onTurnoutCommand()` and
+  `sendAccessoryCommand()` themselves have no native coverage - same
+  hardware-coupled boundary as the rest of `xpressnet_interface.cpp`/
+  `ecos_interface.cpp`.
+- **This closes out Phase 5 entirely - all 10 steps are now done.**
+
+---
+
 **2026-08-05 — Phase 5 step 8: deferred OLED display fields, confirmed live (Phase 5 steps 1-9 now all done)**
 
 - **XNet "Last Msg" age**: `XpressNetInterface` already tracked

@@ -27,6 +27,12 @@
 // system-wide command distinct from setting any one locomotive's speed.
 #define ECOS_OBJECT_BASE_SYSTEM         1
 
+// Accessory (SchaltartikelManager) base object - set(11, switch[...]) sets
+// an accessory directly by protocol+address+port, unlike locomotives no
+// per-accessory object ID / address-map lookup is needed to send a command
+// (official ESU PC-Interface spec, section 7.4).
+#define ECOS_OBJECT_ACCESSORY_MANAGER   11
+
 // ============================================================================
 // ECOS COMMAND FORMAT CONSTANTS
 // ============================================================================
@@ -155,6 +161,27 @@ uint16_t ecosBuildSystemStopCmd(char* buffer, uint16_t buffer_size);
  * @return Number of bytes written, or 0 if buffer too small
  */
 uint16_t ecosBuildSystemGoCmd(char* buffer, uint16_t buffer_size);
+
+/**
+ * Build an accessory/turnout set command - directly by protocol+address+
+ * port against the fixed ECOS_OBJECT_ACCESSORY_MANAGER object, no
+ * per-accessory object ID lookup needed (official spec, section 7.4).
+ * Returns: "set(11, switch[DCC<address><port>])\n", e.g. "set(11,
+ * switch[DCC5r])\n"
+ *
+ * Port letter (r=straight, g=diverging) confirmed live 2026-08-05 against
+ * real Ecos hardware via its own GUI - the spec's own example doesn't
+ * spell out g/r's meaning, and the initial context-inferred guess turned
+ * out backwards.
+ *
+ * @param buffer Destination for the command string
+ * @param buffer_size Size of the destination buffer
+ * @param address DCC accessory address
+ * @param diverging false = straight (r), true = diverging (g)
+ * @return Number of bytes written, or 0 if buffer too small
+ */
+uint16_t ecosBuildSetAccessoryCmd(char* buffer, uint16_t buffer_size,
+                                  uint16_t address, bool diverging);
 
 // ============================================================================
 // PROTOCOL PARSING HELPERS

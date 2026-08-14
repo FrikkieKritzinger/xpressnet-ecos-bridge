@@ -301,6 +301,17 @@ void OledDisplay::drawMainScreen() {
     } else {
         display.print(F("--"));
     }
+
+    // Last accessory/turnout command (Phase 5 step 10, v1) - just the
+    // single most recent one, not a per-address table.
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 4);
+    if (current_status.last_accessory_address > 0) {
+        display.print(F("Acc "));
+        display.print(current_status.last_accessory_address);
+        display.print(current_status.last_accessory_diverging ? F(": Div") : F(": Str"));
+    } else {
+        display.print(F("Acc: (none yet)"));
+    }
 }
 
 // ============================================================================

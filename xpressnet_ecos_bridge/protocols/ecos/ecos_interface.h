@@ -119,6 +119,17 @@ public:
     }
 
     /**
+     * Send an accessory/turnout command directly to the fixed
+     * ECOS_OBJECT_ACCESSORY_MANAGER object ("set(11, switch[...])") - no
+     * per-accessory object ID lookup needed, unlike locomotives. No-op
+     * while disconnected, same as sendEmergencyStop()/sendResumeOperation()
+     * - a point-in-time command like this doesn't have obvious value in
+     * being queued for delivery whenever a reconnect eventually happens,
+     * unlike locomotive state which stays continuously relevant.
+     */
+    void sendAccessoryCommand(uint16_t address, bool diverging) override;
+
+    /**
      * Set reference to command router (called after construction)
      * @param router Pointer to CommandRouter instance
      */

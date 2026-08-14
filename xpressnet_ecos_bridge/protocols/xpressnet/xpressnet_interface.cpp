@@ -68,6 +68,12 @@ void notifyXNetgiveLocoFunc(uint8_t UserOps, uint16_t Address) {
     }
 }
 
+void notifyXNetTrnt(uint16_t Address, uint8_t data) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onTurnoutCommand(Address, data);
+    }
+}
+
 void notifyXNetPower(uint8_t State) {
     if (g_xnet_instance) {
         g_xnet_instance->onPowerStateChange(State);
@@ -480,6 +486,46 @@ void XpressNetInterface::onLocoFunctionGroup(uint16_t address, uint8_t group, ui
 
     DEBUG_XNET_PRINTF("XpressNet RX: Function group %u - Addr=%u Fn=0x%08lx\n", group, address, (unsigned long)functions);
     router->handleXpressNetFunctionCommand(address, functions);
+}
+
+void XpressNetInterface::onTurnoutCommand(uint16_t address, uint8_t data) {
+    // Real hardware confirmed 2026-08-05: a MultiMaus transmits the
+    // user-entered DCC address minus 1 on the wire (entering address 3 on
+    // the MultiMaus sends wire value 2) - a real, fixed protocol-level
+    // shift, not a MultiMaus roster/configuration artifact, since the
+    // MultiMaus's own accessory control takes the DCC address as direct
+    // user input. Ecos's own addressing matches the wire value directly
+    // (an Ecos accessory configured as "address 2" responded to XNet's
+    // wire value 2, i.e. the MultiMaus's typed "3") - so +1 reconstructs
+    // the address the operator actually intended, which both the OLED
+    // display and the Ecos command below should use, not the raw wire
+    // value.
+    uint16_t corrected_address = address + 1;
+
+    if (!isValidDccAddress(corrected_address)) {
+        return;
+    }
+
+    // See onGiveLocoInfo() - a real parsed message from a device on the bus.
+    markBusActivity();
+
+    bool activate = (data >> 3) & 0x01;
+    if (!activate) {
+        // The deactivate/release half of the pulse - see header comment
+        // for why only the activate edge is forwarded.
+        return;
+    }
+
+    bool diverging = data & 0x01;
+
+    if (!router) {
+        DEBUG_XNET_PRINTF("XpressNet: WARNING - router not set, dropping command\n");
+        return;
+    }
+    router->handleAccessoryCommand(corrected_address, diverging, LocoSource::XPRESSNET);
+
+    DEBUG_XNET_PRINTF("XpressNet RX: Accessory - Addr=%u (wire=%u) -> %s\n",
+                       corrected_address, address, diverging ? "diverging" : "straight");
 }
 
 // ============================================================================
