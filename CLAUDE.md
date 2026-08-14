@@ -986,6 +986,14 @@ rather than completed, since it served no design purpose.
   narrative (root cause, investigation, exact numbers) in
   [docs/CHANGELOG.md](docs/CHANGELOG.md); only update this file's status sections
   if the current state actually changed.
+- **Tag every major milestone**: when a phase (or an equally large, independently
+  shippable unit of work) completes, commit the final state, then create an
+  annotated git tag on that commit (`vMAJOR.MINOR.0-<slug>`, e.g.
+  `v0.5.0-phase5-complete`) summarizing what the milestone covered, and push
+  both the commit and the tag to origin - unprompted, as part of closing out
+  the milestone, the same standing authorization that already covers
+  CLAUDE.md commits/pushes at checkpoints. Don't tag individual steps within a
+  phase, only the phase (or equivalent) completing.
 
 ---
 
