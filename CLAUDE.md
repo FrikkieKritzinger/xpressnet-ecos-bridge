@@ -1028,14 +1028,34 @@ during Phase 5 planning but pulled out entirely - not currently planned,
 since the user's Ecos already handles this conveniently on a program track.
 
 1. ⬜ **EEPROM storage** - persist settings across reboots/reflashes instead
-   of compile-time-only `config.h` values. Candidates: WiFi SSID/password,
-   Ecos IP, `XPRESSNET_BUS_TIMEOUT` (already flagged in `config.h` as a
-   per-layout judgment call worth retuning without a reflash), protocol
-   enable flags (`ENABLE_LOCONET`/`ENABLE_Z21_LAN` once built), debug
-   flags. Explicitly NOT for hardware-fixed constants (pins, baud rate,
-   buffer sizes) - those stay compile-time. Deliberately sequenced before
-   the web UI below so it has real persistence to write to from day one,
-   not RAM-only edits that vanish on reboot.
+   of compile-time-only `config.h` values. **Scope finalized 2026-08-14,
+   exactly 4 fields**: WiFi SSID, WiFi password, Ecos IP, and
+   `XPRESSNET_BUS_TIMEOUT` (already flagged in `config.h` as a per-layout
+   judgment call worth retuning without a reflash). Deliberately sequenced
+   before the web UI below so it has real persistence to write to from day
+   one, not RAM-only edits that vanish on reboot.
+   - **Explicitly OUT of EEPROM scope, staying `config.h` compile-time
+     forever**: hardware-fixed constants (pins, baud rate, buffer sizes) -
+     never configurable, they describe the wiring, not a preference.
+   - **Also explicitly OUT, after a design discussion**: protocol enable
+     flags (`ENABLE_LOCONET`/`ENABLE_Z21_LAN`/etc.) and debug flags
+     (`ENABLE_DEBUG` and the per-category `DEBUG_*` flags). Both currently
+     compile out to zero cost when off (confirmed in `utils/debug.h` -
+     `DEBUG_PRINTF` etc. expand to nothing when `ENABLE_DEBUG=0`; disabled
+     protocols via `#if` don't exist in the binary at all). Making either
+     EEPROM-backed would require compiling every interface's code and every
+     debug print in permanently (a runtime `if` instead of a compile-time
+     `#if`), which: (a) costs real RAM/flash for interfaces/prints not in
+     use, undermining the documented "disabled = zero overhead" design
+     premise (see Key Design Decisions below); (b) has no real trigger to
+     serve, since wiring up a new interface already means a reflash for the
+     hardware change itself, so there's no case where "toggle without
+     touching hardware" matters; and (c) for debug specifically, leaves a
+     live `Serial.print()` capability sitting in the timing-critical path
+     that could be flipped on by a bad EEPROM write - the same risk category
+     that caused the real `err13` freeze during Phase 5 step 10's
+     diagnostic `Serial.printf()` detour. Revisit only if a future need
+     actually requires shipping one binary across varied/unknown hardware.
 2. ⬜ **Web-based configuration UI** - backed by the EEPROM storage from
    step 1.
 3. ⬜ **OTA (over-the-air) firmware updates**
@@ -1062,8 +1082,11 @@ except step 6 - code review only), tagged `v0.5.0-phase5-complete` and
 pushed. **Phase 6 (Future Improvements) is now planned** (see the
 dedicated section above) - an ordered 6-item roadmap agreed 2026-08-14:
 EEPROM storage, web-based config UI, OTA updates, Z21 LAN, LocoNet, and a
-deliberately open 6th slot. Nothing implemented yet - next session should
-start with step 1 (EEPROM storage) unless redirected.
+deliberately open 6th slot. Step 1's EEPROM scope was finalized the same
+day to exactly 4 fields (WiFi SSID/password, Ecos IP, XNet bus timeout) -
+interface enable flags and debug flags were deliberately excluded, see the
+step 1 entry above for the full reasoning. Nothing implemented yet - next
+session should start with step 1 (EEPROM storage) unless redirected.
 
 With Phase 5 complete, there's no active roadmap item right now - see
 "Future Improvements" above for longer-term, not-yet-scheduled ideas
