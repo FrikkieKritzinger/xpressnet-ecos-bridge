@@ -89,6 +89,13 @@ public:
      */
     uint8_t getCurrentPage() const { return current_page; }
 
+    /**
+     * Set the Ecos IP to show on the Ecos page (Phase 6 step 1 - EEPROM
+     * value, may differ from the compile-time ECOS_IP default). Call
+     * before/independent of update(); defaults to ECOS_IP until called.
+     */
+    void setEcosIp(const char* ip);
+
 private:
     // Hardware objects
     Adafruit_SSD1306 display;
@@ -123,6 +130,9 @@ private:
 
     // Status snapshot (cached from update)
     SystemStatus current_status;
+
+    // Ecos IP to display - see setEcosIp()
+    char ecos_ip[16];
     
     // Helper methods
     void drawMainScreen();

@@ -66,13 +66,22 @@ public:
     bool removeLocoByAddress(uint16_t address);
     
     /**
-     * Expire all locos that haven't been updated in LOCO_INACTIVITY_TIMEOUT
-     * Called periodically (every ~30 seconds)
+     * Expire all locos that haven't been updated in the inactivity timeout
+     * (see setInactivityTimeoutMs()). Called periodically (every ~30 seconds)
      * @param removed_out Optional output array to receive DCC addresses that were removed
      * @param max_out Maximum entries in removed_out array
      * @return number of locos removed
      */
     int expungeInactiveLocos(uint16_t* removed_out = nullptr, int max_out = 0);
+
+    /**
+     * Set the loco-purge inactivity timeout (ms), loaded from EEPROM at
+     * boot (Phase 6 step 1). Defaults to LOCO_INACTIVITY_TIMEOUT from
+     * config.h until called.
+     */
+    void setInactivityTimeoutMs(unsigned long timeout_ms) {
+        inactivity_timeout_ms = timeout_ms;
+    }
     
     /**
      * Get total number of locos currently in state engine
@@ -118,6 +127,7 @@ private:
     // Internal storage
     LocoState locos[MAX_LOCOS];  // Array of locomotive states
     int loco_count;              // Current number of locos
+    unsigned long inactivity_timeout_ms;  // Runtime-settable, see setInactivityTimeoutMs()
     
     // Helper methods
     void shiftLocoArray(int start_index);  // Remove by shifting remaining

@@ -16,6 +16,7 @@
 #include <ESP8266WiFi.h>
 #include "../../interfaces/interface_base.h"
 #include "../../utils/timing.h"
+#include "../../eeprom_config.h"
 #include "ecos_message_parser.h"
 
 // Forward declaration
@@ -135,6 +136,16 @@ public:
      */
     void setCommandRouter(CommandRouter* router);
 
+    /**
+     * Set the EEPROM-loaded config (WiFi SSID/password, Ecos IP, optional
+     * bridge static IP) to use in begin() - Phase 6 step 1. Stores a
+     * pointer (config outlives this object - it's a global in the .ino),
+     * not a copy. Must be called before begin().
+     */
+    void setConfig(const EepromConfig* config) {
+        this->config = config;
+    }
+
 private:
     // ========================================================================
     // CONNECTION STATE
@@ -146,6 +157,7 @@ private:
     WiFiClient wifi_client;                   // TCP socket to Ecos
     EcosMessageParser* parser;                // Message parser (allocated in begin())
     CommandRouter* router;                    // Pointer to router for callbacks
+    const EepromConfig* config;               // EEPROM-loaded settings, see setConfig()
 
     // ========================================================================
     // ADDRESS MAPPING (DCC address ↔ Ecos object ID)

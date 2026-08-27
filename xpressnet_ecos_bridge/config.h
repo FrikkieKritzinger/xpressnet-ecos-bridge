@@ -44,7 +44,6 @@
     #define XPRESSNET_BAUD          62500
     
     // Timing and lifecycle
-    #define XPRESSNET_TIMEOUT       300000  // 5 minutes - remove inactive locos from state engine
     #define XPRESSNET_POLL_INTERVAL 20     // ms - how often to check for new messages
 
     // How long with no received XpressNet message before status flips to
@@ -59,6 +58,10 @@
     // there's more background traffic and this could likely be tightened.
     // If a genuine disconnect (bus fault, throttle unplugged) ever needs to
     // be detected faster than this, that's the tradeoff to revisit here.
+    // Phase 6 step 1 (2026-08-27): this value is now just the EEPROM
+    // *default* - eeprom_config.cpp seeds it on first boot, but the live
+    // value XpressNetInterface actually uses comes from EEPROM via
+    // setBusTimeoutMs(), so it can be retuned per layout without a reflash.
     #define XPRESSNET_BUS_TIMEOUT   120000
 #endif
 
@@ -70,13 +73,17 @@
 // Requires WiFi connectivity
 
 #if ENABLE_ECOS_LAN
-    // Network configuration
+    // Network configuration - EEPROM default (Phase 6 step 1, 2026-08-27):
+    // seeded on first boot, live value comes from EEPROM via
+    // EcosInterface::setConfig(). Bridge's own static IP (optional, off/DHCP
+    // by default) has no compile-time equivalent - see EepromConfig.
     #define ECOS_IP                 "192.168.0.50"   // IP address of your Ecos (hostname ECOS)
     #define ECOS_PORT               15471            // Standard Ecos port (do not change)
-    
+
     // WiFi configuration - real SSID/password live in wifi_credentials.local.h,
     // a gitignored file (never committed - see wifi_credentials.local.h.example
-    // for the template). Note: Could also be loaded from EEPROM in the future.
+    // for the template). EEPROM default (Phase 6 step 1) - seeded on first
+    // boot, live value comes from EEPROM via EcosInterface::setConfig().
     #if __has_include("wifi_credentials.local.h")
         #include "wifi_credentials.local.h"
     #else
@@ -174,6 +181,8 @@
 // In-memory locomotive state tracking (no persistence)
 
 #define MAX_LOCOS                   50    // Maximum locomotives in state engine
+// EEPROM default (Phase 6 step 1, 2026-08-27) - seeded on first boot, live
+// value comes from EEPROM via StateEngine::setInactivityTimeoutMs().
 #define LOCO_INACTIVITY_TIMEOUT     300000  // 5 minutes - remove if no updates
 #define LOCO_EXPIRY_CHECK_INTERVAL  30000   // Check for expired locos every X ms
 
@@ -214,9 +223,11 @@
 #define MAX_XNET_MESSAGE_LENGTH     32    // bytes - XpressNet message
 
 // Feature flags for future expansion
-#define ENABLE_EEPROM_CONFIG        0     // Save config to EEPROM (future)
-#define ENABLE_WEB_CONFIG           0     // Web-based configuration (future)
-#define ENABLE_OTA_UPDATE           0     // Over-the-air firmware updates (future)
+// EEPROM config (Phase 6 step 1) is implemented unconditionally - see
+// eeprom_config.h/eeprom_store.h - not behind a toggle, it's small, core
+// infrastructure rather than an optional protocol.
+#define ENABLE_WEB_CONFIG           0     // Web-based configuration (Phase 6 step 2)
+#define ENABLE_OTA_UPDATE           0     // Over-the-air firmware updates (Phase 6 step 3)
 
 // ============================================================================
 // VALIDATION - Don't modify below this line

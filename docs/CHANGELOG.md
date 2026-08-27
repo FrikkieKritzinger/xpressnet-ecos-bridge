@@ -7,6 +7,134 @@ here. Newest entries first.
 
 ---
 
+**2026-08-27 — Phase 6 step 1: EEPROM storage, confirmed live via direct flash inspection**
+
+- **Scope, agreed before writing any code**: a design discussion (see
+  CLAUDE.md's Phase 6 step 1 entry) settled on exactly which `config.h`
+  values should move to runtime-editable, EEPROM-persisted storage vs.
+  staying compile-time forever. Final list: WiFi SSID, WiFi password,
+  Ecos IP, `XPRESSNET_BUS_TIMEOUT`, and `LOCO_INACTIVITY_TIMEOUT` (added
+  during this session - same "judgment call that varies by usage pattern"
+  category as the bus timeout, caught by re-auditing `config.h` alongside
+  the already-agreed fields), plus an optional bridge static IP
+  (`use_static_ip`/`bridge_ip`/`bridge_gateway`/`bridge_subnet`, off/DHCP
+  by default - added ahead of the web UI step since browsing to a
+  DHCP-assigned address that changes on every reboot is annoying once
+  that UI exists, and it's cheap to add the storage now even though
+  nothing sets it yet). Explicitly excluded: hardware-fixed constants
+  (pins, baud, buffer sizes - describe wiring, not preference) and
+  protocol-enable/debug flags (already zero-cost when compiled out;
+  making them EEPROM/runtime-toggleable would force their code to always
+  be compiled in, undermining that zero-overhead design, and for debug
+  specifically would reintroduce the exact risk category that caused the
+  Phase 5 step 10 `err13` freeze - a live `Serial.print()` capability
+  sitting in the timing-critical XpressNet path, this time reachable via
+  a bad EEPROM write instead of a code change).
+
+- **New module split, mirroring the project's existing hardware-coupled
+  boundary**: `eeprom_config.h/.cpp` holds the `EepromConfig` struct plus
+  pure defaults-seeding/checksum/validation logic - no `EEPROM.h`
+  dependency at all, so it compiles and is fully unit-tested under
+  `env:native` (11 new tests: defaults match `config.h`, checksum is
+  deterministic and changes when a field changes, invalid data is
+  correctly rejected for wrong magic/wrong version/corrupted
+  field/blank-erased-flash/all-zero). `eeprom_store.h/.cpp` wraps the
+  actual `EEPROM.h` (`begin()`/`get()`/`put()`/`commit()`) calls -
+  Arduino-only, excluded from `env:native` in `platformio.ini` the same
+  way `ecos_interface.cpp`/`xpressnet_interface.cpp` already are. A
+  4-byte magic number + 2-byte version + 2-byte checksum at the end of
+  the struct distinguishes real saved data from blank/erased flash
+  (reads as `0xFF` bytes) or a struct from an incompatible schema
+  version; invalid data seeds from `config.h` compile-time defaults and
+  saves once, so subsequent boots read a valid struct without
+  re-seeding every time.
+
+- **Call-site wiring**: three of the previously-`static const`/macro-only
+  values became runtime members with setters -
+  `XpressNetInterface::setBusTimeoutMs()` (was `static const unsigned
+  long BUS_TIMEOUT = XPRESSNET_BUS_TIMEOUT`), `StateEngine::
+  setInactivityTimeoutMs()` (was a direct `LOCO_INACTIVITY_TIMEOUT` macro
+  reference inside `expungeInactiveLocos()`), and `EcosInterface::
+  setConfig(const EepromConfig*)` (covers WiFi SSID/password, Ecos IP,
+  and the optional static IP via `WiFi.config()` before `WiFi.begin()`).
+  All three fall back to their `config.h` compile-time default if the
+  setter is never called, so nothing breaks if a future call site forgets
+  to wire it up. `OledDisplay::setEcosIp()` was added too, since the Ecos
+  page previously printed the `ECOS_IP` macro directly. The `.ino`'s
+  `setup()` calls `eepromStoreLoad(g_config)` once, right after OLED init
+  and before any protocol interface's `begin()`, then pushes the loaded
+  values into each interface via its setter.
+
+- **Side cleanup in the same pass**: `XPRESSNET_TIMEOUT` (config.h:47,
+  "5 minutes - remove inactive locos from state engine") turned out to be
+  a dead duplicate - grep confirmed nothing in the codebase actually read
+  it; `LOCO_INACTIVITY_TIMEOUT` (a separate constant in the State Engine
+  section, functionally identical) is the one `state_engine.cpp` really
+  uses. Removed. Also removed the now-redundant `ENABLE_EEPROM_CONFIG`
+  feature flag from `config.h`'s "future expansion" section - EEPROM
+  support is unconditional (small, core infrastructure, not an optional
+  protocol worth a compile-time toggle), so a flag that gated nothing
+  would have been actively misleading to leave in place.
+
+- **Real bug found via live hardware testing**: `eepromStoreSave()` never
+  checked `EEPROM.commit()`'s return value. Surfaced while stress-testing
+  the corruption/reseed path with two `EEPROM.put()`+`commit()` calls
+  back-to-back within the same boot (a deliberately temporary test
+  pattern to probe reseed behavior, not something real production code
+  ever does - `eepromStoreLoad()` only ever calls save once per boot) -
+  the second commit's data was silently lost. A cleaner single-commit
+  version of the same test (`g_config.magic = 0xBADC0FFE;
+  eepromStoreSave(g_config);` as the *only* save that boot) persisted
+  correctly, confirmed via a direct flash dump matching the corrupted
+  magic byte-for-byte. Root cause not fully chased down (double-commit
+  timing on this specific SPI flash chip, most likely) since it isn't a
+  real production code path, but `eepromStoreSave()` now logs a clear
+  error if `commit()` ever returns false, so a genuine failure would be
+  visible in the field instead of silently dropped - a real, worthwhile
+  hardening found only because of how this was tested.
+
+- **Verification took two attempts - the first was misleading, not
+  wrong-firmware**: initial live testing used a Python/pyserial script to
+  capture serial boot output around reflashes. Results were confusing and
+  inconsistent - most notably, a fresh boot immediately after a *full chip
+  erase* (confirmed separately, via `esptool.py read_flash` at the
+  EEPROM's linked address, to have genuinely blanked that sector to
+  `0xFF`) still reported "loaded valid config" in the serial log instead
+  of the expected reseed message. Root-caused to the capture script
+  itself: opening a fresh `pyserial` connection right after an upload
+  appears to trigger an *extra* board reset via the same DTR/RTS
+  auto-reset circuit `platformio.ini` already documents disabling for its
+  own monitor (`monitor_rts = 0` / `monitor_dtr = 0`, added back in
+  Phase 4.6 "so opening the monitor doesn't silently reboot the board and
+  wipe state mid-test") - meaning the serial capture was very likely
+  showing a second, later boot's log rather than the first one after
+  reset, several times in a row. Resolved by abandoning serial-log timing
+  entirely in favor of direct flash-content inspection (`esptool.py
+  read_flash` before and after each step, comparing raw bytes at the
+  EEPROM's address found via `nm` on the linked ELF's `_EEPROM_start`
+  symbol - `0x3FB000` physical offset on this board's 4MB flash layout).
+  That gave unambiguous, timing-independent proof of all three required
+  behaviors: blank/erased flash correctly reseeds with real defaults
+  (confirmed via raw bytes: correct magic, SSID, Ecos IP, with zero serial
+  connection involved in the test); a plain reflash with unchanged code
+  leaves the EEPROM sector completely untouched (byte-for-byte identical
+  dump before and after); and - the strongest test - deliberately
+  changing `config.h`'s compile-time `ECOS_IP` default and reflashing
+  (no erase) still loaded and attempted to connect to the *old*,
+  already-persisted value rather than the new default, proving EEPROM
+  genuinely overrides compile-time defaults rather than the two simply
+  happening to agree.
+
+- All temporary test hooks (a debug print of loaded values, the
+  double/single-commit corruption tests, the temporarily-altered
+  `ECOS_IP` default) were fully reverted before finishing; a final full
+  chip erase + clean `env:wemos` production reflash left the real
+  hardware in its normal working state with fresh, correct EEPROM
+  defaults. Native suite 149/149 passing (138 prior + 11 new); `env:wemos`
+  builds clean (RAM 45.4%, Flash 32.1%).
+
+---
+
 **2026-08-05 — Phase 5 step 10: accessory/turnout support v1, confirmed live (Phase 5 now fully complete)**
 
 - **Scope decision, made before writing any code**: the original roadmap

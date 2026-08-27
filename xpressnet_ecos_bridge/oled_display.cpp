@@ -58,8 +58,16 @@ OledDisplay::OledDisplay()
     popup_message.show_time = 0;
     popup_message.is_error = false;
     popup_message.active = false;
-    
+
+    strncpy(ecos_ip, ECOS_IP, sizeof(ecos_ip) - 1);
+    ecos_ip[sizeof(ecos_ip) - 1] = '\0';
+
     DEBUG_PRINT("OledDisplay created (128x64 SSD1306 Yellow/Blue)\n");
+}
+
+void OledDisplay::setEcosIp(const char* ip) {
+    strncpy(ecos_ip, ip, sizeof(ecos_ip) - 1);
+    ecos_ip[sizeof(ecos_ip) - 1] = '\0';
 }
 
 // ============================================================================
@@ -445,7 +453,7 @@ void OledDisplay::drawEcosScreen() {
     // Ecos IP
     display.setCursor(0, BLUE_CONTENT_Y);
     display.print(F("IP: "));
-    display.println(ECOS_IP);
+    display.println(ecos_ip);
     
     // Heartbeat
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);

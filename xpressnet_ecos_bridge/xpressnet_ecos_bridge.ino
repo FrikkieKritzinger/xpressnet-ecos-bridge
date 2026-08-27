@@ -21,6 +21,8 @@
 #include "state_engine.h"
 #include "command_router.h"
 #include "interfaces/interface_base.h"
+#include "eeprom_config.h"
+#include "eeprom_store.h"
 
 // Protocol interfaces - conditionally included based on config.h
 #if ENABLE_XPRESSNET
@@ -51,6 +53,12 @@
 // ============================================================================
 // GLOBAL OBJECTS - Static allocation (no dynamic memory)
 // ============================================================================
+
+// Persisted settings (Phase 6 step 1) - WiFi SSID/password, Ecos IP, XNet
+// bus timeout, loco inactivity timeout, optional bridge static IP. Loaded
+// from EEPROM in setup() before any interface begin()s; config.h holds
+// only the compile-time defaults used to seed it on first boot.
+EepromConfig g_config;
 
 // Command router and state engine
 CommandRouter router;
@@ -112,10 +120,21 @@ void setup() {
         }
     #endif
 
+    // Load persisted settings (Phase 6 step 1) before any interface begin()s,
+    // so WiFi/Ecos IP/timeouts are all correct on the very first connection
+    // attempt below, not just after a later reload.
+    debugPrintf("Loading EEPROM config...\n");
+    eepromStoreLoad(g_config);
+    router.getStateEngine().setInactivityTimeoutMs(g_config.loco_inactivity_timeout_ms);
+    #if ENABLE_OLED_DISPLAY
+        display.setEcosIp(g_config.ecos_ip);
+    #endif
+
     // Initialize protocols (order doesn't matter)
 
     #if ENABLE_XPRESSNET
         debugPrintf("Initializing XpressNet interface...\n");
+        xnet_interface.setBusTimeoutMs(g_config.xnet_bus_timeout_ms);
         if (!xnet_interface.begin()) {
             debugPrintf("ERROR: XpressNet initialization failed!\n");
         } else {
@@ -124,9 +143,10 @@ void setup() {
             xnet_interface.setCommandRouter(&router);
         }
     #endif
-    
+
     #if ENABLE_ECOS_LAN
         debugPrintf("Initializing Ecos LAN interface...\n");
+        ecos_interface.setConfig(&g_config);
         if (!ecos_interface.begin()) {
             debugPrintf("ERROR: Ecos LAN initialization failed!\n");
         } else {

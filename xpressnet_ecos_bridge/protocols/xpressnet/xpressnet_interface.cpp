@@ -114,6 +114,7 @@ XpressNetInterface::XpressNetInterface()
     : current_status(ComponentStatus::DISCONNECTED),
       last_message_time(0),
       bus_connect_time(0),
+      bus_timeout_ms(XPRESSNET_BUS_TIMEOUT),
       was_master_mode(true),
       led_off_at_ms(0),
       router(nullptr) {
@@ -201,10 +202,10 @@ void XpressNetInterface::updateBusStatus() {
             DEBUG_XNET_PRINTF("XpressNet: Bus disconnected (no initial activity)\n");
         }
     } else if (current_status == ComponentStatus::CONNECTED) {
-        if (time_since_message > BUS_TIMEOUT) {
+        if (time_since_message > bus_timeout_ms) {
             current_status = ComponentStatus::DISCONNECTED;
             bus_connect_time = 0;
-            DEBUG_XNET_PRINTF("XpressNet: Bus timeout (no messages for %lu ms)\n", BUS_TIMEOUT);
+            DEBUG_XNET_PRINTF("XpressNet: Bus timeout (no messages for %lu ms)\n", bus_timeout_ms);
         }
     }
 

@@ -31,6 +31,7 @@ EcosInterface::EcosInterface()
       last_message_time(0),
       parser(nullptr),
       router(nullptr),
+      config(nullptr),
       address_map_count(0),
       address_map_last_refresh(0),
       awaiting_query_reply(false),
@@ -72,12 +73,33 @@ bool EcosInterface::begin() {
         current_status = ComponentStatus::CONNECTING;
         last_message_time = millis();
 
+        // Falls back to the compile-time defaults if setConfig() was never
+        // called (shouldn't happen in real firmware - the .ino always calls
+        // it before begin() - but keeps this safe standalone, e.g. in a test).
+        const char* ssid = config ? config->wifi_ssid : WIFI_SSID;
+        const char* password = config ? config->wifi_password : WIFI_PASSWORD;
+
+        // Bridge's own static IP (Phase 6 step 1) - off by default (DHCP,
+        // unchanged behavior) unless EEPROM has it explicitly enabled.
+        // Must be called before WiFi.begin().
+        if (config && config->use_static_ip) {
+            IPAddress ip, gateway, subnet;
+            if (ip.fromString(config->bridge_ip) &&
+                gateway.fromString(config->bridge_gateway) &&
+                subnet.fromString(config->bridge_subnet)) {
+                WiFi.config(ip, gateway, subnet);
+                DEBUG_ECOS_PRINTF("Using static IP %s\n", config->bridge_ip);
+            } else {
+                DEBUG_ECOS_PRINTF("WARNING: static IP enabled but fields invalid - falling back to DHCP\n");
+            }
+        }
+
         // Note: WiFi.begin() is fire-and-forget; actual connection happens asynchronously
         // The setup() banner in the .ino documents this, and the update() loop polls status
         WiFi.mode(WIFI_STA);
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        WiFi.begin(ssid, password);
 
-        DEBUG_ECOS_PRINTF("Ecos LAN initialized (WiFi SSID=%s)\n", WIFI_SSID);
+        DEBUG_ECOS_PRINTF("Ecos LAN initialized (WiFi SSID=%s)\n", ssid);
         return true;
 
     #else
@@ -199,14 +221,15 @@ void EcosInterface::updateConnectionStatus() {
 }
 
 void EcosInterface::attemptTcpConnect() {
-    DEBUG_ECOS_PRINTF("Attempting TCP connect to %s:%u...\n", ECOS_IP, ECOS_PORT);
+    const char* ecos_ip = config ? config->ecos_ip : ECOS_IP;
+    DEBUG_ECOS_PRINTF("Attempting TCP connect to %s:%u...\n", ecos_ip, ECOS_PORT);
 
     // WiFiClient::connect() blocks the whole loop() until it succeeds, fails,
     // or this timeout elapses - see ECOS_TIMEOUT in config.h for the hardware
     // bug this fixes. Must be set before connect(), not after.
     wifi_client.setTimeout(ECOS_TIMEOUT);
 
-    if (wifi_client.connect(ECOS_IP, ECOS_PORT)) {
+    if (wifi_client.connect(ecos_ip, ECOS_PORT)) {
         current_status = ComponentStatus::CONNECTED;
         connected_time_ms = millis();
         last_message_time = millis();

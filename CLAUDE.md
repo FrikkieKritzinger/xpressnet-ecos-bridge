@@ -657,9 +657,9 @@ All disabled features = zero compiled code overhead.
   verified by code review only; step 10 is v1-scoped, Ecos→XpressNet and a
   dedicated display page deliberately deferred) - see the dedicated section
   below for the full roadmap.
-- **Phase 6 (Future Improvements)**: 📋 Planned, not started - ordered
-  6-item roadmap (EEPROM, web config UI, OTA, Z21, LocoNet, TBD) - see the
-  dedicated section below.
+- **Phase 6 (Future Improvements)**: 🔧 In progress - step 1 (EEPROM
+  storage) done and confirmed live; steps 2-6 (web config UI, OTA, Z21,
+  LocoNet, TBD) not started - see the dedicated section below.
 
 ---
 
@@ -1021,41 +1021,71 @@ rather than completed, since it served no design purpose.
 
 ---
 
-## 🎯 Phase 6: Future Improvements 📋 PLANNED (not started)
+## 🎯 Phase 6: Future Improvements 🔧 IN PROGRESS (step 1 of 6 done)
 
 Ordered and agreed 2026-08-14. CV/programming-track support was audited
 during Phase 5 planning but pulled out entirely - not currently planned,
 since the user's Ecos already handles this conveniently on a program track.
 
-1. ⬜ **EEPROM storage** - persist settings across reboots/reflashes instead
-   of compile-time-only `config.h` values. **Scope finalized 2026-08-14,
-   exactly 4 fields**: WiFi SSID, WiFi password, Ecos IP, and
-   `XPRESSNET_BUS_TIMEOUT` (already flagged in `config.h` as a per-layout
-   judgment call worth retuning without a reflash). Deliberately sequenced
-   before the web UI below so it has real persistence to write to from day
-   one, not RAM-only edits that vanish on reboot.
-   - **Explicitly OUT of EEPROM scope, staying `config.h` compile-time
-     forever**: hardware-fixed constants (pins, baud rate, buffer sizes) -
-     never configurable, they describe the wiring, not a preference.
-   - **Also explicitly OUT, after a design discussion**: protocol enable
-     flags (`ENABLE_LOCONET`/`ENABLE_Z21_LAN`/etc.) and debug flags
-     (`ENABLE_DEBUG` and the per-category `DEBUG_*` flags). Both currently
-     compile out to zero cost when off (confirmed in `utils/debug.h` -
-     `DEBUG_PRINTF` etc. expand to nothing when `ENABLE_DEBUG=0`; disabled
-     protocols via `#if` don't exist in the binary at all). Making either
-     EEPROM-backed would require compiling every interface's code and every
-     debug print in permanently (a runtime `if` instead of a compile-time
-     `#if`), which: (a) costs real RAM/flash for interfaces/prints not in
-     use, undermining the documented "disabled = zero overhead" design
-     premise (see Key Design Decisions below); (b) has no real trigger to
-     serve, since wiring up a new interface already means a reflash for the
-     hardware change itself, so there's no case where "toggle without
-     touching hardware" matters; and (c) for debug specifically, leaves a
-     live `Serial.print()` capability sitting in the timing-critical path
-     that could be flipped on by a bad EEPROM write - the same risk category
-     that caused the real `err13` freeze during Phase 5 step 10's
-     diagnostic `Serial.printf()` detour. Revisit only if a future need
-     actually requires shipping one binary across varied/unknown hardware.
+1. ✅ **EEPROM storage - implemented and confirmed live (2026-08-27)**.
+   Final scope, six real fields: WiFi SSID, WiFi password, Ecos IP,
+   `XPRESSNET_BUS_TIMEOUT`, `LOCO_INACTIVITY_TIMEOUT` (added during
+   implementation - same "judgment call that varies by usage pattern"
+   category as the bus timeout), and an optional bridge static IP
+   (`use_static_ip`/`bridge_ip`/`bridge_gateway`/`bridge_subnet` - off/DHCP
+   by default, added ahead of the web UI step since browsing to a
+   DHCP-assigned address is annoying once that UI exists).
+   - **New module**: `eeprom_config.h/.cpp` (pure struct/defaults/checksum/
+     validation logic, no `EEPROM.h` dependency - fully native-testable,
+     11 new tests) + `eeprom_store.h/.cpp` (the actual `EEPROM.h` read/
+     write calls, Arduino-only, excluded from `env:native` like
+     `ecos_interface.cpp`). A magic number + version + checksum
+     distinguishes real saved data from blank/erased flash or an
+     incompatible schema version; invalid data seeds from `config.h`
+     defaults and saves once, so later boots read a valid struct without
+     re-seeding every time. `config.h`'s existing constants are now
+     documented as EEPROM *defaults* (seed values), not the live values -
+     `XpressNetInterface::setBusTimeoutMs()`, `StateEngine::
+     setInactivityTimeoutMs()`, and `EcosInterface::setConfig()` carry the
+     real runtime values in, called from the `.ino`'s `setup()` right
+     after `eepromStoreLoad()`, before any interface `begin()`.
+   - **Side cleanup in the same pass**: removed the dead `XPRESSNET_TIMEOUT`
+     constant (config.h:47) - confirmed unused anywhere in the codebase;
+     `LOCO_INACTIVITY_TIMEOUT` is the real constant `state_engine.cpp`
+     reads. Also removed the now-redundant `ENABLE_EEPROM_CONFIG` feature
+     flag (EEPROM support is unconditional, small core infrastructure, not
+     an optional protocol behind a toggle).
+   - **Real bug found via live hardware testing**: `eepromStoreSave()`
+     never checked `EEPROM.commit()`'s return value. Found while stress-
+     testing the corruption/reseed path with two `EEPROM.put()`+`commit()`
+     calls back-to-back in the same boot (a test-only pattern, not a real
+     production code path - `eepromStoreLoad()` only ever calls save once
+     per boot) - the second commit was silently lost. Fixed by logging a
+     clear error if `commit()` ever returns false, so a real failure would
+     at least be visible instead of silently dropped.
+   - **Confirmed live via direct flash inspection** (`esptool.py
+     read_flash` at the EEPROM's linked address, `0x3FB000` on this
+     board/partition layout - found via `nm` on the linked ELF's
+     `_EEPROM_start` symbol), bypassing serial-log timing ambiguity
+     entirely: blank/erased flash (0xFF) correctly triggers a reseed with
+     real defaults (confirmed via raw bytes: magic, SSID, Ecos IP all
+     correct after boot, no serial connection involved); a plain reflash
+     with unchanged code leaves the EEPROM sector byte-for-byte untouched;
+     and - the key persistence proof - changing `config.h`'s compile-time
+     `ECOS_IP` default and reflashing (no erase) still loads and connects
+     to the *old*, previously-persisted value, not the new default,
+     confirming EEPROM genuinely wins over compile-time defaults rather
+     than incidentally matching them.
+   - **Test-harness footnote, not a firmware issue**: earlier attempts to
+     verify this via live serial-log capture (a Python/pyserial script)
+     gave inconsistent results - almost certainly the script's own port-open
+     triggering an extra board reset via the same DTR/RTS auto-reset
+     circuit `platformio.ini` already documents (`monitor_rts=0`/
+     `monitor_dtr=0` exists for exactly this reason). Resolved by switching
+     to direct flash-content verification instead of trusting serial-log
+     sequencing.
+   - 11 new tests (`test_eeprom_config`); native suite 149/149 passing;
+     `env:wemos` builds clean (RAM 45.4%, Flash 32.1%).
 2. ⬜ **Web-based configuration UI** - backed by the EEPROM storage from
    step 1.
 3. ⬜ **OTA (over-the-air) firmware updates**
@@ -1069,24 +1099,30 @@ since the user's Ecos already handles this conveniently on a program track.
 
 ---
 
-**Last Updated**: 2026-08-05. **Phase 4.6 is complete** - every checklist item
-confirmed on real hardware. **Phase 5 (Feature Completion) is now complete -
+**Last Updated**: 2026-08-27. **Phase 4.6 is complete** - every checklist item
+confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
-everything deferred or stubbed in the existing XpressNet+Ecos feature set -
-see the dedicated section above. Full narrative detail for every step lives
-in `docs/CHANGELOG.md` (dated entries); this section is intentionally just
+everything deferred or stubbed in the existing XpressNet+Ecos feature set,
+tagged `v0.5.0-phase5-complete`. **Phase 6 (Future Improvements) is now in
+progress** - an ordered 6-item roadmap agreed 2026-08-14; see the dedicated
+section above. Full narrative detail for every step lives in
+`docs/CHANGELOG.md` (dated entries); this section is intentionally just
 current status.
 
-Most recent: Phase 5 closed out entirely (all 10 steps, confirmed live
-except step 6 - code review only), tagged `v0.5.0-phase5-complete` and
-pushed. **Phase 6 (Future Improvements) is now planned** (see the
-dedicated section above) - an ordered 6-item roadmap agreed 2026-08-14:
-EEPROM storage, web-based config UI, OTA updates, Z21 LAN, LocoNet, and a
-deliberately open 6th slot. Step 1's EEPROM scope was finalized the same
-day to exactly 4 fields (WiFi SSID/password, Ecos IP, XNet bus timeout) -
-interface enable flags and debug flags were deliberately excluded, see the
-step 1 entry above for the full reasoning. Nothing implemented yet - next
-session should start with step 1 (EEPROM storage) unless redirected.
+Most recent: **Phase 6 step 1 (EEPROM storage)** implemented and confirmed
+live (2026-08-27) - six fields (WiFi SSID/password, Ecos IP, XNet bus
+timeout, loco inactivity timeout, optional bridge static IP), a new
+`eeprom_config.h/.cpp` (native-testable) + `eeprom_store.h/.cpp`
+(Arduino-only) module pair, `config.h`'s old constants now documented as
+EEPROM seed defaults rather than live values. Confirmed via direct flash
+inspection (`esptool.py read_flash`, bypassing serial-log timing
+ambiguity that tripped up an earlier verification attempt): blank flash
+correctly reseeds, a plain reflash never touches the EEPROM sector, and a
+changed compile-time default correctly loses to already-persisted EEPROM
+data. One real bug fixed along the way: `EEPROM.commit()`'s return value
+was never checked. Native suite 149/149 passing; `env:wemos` builds clean
+and is flashed to the real hardware. Next session should start with step 2
+(web-based config UI) unless redirected.
 
 With Phase 5 complete, there's no active roadmap item right now - see
 "Future Improvements" above for longer-term, not-yet-scheduled ideas

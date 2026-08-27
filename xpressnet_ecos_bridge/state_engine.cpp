@@ -23,7 +23,7 @@
 // CONSTRUCTOR
 // ============================================================================
 
-StateEngine::StateEngine() : loco_count(0) {
+StateEngine::StateEngine() : loco_count(0), inactivity_timeout_ms(LOCO_INACTIVITY_TIMEOUT) {
     // Initialize all locomotive states to zero
     memset(locos, 0, sizeof(locos));
     
@@ -203,7 +203,7 @@ int StateEngine::expungeInactiveLocos(uint16_t* removed_out, int max_out) {
     for (int i = loco_count - 1; i >= 0; i--) {
         unsigned long age = now - locos[i].last_update_ms;
 
-        if (age > LOCO_INACTIVITY_TIMEOUT) {
+        if (age > inactivity_timeout_ms) {
             DEBUG_STATE_PRINTF("Expiring inactive loco %u (age: %lu ms)\n",
                               locos[i].dcc_address, age);
 

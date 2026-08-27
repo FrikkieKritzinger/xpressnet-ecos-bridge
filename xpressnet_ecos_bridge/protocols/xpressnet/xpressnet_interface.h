@@ -120,6 +120,16 @@ public:
         this->router = router;
     }
 
+    /**
+     * Set the bus-idle-to-DISCONNECTED threshold (ms), loaded from EEPROM
+     * at boot (Phase 6 step 1) - see XPRESSNET_BUS_TIMEOUT in config.h for
+     * the default and why 120s isn't a bug. Call before begin(); defaults
+     * to that compile-time value until called.
+     */
+    void setBusTimeoutMs(unsigned long timeout_ms) {
+        bus_timeout_ms = timeout_ms;
+    }
+
     // ------------------------------------------------------------------
     // Called only by the file-scope notifyXNet* callbacks (weak symbols
     // required by XpressNetMasterClass - they can't be member functions).
@@ -242,9 +252,12 @@ private:
     ComponentStatus current_status;         // CONNECTED, DISCONNECTED, ERROR
     unsigned long last_message_time;        // Timestamp of last received message
     unsigned long bus_connect_time;         // When we first detected bus activity
-    // See XPRESSNET_BUS_TIMEOUT in config.h for why this is 120s, not a
-    // shorter "obviously safe" value.
-    static const unsigned long BUS_TIMEOUT = XPRESSNET_BUS_TIMEOUT;
+    // See XPRESSNET_BUS_TIMEOUT in config.h for why this is 120s by
+    // default, not a shorter "obviously safe" value. Runtime member (not
+    // compile-time const) since Phase 6 step 1 - overridden from EEPROM
+    // via setBusTimeoutMs(), initialized to the compile-time default in
+    // the constructor so it's still correct if that's never called.
+    unsigned long bus_timeout_ms;
     bool was_master_mode;                   // Last known xnet.getOperationModeMaster() - edge-triggered tripwire
 
     // TEMP: visual health indicator for hardware testing - onboard LED
