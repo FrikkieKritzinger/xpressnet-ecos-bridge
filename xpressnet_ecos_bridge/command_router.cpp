@@ -63,6 +63,13 @@ void CommandRouter::setEcosInterface(ProtocolInterface* ecos_intf) {
 }
 #endif
 
+#if ENABLE_Z21_LAN
+void CommandRouter::setZ21Interface(ProtocolInterface* z21_intf) {
+    z21 = z21_intf;
+    DEBUG_PRINT("Z21 LAN interface registered with router\n");
+}
+#endif
+
 // ============================================================================
 // HANDLE XPRESSNET COMMANDS
 // ============================================================================
@@ -215,6 +222,122 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
     echo_state.last_command_type = 1;  // FUNCTION command type
     echo_state.last_timestamp_ms = now_ms();
     echo_state.last_source = LocoSource::XPRESSNET;
+}
+
+// ============================================================================
+// HANDLE Z21 LAN COMMANDS
+// ============================================================================
+// Mirrors the XpressNet handlers above exactly (Phase 6 step 4) - a
+// throttle-facing protocol always forwards to Ecos only; Ecos's own echo
+// back through handleEcosCommand()/broadcastCommand() is what reaches
+// every other throttle-facing protocol, including back to Z21 itself
+// (filtered by echo prevention for whichever side originated it).
+
+void CommandRouter::handleZ21Command(uint16_t address, uint8_t speed, uint8_t direction) {
+    DEBUG_PRINTF("Z21: Loco %u Speed %u Dir %u\n", address, speed, direction);
+
+    if (!isValidDccAddress(address)) {
+        DEBUG_PRINTF("ERROR: Invalid Z21 address: %u\n", address);
+        return;
+    }
+    if (!isValidSpeed(speed) || !isValidDirection(direction)) {
+        DEBUG_PRINTF("ERROR: Invalid speed (%u) or direction (%u)\n", speed, direction);
+        return;
+    }
+
+    if (isEchoCommand(address, LocoSource::Z21_LAN)) {
+        DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u speed command (from Ecos)\n", address);
+        echo_prevented_count++;
+        return;
+    }
+
+    LocoState new_state;
+    new_state.dcc_address = address;
+    new_state.speed = speed;
+    new_state.direction = direction;
+    new_state.functions = 0;
+    new_state.last_source = LocoSource::Z21_LAN;
+
+    LocoState existing;
+    bool already_subscribed = false;
+    if (state_engine.getLoco(address, existing)) {
+        new_state.functions = existing.functions;
+        already_subscribed = existing.subscribed_to_ecos;
+    }
+    new_state.subscribed_to_ecos = true;
+
+    if (!state_engine.addOrUpdateLoco(address, new_state)) {
+        DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u (state engine full?)\n", address);
+        return;
+    }
+
+    if (!already_subscribed) {
+        DEBUG_STATE_PRINTF("New loco from Z21: requesting Ecos subscription\n");
+        requestEcosSubscription(address);
+    }
+
+    broadcastCommand(address, new_state, LocoSource::Z21_LAN);
+
+    total_commands_count++;
+    last_command.address = address;
+    last_command.speed = speed;
+    last_command.direction = direction;
+    last_command.functions = new_state.functions;
+    last_command.source = LocoSource::Z21_LAN;
+
+    echo_state.last_loco_address = address;
+    echo_state.last_command_type = 0;  // SPEED command type
+    echo_state.last_timestamp_ms = now_ms();
+    echo_state.last_source = LocoSource::Z21_LAN;
+}
+
+void CommandRouter::handleZ21FunctionCommand(uint16_t address, uint32_t functions) {
+    DEBUG_PRINTF("Z21: Loco %u Functions 0x%08lx\n", address, (unsigned long)functions);
+
+    if (!isValidDccAddress(address)) {
+        DEBUG_PRINTF("ERROR: Invalid Z21 address: %u\n", address);
+        return;
+    }
+
+    if (isEchoCommand(address, LocoSource::Z21_LAN)) {
+        DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u function command (from Ecos)\n", address);
+        echo_prevented_count++;
+        return;
+    }
+
+    LocoState new_state;
+    if (!state_engine.getLoco(address, new_state)) {
+        new_state.dcc_address = address;
+        new_state.speed = 0;
+        new_state.direction = 1;
+        new_state.functions = functions;
+        new_state.subscribed_to_ecos = true;
+
+        if (!state_engine.addOrUpdateLoco(address, new_state)) {
+            DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u\n", address);
+            return;
+        }
+
+        requestEcosSubscription(address);
+    } else {
+        new_state.functions = functions;
+        new_state.last_source = LocoSource::Z21_LAN;
+        state_engine.addOrUpdateLoco(address, new_state);
+    }
+
+    broadcastCommand(address, new_state, LocoSource::Z21_LAN);
+
+    total_commands_count++;
+    last_command.address = address;
+    last_command.speed = new_state.speed;
+    last_command.direction = new_state.direction;
+    last_command.functions = new_state.functions;
+    last_command.source = LocoSource::Z21_LAN;
+
+    echo_state.last_loco_address = address;
+    echo_state.last_command_type = 1;  // FUNCTION command type
+    echo_state.last_timestamp_ms = now_ms();
+    echo_state.last_source = LocoSource::Z21_LAN;
 }
 
 // ============================================================================
@@ -421,6 +544,11 @@ void CommandRouter::emergencyStopAll(LocoSource source) {
             xpressnet->sendSpeedCommand(loco->dcc_address, 0, loco->direction);
         }
         #endif
+        #if ENABLE_Z21_LAN
+        if (z21 != nullptr) {
+            z21->sendSpeedCommand(loco->dcc_address, 0, loco->direction);
+        }
+        #endif
     }
 
     // The system-wide stop only goes to whichever side didn't already
@@ -442,6 +570,12 @@ void CommandRouter::emergencyStopAll(LocoSource source) {
         xpressnet->sendEmergencyStop();
     }
     #endif
+
+    #if ENABLE_Z21_LAN
+    if (source != LocoSource::Z21_LAN && z21 != nullptr) {
+        z21->sendEmergencyStop();
+    }
+    #endif
 }
 
 void CommandRouter::resumeOperation(LocoSource source) {
@@ -459,6 +593,12 @@ void CommandRouter::resumeOperation(LocoSource source) {
     #if ENABLE_XPRESSNET
     if (source != LocoSource::XPRESSNET && xpressnet != nullptr) {
         xpressnet->sendResumeOperation();
+    }
+    #endif
+
+    #if ENABLE_Z21_LAN
+    if (source != LocoSource::Z21_LAN && z21 != nullptr) {
+        z21->sendResumeOperation();
     }
     #endif
 }
@@ -565,18 +705,22 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
      * If came from Ecos, send to XpressNet
      */
     
-    if (source == LocoSource::XPRESSNET) {
-        // Send to Ecos
+    if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN) {
+        // Any throttle-facing protocol forwards to Ecos only - Ecos's own
+        // echo back through the ECOS branch below is what reaches every
+        // OTHER throttle-facing protocol (including this one, filtered by
+        // echo prevention), not a direct fan-out here.
         #if ENABLE_ECOS_LAN
         if (ecos != nullptr) {
-            DEBUG_PRINTF("Broadcasting XpressNet command to Ecos\n");
+            DEBUG_PRINTF("Broadcasting %s command to Ecos\n", locoSourceToString(source));
             ecos->sendSpeedCommand(address, state.speed, state.direction);
             ecos->sendFunctionCommand(address, state.functions);
         }
         #endif
     }
     else if (source == LocoSource::ECOS) {
-        // Send to XpressNet
+        // Send to every throttle-facing protocol - Ecos is the single
+        // source of truth all of them need to stay in sync with.
         #if ENABLE_XPRESSNET
         if (xpressnet != nullptr) {
             DEBUG_PRINTF("Broadcasting Ecos command to XpressNet\n");
@@ -587,6 +731,13 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
             // model - only a directed reply it recognizes as authoritative.
             // No-op if no XpressNet slot currently has this address selected.
             xpressnet->pushLocoStateToOwningSlot(address);
+        }
+        #endif
+        #if ENABLE_Z21_LAN
+        if (z21 != nullptr) {
+            DEBUG_PRINTF("Broadcasting Ecos command to Z21\n");
+            z21->sendSpeedCommand(address, state.speed, state.direction);
+            z21->sendFunctionCommand(address, state.functions);
         }
         #endif
     }

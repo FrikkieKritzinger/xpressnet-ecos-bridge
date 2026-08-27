@@ -788,6 +788,119 @@ void test_router_debug_print_echo_state_does_not_crash(void) {
 #endif
 
 // ============================================================================
+// Z21 LAN ROUTING (Phase 6 step 4)
+// ============================================================================
+// Mirrors the existing XpressNet routing tests above - handleZ21Command()/
+// handleZ21FunctionCommand() are structurally identical, and
+// broadcastCommand()'s Ecos branch now fans out to Z21 too.
+
+void test_router_route_z21_speed_to_ecos(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleZ21Command(100, 64, 1);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getSpeedCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(100, ecos_mock.getLastSpeedCommand().address);
+    TEST_ASSERT_EQUAL_UINT8(64, ecos_mock.getLastSpeedCommand().speed);
+}
+
+void test_router_route_z21_function_to_ecos(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleZ21FunctionCommand(50, 0x01);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getFunctionCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(50, ecos_mock.getLastFunctionCommand().address);
+}
+
+void test_router_route_ecos_to_z21(void) {
+    // The other direction: an Ecos-sourced update must reach Z21 clients,
+    // same as it already reaches XpressNet.
+    CommandRouter router;
+    MockProtocolInterface z21_mock;
+    router.setZ21Interface(&z21_mock);
+
+    router.handleEcosCommand(100, 64, 1);
+
+    TEST_ASSERT_EQUAL_INT(1, z21_mock.getSpeedCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(100, z21_mock.getLastSpeedCommand().address);
+}
+
+void test_router_z21_does_not_receive_direct_xpressnet_fanout(void) {
+    // A throttle-facing protocol forwards to Ecos only - it should NOT
+    // also fan out directly to another throttle-facing protocol. Only
+    // Ecos's own echo (a separate handleEcosCommand() call) closes that
+    // loop - see the broadcastCommand() comment this mirrors.
+    CommandRouter router;
+    MockProtocolInterface z21_mock;
+    router.setZ21Interface(&z21_mock);
+
+    router.handleXpressNetCommand(100, 64, 1);
+
+    TEST_ASSERT_EQUAL_INT(0, z21_mock.getSpeedCommandCount());
+}
+
+void test_router_echo_prevention_z21_vs_ecos(void) {
+    CommandRouter router;
+    MockProtocolInterface z21_mock;
+    MockProtocolInterface ecos_mock;
+    router.setZ21Interface(&z21_mock);
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleZ21Command(100, 64, 1);   // t=0, from Z21_LAN
+    router.handleEcosCommand(100, 64, 1);  // t=0, from ECOS (opposite source)
+
+    TEST_ASSERT_EQUAL_INT(0, z21_mock.getSpeedCommandCount());  // suppressed
+}
+
+void test_router_emergency_stop_from_z21_reaches_ecos(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.emergencyStopAll(LocoSource::Z21_LAN);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getEmergencyStopCallCount());
+}
+
+void test_router_emergency_stop_from_ecos_reaches_z21(void) {
+    CommandRouter router;
+    MockProtocolInterface z21_mock;
+    router.setZ21Interface(&z21_mock);
+
+    router.emergencyStopAll(LocoSource::ECOS);
+
+    TEST_ASSERT_EQUAL_INT(1, z21_mock.getEmergencyStopCallCount());
+}
+
+void test_router_emergency_stop_from_z21_does_not_reecho_to_z21(void) {
+    CommandRouter router;
+    MockProtocolInterface z21_mock;
+    router.setZ21Interface(&z21_mock);
+
+    router.emergencyStopAll(LocoSource::Z21_LAN);
+
+    TEST_ASSERT_EQUAL_INT(0, z21_mock.getEmergencyStopCallCount());
+}
+
+void test_router_resume_operation_from_z21_reaches_ecos_and_xpressnet(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    MockProtocolInterface xnet_mock;
+    router.setEcosInterface(&ecos_mock);
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.resumeOperation(LocoSource::Z21_LAN);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getResumeOperationCallCount());
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getResumeOperationCallCount());
+}
+
+// ============================================================================
 // TEST RUNNER
 // ============================================================================
 
@@ -860,6 +973,16 @@ int main(void) {
     RUN_TEST(test_router_xpressnet_function_command_updates_last_command);
     RUN_TEST(test_router_ecos_speed_command_surfaces_existing_functions);
     RUN_TEST(test_router_ecos_function_command_updates_last_command);
+
+    RUN_TEST(test_router_route_z21_speed_to_ecos);
+    RUN_TEST(test_router_route_z21_function_to_ecos);
+    RUN_TEST(test_router_route_ecos_to_z21);
+    RUN_TEST(test_router_z21_does_not_receive_direct_xpressnet_fanout);
+    RUN_TEST(test_router_echo_prevention_z21_vs_ecos);
+    RUN_TEST(test_router_emergency_stop_from_z21_reaches_ecos);
+    RUN_TEST(test_router_emergency_stop_from_ecos_reaches_z21);
+    RUN_TEST(test_router_emergency_stop_from_z21_does_not_reecho_to_z21);
+    RUN_TEST(test_router_resume_operation_from_z21_reaches_ecos_and_xpressnet);
 
     #if ENABLE_DEBUG
     RUN_TEST(test_router_debug_print_echo_state_does_not_crash);

@@ -7,6 +7,113 @@ here. Newest entries first.
 
 ---
 
+**2026-08-27 — Phase 6 step 4: Z21 LAN support implemented, paused before live WLANmaus test**
+
+- **Design discussion before any code, twice**. First: how much would
+  this touch the existing Ecos implementation? Checked the real
+  `command_router.cpp` rather than reasoning abstractly - confirmed
+  `EcosInterface` needs zero changes (it has no idea which throttle-
+  facing protocol originated a call, by design of the `ProtocolInterface`
+  abstraction), and `CommandRouter` needs only the same small extension
+  already proven for XpressNet. Second, the actual command scope: agreed
+  with the user on loco speed/direction/function control plus track
+  power/emergency stop (mapped onto existing `CommandRouter` mechanisms,
+  essentially free reuse), deliberately deferring Z21 turnout commands
+  (XpressNet->Ecos accessory support already exists) and CV programming
+  (out of scope project-wide).
+- **Fetched and read the actual official Z21 LAN Protocol Specification
+  v1.13** (via WebSearch/WebFetch, saved to `docs/z21-lan-protokoll-en.pdf`
+  - same Modelleisenbahn GmbH copyright restriction as the ESU Ecos PDF,
+  "reproduction or use... not permitted without express permission",
+  gitignored) rather than working from general protocol familiarity.
+  `WebFetch`'s own AI summarizer couldn't parse the PDF content
+  correctly (returned an unrelated German document description) - worked
+  around it by reading the saved binary directly with `pdftotext -layout`
+  (already used successfully for the XpressNet spec PDFs earlier in this
+  project) and grepping the extracted text for the actual command tables.
+  Confirmed: UDP port 21105; packet framing `DataLen(2)+Header(2)+Data`;
+  X-Bus tunneled commands (header `0x40`) use a sub-header + XOR checksum,
+  structurally similar to XpressNet's own checksum handling; and -
+  critically - the base Z21 protocol has **no documented broadcast
+  auto-discovery** (only the separate "Z21 pro LINK" accessory device
+  does). This directly validated the earlier decision (Phase 6 step 2)
+  to make the bridge's static IP mandatory rather than optional, closing
+  the open question flagged at the time.
+- **Module split, matching the project's established pure-logic/hardware-
+  glue boundary**: `z21_protocol.h/.cpp` (checksum, address encode/
+  decode, speed encode/decode for all three DCC step modes, function
+  encode/decode, packet builders - no Arduino dependency, fully native-
+  testable) + `z21lan_interface.h/.cpp` (real `WiFiUDP` socket + a
+  fixed-size client session table, Arduino-only, excluded from
+  `env:native` like `ecos_interface.cpp`/`setup_mode.cpp`). Unlike
+  XpressNet (a shared RS485 bus where multiple physical throttles
+  already see each other's traffic for free), Z21 is UDP client-server -
+  this bridge itself has to track each connected client and broadcast
+  state to all of them; that complexity lives entirely inside
+  `Z21LanInterface` and never surfaces to `CommandRouter`, which still
+  only ever sees "one Z21 interface" - the same shape as `xpressnet`/
+  `ecos` already.
+- **DCC-28 speed-step decoding required deriving the actual bit-math
+  from the spec's own worked table**, not just reading a formula: the
+  wire format is `R00V5 VVVV` (an odd/even interleave on top of the
+  14-step encoding), and the spec only gives a lookup table, not a
+  closed-form equation. Derived `step = 2*VVVV - 3 + V5` by cross-
+  checking every row of the table (e.g. V5=0,VVVV=2 -> step1;
+  V5=1,VVVV=2 -> step2; V5=1,VVVV=15 -> step28 max) - then wrote native
+  tests asserting several of those exact table rows directly, not just
+  testing against the implementation's own output.
+- **Two real bugs found and fixed before ever reaching hardware**, via
+  careful reading rather than live-testing this time - the spec's own
+  quirk of reusing X-Header byte values across multiple distinct
+  commands (disambiguated only by a DB0 sub-byte) is an easy trap for a
+  dispatch-by-header implementation:
+  1. `LAN_X_SET_LOCO_DRIVE` and `LAN_X_SET_LOCO_FUNCTION` share
+     X-Header `0xE4`. The first cut of the dispatch logic checked only
+     the X-Header before treating a packet as a drive command - meaning
+     every real function-toggle packet from a client would have been
+     silently misinterpreted as a garbled speed command instead of
+     reaching the function-handling branch at all. Fixed by requiring
+     DB0's upper nibble to be `0x1` (`(data[1] & 0xF0) == 0x10`) before
+     treating a packet as `SET_LOCO_DRIVE`.
+  2. X-Header `0x21` is shared by four genuinely different requests
+     (`GET_VERSION`, `GET_STATUS`, `SET_TRACK_POWER_OFF`,
+     `SET_TRACK_POWER_ON`), disambiguated by DB0. The first draft defined
+     two separately-named constants (`Z21_X_GET_VERSION`,
+     `Z21_X_SET_TRACK_POWER`) both accidentally equal to the same numeric
+     value `0x21` - functionally harmless (the dispatch code happened to
+     use whichever name regardless of which command it actually meant),
+     but confusing and a real landmine for a future edit that assumes
+     the names mean what they say. Replaced with one clearly-named
+     `Z21_X_HEADER_SYSTEM` shared constant plus explicit `Z21_X_DB0_*`
+     sub-codes for each of the four requests.
+- 42 new tests (`test_z21_protocol`) - several asserting byte-for-byte
+  against the spec's own documented hex examples (e.g. `LAN_X_BC_TRACK_POWER_ON`
+  -> exactly `07 00 40 00 61 01 60`), not just internal consistency -
+  plus 9 new `CommandRouter` integration tests (Z21<->Ecos routing, echo
+  prevention between Z21 and Ecos, emergency stop/resume reaching Z21
+  and vice versa) mirroring the existing XpressNet test coverage. Native
+  suite 249/249 passing; `env:wemos` builds clean (RAM 56.2% from 55.1%,
+  Flash 36.6% from 35.9% - a modest, reasonable cost for the whole
+  feature). Confirmed on real hardware only that the interface itself
+  initializes correctly (serial log: "Z21 LAN listening on UDP port
+  21105") after a normal reflash - **no real WLANmaus has connected to
+  it yet**.
+- **Session paused here at the user's request**, before the live
+  WLANmaus test could happen. This is deliberately NOT being treated as
+  "confirmed live" the way every other Phase 6 step has been - CLAUDE.md's
+  step 4 entry is explicitly marked code-complete-but-unproven, matching
+  how Phase 5 step 6 was once marked "verified by code review only" for
+  a genuinely different reason (no hardware could trigger that path at
+  all) - this is instead "the hardware exists and can trigger it, the
+  session just ended first." No version bump, no git tag - both wait
+  for real confirmation. Real hardware is currently running the `debug`
+  build (not the `1.0.0` production release) so debug output stays
+  available when the WLANmaus session resumes; this is a deliberate
+  choice, not an oversight - reflashing to production and back again
+  later would be wasted effort.
+
+---
+
 **2026-08-27 — Phase 6 step 3: OTA firmware updates, confirmed live end-to-end**
 
 - **Design discussion before any code**: the user's stated goal was

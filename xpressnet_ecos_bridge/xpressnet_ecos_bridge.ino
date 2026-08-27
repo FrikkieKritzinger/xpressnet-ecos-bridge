@@ -207,6 +207,8 @@ void setup() {
             debugPrintf("ERROR: Z21 LAN initialization failed!\n");
         } else {
             debugPrintf("Z21 LAN interface initialized\n");
+            router.setZ21Interface(&z21_interface);
+            z21_interface.setCommandRouter(&router);
         }
     #endif
 

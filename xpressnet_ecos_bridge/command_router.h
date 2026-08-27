@@ -47,7 +47,15 @@ public:
     #if ENABLE_ECOS_LAN
     void setEcosInterface(ProtocolInterface* ecos);
     #endif
-    
+
+    /**
+     * Set reference to Z21 LAN interface (called after creation) - same
+     * pattern as XpressNet/Ecos (Phase 6 step 4).
+     */
+    #if ENABLE_Z21_LAN
+    void setZ21Interface(ProtocolInterface* z21);
+    #endif
+
     /**
      * Handle incoming command from XpressNet
      * 1. Update state engine
@@ -55,11 +63,26 @@ public:
      * 3. Broadcast to other protocols
      */
     void handleXpressNetCommand(uint16_t address, uint8_t speed, uint8_t direction);
-    
+
     /**
      * Handle incoming function command from XpressNet
      */
     void handleXpressNetFunctionCommand(uint16_t address, uint32_t functions);
+
+    /**
+     * Handle incoming command from Z21 LAN (WLANmaus or any Z21 client) -
+     * mirrors handleXpressNetCommand() exactly (Phase 6 step 4): update
+     * state engine, check echo prevention, forward to Ecos. Does not
+     * fan out directly to XpressNet or back to other Z21 clients -
+     * Ecos's own echo through handleEcosCommand()/broadcastCommand()
+     * already closes that loop, same as it already does for XpressNet.
+     */
+    void handleZ21Command(uint16_t address, uint8_t speed, uint8_t direction);
+
+    /**
+     * Handle incoming function command from Z21 LAN.
+     */
+    void handleZ21FunctionCommand(uint16_t address, uint32_t functions);
     
     /**
      * Handle incoming command from Ecos
@@ -169,7 +192,11 @@ private:
     #if ENABLE_ECOS_LAN
     ProtocolInterface* ecos = nullptr;
     #endif
-    
+
+    #if ENABLE_Z21_LAN
+    ProtocolInterface* z21 = nullptr;
+    #endif
+
     // Echo prevention state
     struct EchoPreventionState {
         uint16_t last_loco_address;

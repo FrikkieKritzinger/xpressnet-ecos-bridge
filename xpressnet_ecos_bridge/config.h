@@ -37,7 +37,7 @@
 #define ENABLE_XPRESSNET        1    // XpressNet interface (hardwired, timing-critical)
 #define ENABLE_ECOS_LAN         1    // Ecos LAN interface (WiFi, XML-based)
 #define ENABLE_LOCONET          0    // LocoNet interface (future)
-#define ENABLE_Z21_LAN          0    // Z21 LAN protocol (future)
+#define ENABLE_Z21_LAN          1    // Z21 LAN protocol (Phase 6 step 4 - WLANmaus support)
 #define ENABLE_OLED_DISPLAY     1    // OLED status display
 
 // ============================================================================
@@ -160,12 +160,34 @@
 #endif
 
 // ============================================================================
-// Z21 LAN CONFIGURATION (Future)
+// Z21 LAN CONFIGURATION (Phase 6 step 4)
 // ============================================================================
+// UDP server emulating a Z21 command station, so a Roco WLANmaus (or any
+// Z21-compatible app) can connect directly to this bridge. Confirmed
+// against the official Z21 LAN Protocol Specification v1.13 (docs/
+// z21-lan-protokoll-en.pdf, gitignored - redistribution-restricted like
+// the Ecos PDF): port 21105 is correct, and the base Z21 protocol has no
+// documented broadcast auto-discovery (only the separate "Z21 pro LINK"
+// accessory does) - clients are expected to already know the server's
+// IP, confirming the bridge's own static IP (Phase 6 step 2) as the
+// right call, not incidental.
 
 #if ENABLE_Z21_LAN
-    // TODO: Define Z21 configuration when implementing
-    #define Z21_PORT                21105  // Placeholder
+    #define Z21_PORT                    21105  // Official Z21 UDP port - do not change
+
+    // Fixed-size client session table - no dynamic allocation, matching
+    // the rest of this project. Unlike XpressNet (a shared bus where
+    // multiple physical throttles already see each other's traffic for
+    // free), Z21 is UDP client-server - this bridge itself must track
+    // each connected client (WLANmaus, phone app, etc.) and broadcast
+    // state to all of them individually.
+    #define MAX_Z21_CLIENTS                  4  // Concurrent Z21 clients
+    #define MAX_Z21_SUBSCRIBED_PER_CLIENT    8  // Loco addresses per client (spec allows up to 16; capped lower for RAM)
+
+    // Spec: "Each client is expected to communicate with the Z21 once per
+    // minute, otherwise it will be removed from the list of active
+    // participants."
+    #define Z21_CLIENT_TIMEOUT_MS       60000
 #endif
 
 // ============================================================================

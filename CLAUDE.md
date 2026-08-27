@@ -659,7 +659,9 @@ All disabled features = zero compiled code overhead.
   below for the full roadmap.
 - **Phase 6 (Future Improvements)**: 🔧 In progress - steps 1-3 (EEPROM
   storage, web config UI/Setup Mode, OTA updates) done and confirmed live;
-  steps 4-6 (Z21, LocoNet, TBD) not started - see the dedicated section below.
+  step 4 (Z21 LAN) code-complete but paused before live WLANmaus
+  validation; steps 5-6 (LocoNet, TBD) not started - see the dedicated
+  section below.
 
 ---
 
@@ -1204,7 +1206,77 @@ since the user's Ecos already handles this conveniently on a program track.
      and the config page's new nav link); native suite 198/198 passing;
      `env:wemos` builds clean (RAM 55.1%, Flash 35.9% - `ESP8266HTTPUpdateServer`'s
      modest overhead, on top of step 2's `ESP8266WebServer`).
-4. ⬜ **Z21 LAN protocol support** - for WLANmaus
+4. 🔧 **Z21 LAN protocol support - implemented, code-complete, NOT YET
+   confirmed live (2026-08-27)**. Distinct from every other Phase 6 step
+   so far - this one is paused before real-hardware validation, not
+   after, so treat it as unproven until a live WLANmaus session says
+   otherwise.
+   - **Scope agreed with the user before implementation**: loco speed/
+     direction/function control, track power on/off, and emergency stop -
+     all mapped onto this project's existing `CommandRouter` mechanisms.
+     Deliberately deferred: Z21 turnout/accessory commands (XpressNet->
+     Ecos accessory support already exists; a second input path for the
+     same feature is separate work) and CV programming (out of scope
+     project-wide).
+   - **Verified against the actual official spec**, not general
+     recollection: fetched and saved the real Z21 LAN Protocol
+     Specification v1.13 (docs/z21-lan-protokoll-en.pdf, gitignored -
+     same redistribution restriction as the Ecos PDF). Confirmed UDP
+     port 21105, and confirmed the base Z21 protocol has **no**
+     documented broadcast auto-discovery (only the separate "Z21 pro
+     LINK" accessory does) - directly validating the earlier decision to
+     make the bridge's static IP (step 1/2) mandatory rather than
+     optional, not just a good guess.
+   - **Architecture impact analysis, done before writing code**: verified
+     against the real `command_router.cpp` (not assumed) that Ecos
+     itself needs zero changes - `EcosInterface` has no idea which
+     throttle-facing protocol originated a call, by design. CommandRouter
+     needed only the same small, mechanical extension already used for
+     XpressNet: a `z21` member/setter, a `handleZ21Command()`/
+     `handleZ21FunctionCommand()` pair mirroring the XpressNet handlers,
+     and one new branch in `broadcastCommand()`'s existing
+     `LocoSource::ECOS` case (fanning Ecos-sourced updates out to Z21
+     too) plus a new `LocoSource::Z21_LAN` case (forwarding to Ecos only -
+     Ecos's own echo-back is what completes the loop to other throttle
+     protocols, same as it already does for XpressNet).
+   - **Module split**: `z21_protocol.h/.cpp` (pure packet encode/decode -
+     checksum, address/speed/function encode-decode, packet builders - no
+     Arduino dependency, native-testable, 42 new tests including several
+     that assert byte-for-byte against the spec's own worked examples) +
+     `z21lan_interface.h/.cpp` (real `WiFiUDP` socket + a fixed-size
+     client session table, Arduino-only, excluded from `env:native`).
+     Unlike XpressNet (a shared bus where multiple physical throttles
+     see each other's traffic for free), Z21 is UDP client-server - this
+     interface tracks each connected client itself and broadcasts state
+     to all of them, entirely internal to `Z21LanInterface` - CommandRouter
+     still only ever sees "one Z21 interface".
+   - **Two real bugs caught before ever reaching hardware**, via careful
+     review while writing the dispatch logic (not live-testing this
+     time - the spec's own quirk of reusing X-Header values across
+     multiple commands, disambiguated only by a DB0 sub-byte, is an easy
+     trap): `LAN_X_SET_LOCO_DRIVE` and `LAN_X_SET_LOCO_FUNCTION` share
+     X-Header `0xE4` - the first implementation would have silently
+     misinterpreted every function-toggle packet as a garbled drive
+     command; fixed by requiring DB0's upper nibble to be `0x1` before
+     treating it as a drive command. Renamed a pair of confusingly-aliased
+     constants (`Z21_X_GET_VERSION`/`Z21_X_SET_TRACK_POWER`, both
+     accidentally defined as the same numeric value `0x21`) to a single
+     clearly-named `Z21_X_HEADER_SYSTEM` shared header, since X-Header
+     `0x21` is genuinely shared by four different requests
+     (GET_VERSION/GET_STATUS/TRACK_POWER_OFF/TRACK_POWER_ON) disambiguated
+     by DB0, not something worth four separate same-valued aliases.
+   - 42 new tests (`test_z21_protocol`) + 9 new `CommandRouter` integration
+     tests (routing, echo prevention, emergency stop/resume, all mirroring
+     existing XpressNet test coverage); native suite 249/249 passing;
+     `env:wemos` builds clean (RAM 56.2%, Flash 36.6%). Confirmed on real
+     hardware only that the interface itself boots correctly and binds
+     UDP port 21105 (serial log: "Z21 LAN listening on UDP port 21105") -
+     **no real WLANmaus session has happened yet**. Session paused here
+     at the user's request before that test could run; picking back up
+     needs a live WLANmaus connected to the bridge's real IP
+     (`192.168.0.51`) to actually exercise speed/function/power control
+     end-to-end before this step can be marked done, version-bumped, or
+     tagged.
 5. ⬜ **LocoNet support** - parallel to XpressNet
 6. ⬜ **TBD** - deliberately left open; revisit once steps 1-5 are further
    along and it's clearer what's still missing. Accessory/turnout v2
@@ -1246,8 +1318,25 @@ conventional version number instead, since they plan to publish built
 `/update` page from the user's phone, correctly changed the running
 version on both the OLED and setup page after reboot. Native suite
 198/198 passing; `env:wemos` builds clean and is flashed to the real
-hardware at the real `1.0.0` release version. Next session should start
-with step 4 (Z21 LAN) unless redirected - note it's also where the
-"does WLANmaus need our static IP, or does it use broadcast discovery"
-question from step 2's design discussion should get a real answer
-against the actual Z21 LAN spec, not general protocol familiarity.
+hardware at the real `1.0.0` release version.
+
+**Since then**: **Phase 6 step 4 (Z21 LAN for WLANmaus) is implemented
+and code-complete, but explicitly NOT yet confirmed live** - the session
+was paused before a real WLANmaus test could run. The static-IP question
+from step 2 got its real answer: confirmed against the actual Z21 LAN
+Protocol Specification v1.13 (docs/z21-lan-protokoll-en.pdf, gitignored)
+that the base protocol has no broadcast auto-discovery, only the
+separate "Z21 pro LINK" accessory does - the mandatory static IP
+decision was correct, not just a good guess. New `z21_protocol.h/.cpp`
+(native-testable, 42 new tests, several asserting byte-for-byte against
+the spec's own examples) + `z21lan_interface.h/.cpp` (real WiFiUDP,
+Arduino-only) module pair, plus the same small CommandRouter extension
+XpressNet already has (a `z21` member/setter, `handleZ21Command()`/
+`handleZ21FunctionCommand()`, one new `broadcastCommand()` branch).
+Native suite 249/249 passing; `env:wemos` builds clean (RAM 56.2%, Flash
+36.6%); confirmed on real hardware only that the interface boots and
+binds UDP 21105 - no loco control has actually been exercised through a
+real WLANmaus yet. **Next session should resume here**: connect a real
+WLANmaus to the bridge's static IP (`192.168.0.51`) and validate speed/
+direction/function/track-power control end-to-end before marking this
+step done, bumping `version.h`, or tagging a release.
