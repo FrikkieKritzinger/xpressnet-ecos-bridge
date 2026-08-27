@@ -70,6 +70,30 @@ void OledDisplay::setEcosIp(const char* ip) {
     ecos_ip[sizeof(ecos_ip) - 1] = '\0';
 }
 
+void OledDisplay::showSetupMode(const char* ap_ssid, const char* ap_ip) {
+    display.clearDisplay();
+
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+
+    display.setCursor(0, 4);
+    display.print(F("*** SETUP MODE ***"));
+    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
+
+    display.setCursor(0, BLUE_CONTENT_Y);
+    display.print(F("Connect to WiFi:"));
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
+    display.print(ap_ssid);
+
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 3);
+    display.print(F("Browse to:"));
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 4);
+    display.print(F("http://"));
+    display.print(ap_ip);
+
+    display.display();
+}
+
 // ============================================================================
 // INITIALIZATION
 // ============================================================================

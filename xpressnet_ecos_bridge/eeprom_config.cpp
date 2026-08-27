@@ -21,9 +21,13 @@ void eepromConfigLoadDefaults(EepromConfig& config) {
     config.xnet_bus_timeout_ms = XPRESSNET_BUS_TIMEOUT;
     config.loco_inactivity_timeout_ms = LOCO_INACTIVITY_TIMEOUT;
 
-    // Static IP has no compile-time equivalent - default is DHCP (current,
-    // unchanged behavior) with the bridge_* fields left blank/unused.
-    config.use_static_ip = false;
+    // Bridge's own static IP has no compile-time equivalent (inherently
+    // network-specific) - left blank here. Blank/invalid EEPROM already
+    // forces Setup Mode on the very next boot, so normal operation never
+    // actually runs with these empty.
+    config.bridge_ip[0] = '\0';
+    config.bridge_gateway[0] = '\0';
+    config.bridge_subnet[0] = '\0';
 
     config.checksum = eepromConfigChecksum(config);
 }
@@ -47,5 +51,13 @@ bool eepromConfigIsValid(const EepromConfig& config) {
     if (config.magic != EEPROM_CONFIG_MAGIC) return false;
     if (config.version != EEPROM_CONFIG_VERSION) return false;
     if (config.checksum != eepromConfigChecksum(config)) return false;
+    return true;
+}
+
+bool eepromConfigIsComplete(const EepromConfig& config) {
+    if (!eepromConfigIsValid(config)) return false;
+    if (config.bridge_ip[0] == '\0') return false;
+    if (config.bridge_gateway[0] == '\0') return false;
+    if (config.bridge_subnet[0] == '\0') return false;
     return true;
 }

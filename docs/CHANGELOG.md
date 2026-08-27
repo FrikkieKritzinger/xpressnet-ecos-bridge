@@ -7,6 +7,154 @@ here. Newest entries first.
 
 ---
 
+**2026-08-27 — Phase 6 step 2: web-based config UI / Setup Mode, confirmed live (all 4 entry paths)**
+
+- **Design discussion before any code**: two real risks were unpacked with
+  the user before starting - which web server model to use (settled on
+  the built-in synchronous `ESP8266WebServer`, since Setup Mode usage is
+  rare/occasional rather than continuous like Ecos's heartbeat, so the
+  brief per-request blocking window doesn't violate the project's
+  non-blocking design premise), and what happens if a WiFi credential
+  change via the UI is wrong (a single-radio ESP8266 can't "test" new
+  WiFi credentials without dropping the very connection serving the test
+  page - three options were laid out: no fallback, a full WiFiManager-
+  style captive portal library, or a minimal hand-rolled AP fallback with
+  no new dependency; the middle option was chosen). The user then asked
+  the sharper question of *how you even get into Setup Mode in the first
+  place* when nothing is broken (STA connecting fine, you just want to
+  change a setting) - landing on a physical button as the deliberate
+  trigger, plus an automatic WiFi-disconnection-timeout fallback as
+  defense-in-depth, both confirmed live.
+- **Mid-design pivot on the bridge's static IP**: originally scoped in
+  step 1 as optional (DHCP by default, an on/off toggle). The user asked
+  directly whether the bridge and a future Z21 LAN interface (step 4, for
+  WLANmaus) would share one IP or need separate ones - confirmed they
+  share one (Z21 LAN will be another protocol interface on this same
+  device, not a separate one), and whether showing the DHCP-assigned IP
+  on the OLED would make static IP unnecessary. The answer distinguished
+  two different problems: OLED display solves *discovery* (a human
+  finding the IP) but not *stability* (an automated client like WLANmaus
+  reconnecting after a lease change) - and genuine Z21 hardware supports
+  UDP broadcast auto-discovery for exactly this reason, though that's a
+  claim from general protocol familiarity, not yet verified against an
+  authoritative Z21 LAN spec (to be confirmed properly at step 4). Given
+  the uncertainty, static IP was kept mandatory - a strict superset of
+  correctness regardless of what WLANmaus turns out to need. This
+  required revising the already-shipped step 1 EEPROM schema: removed
+  `use_static_ip`, made `bridge_ip`/`bridge_gateway`/`bridge_subnet`
+  mandatory with no DHCP path, bumped `EEPROM_CONFIG_VERSION` to 2 (a
+  real schema change - anything written by the v1 schema correctly fails
+  validation and reseeds, fine since v1 had shipped only hours earlier in
+  the same session, before any real deployment).
+- **Module split, mirroring the project's existing hardware-coupled
+  boundary**: `setup_web_form.h/.cpp` holds pure HTML generation and
+  field validation/parsing - no Arduino dependency at all, fully
+  native-testable (20 new tests: IPv4 format validation, per-field
+  accept/reject rules, HTML pre-fill content, undersized-buffer
+  rejection). `setup_mode.h/.cpp` wraps the real `WiFi.softAP()`/
+  `ESP8266WebServer`/RTC-memory/GPIO calls - Arduino-only, excluded from
+  `env:native` like `ecos_interface.cpp`/`eeprom_store.cpp`. Timeout
+  fields are shown/submitted in whole seconds (friendlier than raw
+  milliseconds), converted to/from the stored ms internally.
+- **Entry mechanism, RTC memory**: a "next boot only" flag
+  (`requestSetupModeOnNextBoot()`/`consumeSetupModeRequest()`) backed by
+  ESP8266 RTC user memory rather than EEPROM, since this is a transient
+  signal that shouldn't cost a real flash write cycle and doesn't need to
+  survive a power cycle. Checked the actual ESP8266 Arduino core source
+  (`Esp.cpp`) rather than assuming: `rtcUserMemoryWrite/Read(offset, ...)`
+  internally maps to physical block `64 + offset`, meaning offset 0
+  (what this code uses) safely lands past the SDK/eboot-reserved region
+  (the first 64 blocks) - confirmed correct, not a bug, when this was
+  briefly suspected during the button-hold investigation below.
+- **Real gap found via live testing: valid-but-incomplete config skipping
+  Setup Mode**. The user tested the very first real Setup Mode session
+  themselves (connected to the AP, loaded the page, saved real values) -
+  and afterward asked directly "if [the bridge IP fields] are blank in
+  eeprom, there is a problem". Investigation confirmed: a freshly-seeded
+  config (first boot) has a *valid* checksum (since `eepromConfigLoadDefaults()`
+  correctly computes it over whatever it seeded, including blank bridge
+  fields - there's no compile-time default for those) while still having
+  blank bridge IP/gateway/subnet. The existing entry condition only
+  checked raw checksum validity (`eepromConfigIsValid()`), so a *second*
+  boot after the same reseed would have found the struct "valid" and
+  proceeded straight into normal operation with an incomplete mandatory
+  setting, silently falling back to DHCP in `EcosInterface` instead of
+  forcing Setup Mode again. Fixed with a new `eepromConfigIsComplete()`
+  (validity plus non-empty bridge fields), with 4 new
+  `test_eeprom_config` tests specifically covering "valid but not
+  complete" as a distinct state from either "invalid" or "complete".
+- **Real bug found via live testing: the button pin was simply wrong**.
+  The original plan (documented and agreed with the user beforehand)
+  was to reuse the Wemos D1 Mini's onboard button, assumed wired to
+  GPIO0 - a "FLASH" button pattern common on other ESP8266 dev boards,
+  reusable with zero new wiring. Live testing showed the button
+  triggered an instant reboot with **zero** `checkSetupButton()` debug
+  output beforehand, and the very next boot proceeded straight to normal
+  operation (no Setup Mode request recorded) - meaning the reboot
+  bypassed the running sketch's code entirely. The user confirmed: their
+  board has exactly one button, and it's silkscreened "RESET", wired
+  directly to RST/EN - a genuine hardware reset line, unreadable and
+  un-holdable in software at all, not the GPIO0 pattern assumed. Fixed
+  by moving to a genuinely new, separately-wired pushbutton on
+  **D7/GPIO13** - deliberately not GPIO0 (which has its own "don't hold
+  during power-up or you enter the ROM bootloader" boot-strapping
+  caveat), and not GPIO2 (already used for the XNet activity LED) or
+  GPIO15 (also boot-strapping-significant) - so unlike the original
+  GPIO0 plan, D7 has no equivalent caveat to get wrong. The user manually
+  wired a test button to D7 to confirm the fix.
+- **A UX follow-up during the same live session**: the user's first real
+  save used `255.255.0.0` for the bridge subnet instead of the intended
+  `255.255.255.0` (a home-network `/24`). Rather than silently
+  "correcting" values on save (which would violate "EEPROM/what's
+  actually saved always wins, only ever default when genuinely blank" -
+  a principle the user explicitly restated and endorsed once this was
+  discussed), a **display-only** suggestion was added:
+  `buildConfigPageHtml()` shows `255.255.255.0` as the pre-filled value
+  only when `bridge_subnet` is truly empty (first boot), and never
+  overrides an already-saved value, even a non-standard one - confirmed
+  by two dedicated tests (`test_html_suggests_default_subnet_when_blank`/
+  `test_html_keeps_saved_subnet_when_not_blank`) and by the user's own
+  re-test: the correction only took effect once they manually cleared
+  and retyped the field, exactly as designed.
+- **All 4 Setup Mode entry paths confirmed live, on real hardware,
+  directly by the user**:
+  1. Blank/erased EEPROM -> immediate Setup Mode on first boot.
+  2. Technically-valid-but-incomplete EEPROM -> Setup Mode (the gap
+     found and fixed above) - this was the actual live scenario that
+     surfaced the bug, not a synthetic test.
+  3. Holding the (corrected) D7 button for 3s while running normally -
+     confirmed via serial capture: `Setup button held - entering Setup
+     Mode on reboot` followed by `Entering Setup Mode (requested)` on
+     the next boot.
+  4. 5 minutes of continuous WiFi disconnection - tested with a
+     temporarily shortened 20s threshold plus a RAM-only fake SSID
+     override (never written to EEPROM, confirmed via direct flash read
+     after reverting), both fully reverted before the final production
+     flash. Confirmed via serial capture: `WiFi disconnected for too
+     long - entering Setup Mode on reboot` firing at the 20s mark, then
+     `Entering Setup Mode (requested)` on the next boot - and separately
+     confirmed visually by the user, who watched the OLED switch from
+     normal RUN-mode pages to the SETUP MODE screen at the same moment.
+  A full real save/reboot cycle was also confirmed end-to-end: submitted
+  values persisted to EEPROM exactly as entered (verified via direct
+  flash reads, catching one self-inflicted test-harness bug along the way
+  - a temporary WiFi-fallback test hook that mutated the config struct
+  without recomputing its checksum, which the completeness check
+  correctly - if confusingly, for that specific test - flagged as
+  corrupted), and the reboot into normal operation correctly applied the
+  new static IP (`WiFi connected! IP: 192.168.0.51` - the configured
+  address, confirmed not a DHCP-assigned one).
+- 20 new tests (`test_setup_web_form`) + 4 more in `test_eeprom_config`
+  (for `eepromConfigIsComplete()`); native suite 191/191 passing;
+  `env:wemos` builds clean (RAM 53.9% from 45.4%, Flash 34.7% from
+  32.1% - the jump is `ESP8266WebServer`'s real overhead, only paid
+  while actually in Setup Mode, not during normal bridging). Real
+  hardware is now fully configured (WiFi, Ecos IP, timeouts, static IP,
+  correct subnet) via Setup Mode itself, running the final production
+  build with all temporary test hooks reverted.
+
+---
+
 **2026-08-27 — Phase 6 step 1: EEPROM storage, confirmed live via direct flash inspection**
 
 - **Scope, agreed before writing any code**: a design discussion (see

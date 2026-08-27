@@ -19,8 +19,13 @@
  * falls back to compile-time defaults from config.h and writes them to
  * EEPROM once, so subsequent boots read a valid struct without needing
  * to reseed every time.
+ * @return true if a valid existing config was loaded, false if it had to
+ *         be reseeded from defaults (e.g. blank/erased flash, first boot,
+ *         or an incompatible schema version) - callers use this to decide
+ *         whether to force Setup Mode, since a freshly-seeded config has
+ *         no real WiFi/bridge IP to operate with yet.
  */
-void eepromStoreLoad(EepromConfig& config);
+bool eepromStoreLoad(EepromConfig& config);
 
 /**
  * Persist `config` to EEPROM (recomputes the checksum first, so callers

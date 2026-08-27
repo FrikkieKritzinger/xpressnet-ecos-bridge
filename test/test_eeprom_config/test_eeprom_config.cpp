@@ -38,11 +38,60 @@ void test_defaults_matches_config_h_values(void) {
     TEST_ASSERT_EQUAL_UINT32(LOCO_INACTIVITY_TIMEOUT, config.loco_inactivity_timeout_ms);
 }
 
-void test_defaults_static_ip_disabled(void) {
+void test_defaults_bridge_ip_blank(void) {
+    // No compile-time equivalent exists for the bridge's own static IP -
+    // stays blank until Setup Mode is used to fill it in.
     EepromConfig config;
     eepromConfigLoadDefaults(config);
 
-    TEST_ASSERT_FALSE(config.use_static_ip);
+    TEST_ASSERT_EQUAL_STRING("", config.bridge_ip);
+    TEST_ASSERT_EQUAL_STRING("", config.bridge_gateway);
+    TEST_ASSERT_EQUAL_STRING("", config.bridge_subnet);
+}
+
+void test_defaults_config_is_valid_but_not_complete(void) {
+    // Real gap found live 2026-08-27: a freshly-seeded config passes
+    // eepromConfigIsValid() (correct checksum) while bridge_ip is still
+    // blank - eepromConfigIsComplete() must catch that so Setup Mode
+    // doesn't get skipped on a later boot.
+    EepromConfig config;
+    eepromConfigLoadDefaults(config);
+
+    TEST_ASSERT_TRUE(eepromConfigIsValid(config));
+    TEST_ASSERT_FALSE(eepromConfigIsComplete(config));
+}
+
+void test_complete_requires_bridge_ip(void) {
+    EepromConfig config;
+    eepromConfigLoadDefaults(config);
+    strncpy(config.bridge_gateway, "192.168.0.1", sizeof(config.bridge_gateway) - 1);
+    strncpy(config.bridge_subnet, "255.255.255.0", sizeof(config.bridge_subnet) - 1);
+    config.checksum = eepromConfigChecksum(config);
+
+    TEST_ASSERT_FALSE(eepromConfigIsComplete(config));  // bridge_ip still blank
+}
+
+void test_complete_true_when_all_bridge_fields_set(void) {
+    EepromConfig config;
+    eepromConfigLoadDefaults(config);
+    strncpy(config.bridge_ip, "192.168.0.51", sizeof(config.bridge_ip) - 1);
+    strncpy(config.bridge_gateway, "192.168.0.1", sizeof(config.bridge_gateway) - 1);
+    strncpy(config.bridge_subnet, "255.255.255.0", sizeof(config.bridge_subnet) - 1);
+    config.checksum = eepromConfigChecksum(config);
+
+    TEST_ASSERT_TRUE(eepromConfigIsComplete(config));
+}
+
+void test_complete_false_for_invalid_config(void) {
+    EepromConfig config;
+    eepromConfigLoadDefaults(config);
+    strncpy(config.bridge_ip, "192.168.0.51", sizeof(config.bridge_ip) - 1);
+    strncpy(config.bridge_gateway, "192.168.0.1", sizeof(config.bridge_gateway) - 1);
+    strncpy(config.bridge_subnet, "255.255.255.0", sizeof(config.bridge_subnet) - 1);
+    // Deliberately not recomputing the checksum - all bridge fields set,
+    // but the struct itself is now corrupted/stale.
+
+    TEST_ASSERT_FALSE(eepromConfigIsComplete(config));
 }
 
 void test_defaults_produces_valid_config(void) {
@@ -124,7 +173,11 @@ int main(void) {
 
     RUN_TEST(test_defaults_sets_valid_magic_and_version);
     RUN_TEST(test_defaults_matches_config_h_values);
-    RUN_TEST(test_defaults_static_ip_disabled);
+    RUN_TEST(test_defaults_bridge_ip_blank);
+    RUN_TEST(test_defaults_config_is_valid_but_not_complete);
+    RUN_TEST(test_complete_requires_bridge_ip);
+    RUN_TEST(test_complete_true_when_all_bridge_fields_set);
+    RUN_TEST(test_complete_false_for_invalid_config);
     RUN_TEST(test_defaults_produces_valid_config);
 
     RUN_TEST(test_checksum_is_deterministic);

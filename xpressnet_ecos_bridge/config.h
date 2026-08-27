@@ -75,8 +75,8 @@
 #if ENABLE_ECOS_LAN
     // Network configuration - EEPROM default (Phase 6 step 1, 2026-08-27):
     // seeded on first boot, live value comes from EEPROM via
-    // EcosInterface::setConfig(). Bridge's own static IP (optional, off/DHCP
-    // by default) has no compile-time equivalent - see EepromConfig.
+    // EcosInterface::setConfig(). Bridge's own static IP (mandatory, no
+    // DHCP - see EepromConfig) has no compile-time equivalent at all.
     #define ECOS_IP                 "192.168.0.50"   // IP address of your Ecos (hostname ECOS)
     #define ECOS_PORT               15471            // Standard Ecos port (do not change)
 
@@ -176,6 +176,40 @@
 #endif
 
 // ============================================================================
+// SETUP MODE CONFIGURATION (Phase 6 step 2)
+// ============================================================================
+// AP mode + web config page for editing the EEPROM-persisted settings (see
+// eeprom_config.h). All 6 fields (WiFi SSID/password, Ecos IP, XNet bus
+// timeout, loco inactivity timeout, bridge static IP) are only editable
+// here, in this dedicated mode - never live during normal operation.
+//
+// Entered via: (1) blank/invalid EEPROM (first boot - no known WiFi to even
+// attempt), (2) holding a dedicated momentary pushbutton (D7/GPIO13 to
+// GND, using INPUT_PULLUP internally - no external resistor needed) for
+// SETUP_BUTTON_HOLD_MS while running normally, or (3)
+// WIFI_FALLBACK_TIMEOUT_MS of continuous WiFi disconnection (e.g. router
+// password changed) - a defense-in-depth auto-recovery so a WiFi credential
+// mistake never requires a USB reflash to fix.
+//
+// Real correction (2026-08-27): originally planned to reuse the Wemos D1
+// Mini's onboard button assuming it was wired to GPIO0 (a "FLASH" button,
+// common on other ESP8266 dev boards). Confirmed live that this specific
+// board has only one onboard button, wired directly to RST/EN - a genuine
+// hardware reset that bypasses all running code, silkscreened "RESET",
+// not readable/holdable in software at all. A real dedicated button is
+// required; D7/GPIO13 was chosen specifically to avoid GPIO0/GPIO2/GPIO15,
+// which all have boot-strapping significance (pulling them low/high at
+// power-on selects boot mode) - GPIO13 has none, so there's no equivalent
+// "don't hold this during power-up" caveat to document or get wrong.
+
+#define SETUP_BUTTON_PIN            13      // D7/GPIO13 - dedicated pushbutton to GND (new wiring required)
+#define SETUP_BUTTON_HOLD_MS        3000    // Hold duration to trigger setup mode
+#define WIFI_FALLBACK_TIMEOUT_MS    300000  // 5 min continuous WiFi disconnection -> auto setup mode
+#define SETUP_MODE_AP_SSID          "XNetBridge-Setup"
+#define SETUP_MODE_AP_PASSWORD      ""      // Open network - matches this project's no-auth posture elsewhere; the button/timeout triggers already require physical presence or an already-broken connection
+#define SETUP_MODE_WEB_PORT         80
+
+// ============================================================================
 // STATE ENGINE CONFIGURATION
 // ============================================================================
 // In-memory locomotive state tracking (no persistence)
@@ -223,10 +257,12 @@
 #define MAX_XNET_MESSAGE_LENGTH     32    // bytes - XpressNet message
 
 // Feature flags for future expansion
-// EEPROM config (Phase 6 step 1) is implemented unconditionally - see
-// eeprom_config.h/eeprom_store.h - not behind a toggle, it's small, core
-// infrastructure rather than an optional protocol.
-#define ENABLE_WEB_CONFIG           0     // Web-based configuration (Phase 6 step 2)
+// EEPROM config (Phase 6 step 1) and the web config/setup mode (Phase 6
+// step 2) are both implemented unconditionally - see eeprom_config.h/
+// eeprom_store.h and setup_mode.h. Not behind toggles: EEPROM is small
+// core infrastructure, and the web server only runs while actually in
+// Setup Mode (not during normal operation), so there's no always-on cost
+// to disable.
 #define ENABLE_OTA_UPDATE           0     // Over-the-air firmware updates (Phase 6 step 3)
 
 // ============================================================================

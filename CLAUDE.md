@@ -657,9 +657,9 @@ All disabled features = zero compiled code overhead.
   verified by code review only; step 10 is v1-scoped, Ecos→XpressNet and a
   dedicated display page deliberately deferred) - see the dedicated section
   below for the full roadmap.
-- **Phase 6 (Future Improvements)**: 🔧 In progress - step 1 (EEPROM
-  storage) done and confirmed live; steps 2-6 (web config UI, OTA, Z21,
-  LocoNet, TBD) not started - see the dedicated section below.
+- **Phase 6 (Future Improvements)**: 🔧 In progress - steps 1-2 (EEPROM
+  storage, web config UI/Setup Mode) done and confirmed live; steps 3-6
+  (OTA, Z21, LocoNet, TBD) not started - see the dedicated section below.
 
 ---
 
@@ -1021,7 +1021,7 @@ rather than completed, since it served no design purpose.
 
 ---
 
-## 🎯 Phase 6: Future Improvements 🔧 IN PROGRESS (step 1 of 6 done)
+## 🎯 Phase 6: Future Improvements 🔧 IN PROGRESS (steps 1-2 of 6 done)
 
 Ordered and agreed 2026-08-14. CV/programming-track support was audited
 during Phase 5 planning but pulled out entirely - not currently planned,
@@ -1031,10 +1031,12 @@ since the user's Ecos already handles this conveniently on a program track.
    Final scope, six real fields: WiFi SSID, WiFi password, Ecos IP,
    `XPRESSNET_BUS_TIMEOUT`, `LOCO_INACTIVITY_TIMEOUT` (added during
    implementation - same "judgment call that varies by usage pattern"
-   category as the bus timeout), and an optional bridge static IP
-   (`use_static_ip`/`bridge_ip`/`bridge_gateway`/`bridge_subnet` - off/DHCP
-   by default, added ahead of the web UI step since browsing to a
-   DHCP-assigned address is annoying once that UI exists).
+   category as the bus timeout), and the bridge's own static IP
+   (`bridge_ip`/`bridge_gateway`/`bridge_subnet`). **Revised during step 2
+   design (2026-08-27) from optional/DHCP-by-default to mandatory, no
+   DHCP** - Z21 LAN (step 4, a future WLANmaus client) will need to
+   depend on the bridge's address reliably, and a fixed IP is simpler
+   than chasing a DHCP lease; this bumped `EEPROM_CONFIG_VERSION` to 2.
    - **New module**: `eeprom_config.h/.cpp` (pure struct/defaults/checksum/
      validation logic, no `EEPROM.h` dependency - fully native-testable,
      11 new tests) + `eeprom_store.h/.cpp` (the actual `EEPROM.h` read/
@@ -1086,8 +1088,69 @@ since the user's Ecos already handles this conveniently on a program track.
      sequencing.
    - 11 new tests (`test_eeprom_config`); native suite 149/149 passing;
      `env:wemos` builds clean (RAM 45.4%, Flash 32.1%).
-2. ⬜ **Web-based configuration UI** - backed by the EEPROM storage from
-   step 1.
+2. ✅ **Web-based configuration UI / Setup Mode - implemented and
+   confirmed live (2026-08-27)**. All 6 EEPROM fields are editable only
+   in a dedicated "Setup Mode" (AP + web form), never live during normal
+   bridging - reboot required to apply, matching the user's explicit
+   preference over an always-on config server.
+   - **Entry, 4 ways, all confirmed live**: (1) blank/invalid EEPROM -
+     first boot, no known WiFi/bridge IP to even attempt; (2) EEPROM
+     technically valid (correct checksum) but *incomplete* - a real gap
+     found live: a freshly-reseeded config has blank bridge IP fields
+     with a valid checksum, which would otherwise silently start normal
+     operation with DHCP fallback instead of forcing setup - fixed with
+     `eepromConfigIsComplete()`, a second check beyond raw checksum
+     validity; (3) holding a dedicated pushbutton on D7/GPIO13 for 3s
+     while running normally; (4) 5 minutes of continuous WiFi
+     disconnection (e.g. router password changed) - defense-in-depth so
+     a bad WiFi credential never requires a USB reflash to recover.
+   - **Button pin correction, found live**: originally planned to reuse
+     the Wemos D1 Mini's onboard button, assumed wired to GPIO0 (a
+     "FLASH" button, common on other ESP8266 boards) - confirmed on the
+     user's actual hardware that this board's only onboard button is
+     wired directly to RST/EN instead, silkscreened "RESET", a genuine
+     hardware reset that bypasses all running code and can't be
+     "held" in software at all (confirmed via live serial capture:
+     zero button-hold debug output before an instant reboot). Moved to a
+     new dedicated pushbutton wired to D7/GPIO13 - chosen specifically to
+     avoid GPIO0/GPIO2/GPIO15's boot-strapping significance, so (unlike
+     the original GPIO0 plan) there's no "don't hold this during
+     power-up" caveat to document or get wrong. Requires real new wiring,
+     which the user did on the workbench to confirm the fix.
+   - **Module split**: `setup_web_form.h/.cpp` (pure HTML generation +
+     field validation/parsing, no Arduino dependency - native-testable,
+     20 new tests) + `setup_mode.h/.cpp` (real `ESP8266WebServer`/
+     `WiFi.softAP()`/RTC-memory/GPIO calls, Arduino-only, excluded from
+     `env:native` like `eeprom_store.cpp`). Timeout fields are shown/
+     submitted in whole seconds, converted to/from the stored
+     milliseconds internally. Bridge IP/gateway/subnet are `required`
+     HTML fields (client- and server-side) - the subnet specifically
+     shows a `255.255.255.0` suggestion when blank (added after live
+     testing: the user's first real submission used `255.255.0.0`
+     instead of the intended `/24`, and asked for a nudge toward the
+     standard value) but never overrides an already-saved value, even a
+     non-standard one - EEPROM always wins over any suggestion once set.
+   - **Reboot-to-apply signal**: `requestSetupModeOnNextBoot()`/
+     `consumeSetupModeRequest()` use ESP8266 RTC user memory (a
+     magic+flag struct at offset 0, which the core maps to physical
+     block 64 - confirmed via the actual core source, safely past the
+     SDK/eboot-reserved region) rather than EEPROM, since this is a
+     one-shot "next boot only" signal that doesn't need to survive a
+     power cycle and shouldn't cost a real flash write cycle.
+   - **Confirmed live for all 4 entry paths** via direct serial capture
+     (this feature's own debug output isn't timing-sensitive the way
+     step 1's persistence proof was, so serial logs were reliable here)
+     and cross-checked against direct flash reads for the actual saved
+     values: blank-EEPROM entry, incomplete-config entry, button-hold
+     entry (after the D7 rewiring), and WiFi-fallback entry (tested with
+     a temporary shortened timeout + fake SSID override, both fully
+     reverted afterward) all fire correctly, and a real save/reboot
+     cycle correctly persists and applies the new static IP (`WiFi
+     connected! IP: 192.168.0.51` - the configured static address, not a
+     DHCP-assigned one).
+   - 20 new tests (`test_setup_web_form`) + 4 more in `test_eeprom_config`
+     for `eepromConfigIsComplete()`; native suite 191/191 passing;
+     `env:wemos` builds clean (RAM 53.9%, Flash 34.7%).
 3. ⬜ **OTA (over-the-air) firmware updates**
 4. ⬜ **Z21 LAN protocol support** - for WLANmaus
 5. ⬜ **LocoNet support** - parallel to XpressNet
@@ -1109,21 +1172,22 @@ section above. Full narrative detail for every step lives in
 `docs/CHANGELOG.md` (dated entries); this section is intentionally just
 current status.
 
-Most recent: **Phase 6 step 1 (EEPROM storage)** implemented and confirmed
-live (2026-08-27) - six fields (WiFi SSID/password, Ecos IP, XNet bus
-timeout, loco inactivity timeout, optional bridge static IP), a new
-`eeprom_config.h/.cpp` (native-testable) + `eeprom_store.h/.cpp`
-(Arduino-only) module pair, `config.h`'s old constants now documented as
-EEPROM seed defaults rather than live values. Confirmed via direct flash
-inspection (`esptool.py read_flash`, bypassing serial-log timing
-ambiguity that tripped up an earlier verification attempt): blank flash
-correctly reseeds, a plain reflash never touches the EEPROM sector, and a
-changed compile-time default correctly loses to already-persisted EEPROM
-data. One real bug fixed along the way: `EEPROM.commit()`'s return value
-was never checked. Native suite 149/149 passing; `env:wemos` builds clean
-and is flashed to the real hardware. Next session should start with step 2
-(web-based config UI) unless redirected.
-
-With Phase 5 complete, there's no active roadmap item right now - see
-"Future Improvements" above for longer-term, not-yet-scheduled ideas
-(LocoNet, Z21, accessory v2, etc.) if picking up new work.
+Most recent: **Phase 6 step 2 (web-based config UI / Setup Mode)**
+implemented and confirmed live (2026-08-27) - a dedicated AP+web-form mode
+(never live-editable during normal bridging) for all 6 EEPROM fields, new
+`setup_web_form.h/.cpp` (native-testable, 20 new tests) + `setup_mode.h/.cpp`
+(Arduino-only) module pair. Entered via blank EEPROM, a technically-valid-
+but-incomplete config (a real gap found and fixed with a new
+`eepromConfigIsComplete()` check), a 3s hold on a dedicated D7/GPIO13
+button, or 5 minutes of continuous WiFi disconnection - all 4 confirmed
+live. Also revised step 1's bridge static IP from optional/DHCP to
+mandatory (Z21 LAN will need to depend on it reliably), bumping
+`EEPROM_CONFIG_VERSION` to 2. One real design correction found live: the
+original plan assumed the Wemos D1 Mini's onboard button was wired to
+GPIO0 (reusable, no new wiring) - confirmed on real hardware it's wired
+to RST instead (a hardware reset, unusable in software), so a genuinely
+new pushbutton was wired to D7/GPIO13. Native suite 191/191 passing;
+`env:wemos` builds clean and is flashed to the real hardware, fully
+configured (static IP, corrected subnet, real WiFi/Ecos settings) via
+the new Setup Mode itself. Next session should start with step 3 (OTA
+updates) unless redirected.

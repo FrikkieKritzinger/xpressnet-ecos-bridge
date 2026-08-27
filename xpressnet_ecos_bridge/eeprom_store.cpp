@@ -6,18 +6,19 @@
 #include <EEPROM.h>
 #include "utils/debug.h"
 
-void eepromStoreLoad(EepromConfig& config) {
+bool eepromStoreLoad(EepromConfig& config) {
     EEPROM.begin(sizeof(EepromConfig));
     EEPROM.get(0, config);
 
     if (eepromConfigIsValid(config)) {
         DEBUG_PRINTF("EEPROM: loaded valid config (version %u)\n", config.version);
-        return;
+        return true;
     }
 
     DEBUG_PRINTF("EEPROM: no valid config found - seeding defaults from config.h\n");
     eepromConfigLoadDefaults(config);
     eepromStoreSave(config);
+    return false;
 }
 
 void eepromStoreSave(EepromConfig& config) {

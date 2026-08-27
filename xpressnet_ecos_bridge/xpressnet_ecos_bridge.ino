@@ -23,6 +23,7 @@
 #include "interfaces/interface_base.h"
 #include "eeprom_config.h"
 #include "eeprom_store.h"
+#include "setup_mode.h"
 
 // Protocol interfaces - conditionally included based on config.h
 #if ENABLE_XPRESSNET
@@ -54,11 +55,17 @@
 // GLOBAL OBJECTS - Static allocation (no dynamic memory)
 // ============================================================================
 
-// Persisted settings (Phase 6 step 1) - WiFi SSID/password, Ecos IP, XNet
-// bus timeout, loco inactivity timeout, optional bridge static IP. Loaded
-// from EEPROM in setup() before any interface begin()s; config.h holds
-// only the compile-time defaults used to seed it on first boot.
+// Persisted settings (Phase 6 step 1/2) - WiFi SSID/password, Ecos IP,
+// XNet bus timeout, loco inactivity timeout, bridge static IP (mandatory,
+// no DHCP). Loaded from EEPROM in setup() before any interface begin()s;
+// config.h holds only the compile-time defaults used to seed it on first
+// boot (blank for the bridge's own IP, which has no sensible default).
 EepromConfig g_config;
+
+// True for the remainder of this boot once Setup Mode (Phase 6 step 2) has
+// been entered - loop() branches entirely on this, normal bridging and
+// Setup Mode are mutually exclusive within a single boot.
+bool g_in_setup_mode = false;
 
 // Command router and state engine
 CommandRouter router;
@@ -124,7 +131,36 @@ void setup() {
     // so WiFi/Ecos IP/timeouts are all correct on the very first connection
     // attempt below, not just after a later reload.
     debugPrintf("Loading EEPROM config...\n");
-    eepromStoreLoad(g_config);
+    bool config_was_valid = eepromStoreLoad(g_config);
+
+    // Beyond "not corrupted" (config_was_valid), the bridge's own static
+    // IP has no compile-time default, so a freshly-reseeded config can be
+    // validly checksummed while still blank - confirmed live 2026-08-27,
+    // this really happens on first boot. eepromConfigIsComplete() checks
+    // that too, so an incomplete-but-technically-valid config still forces
+    // Setup Mode instead of silently falling back to DHCP in EcosInterface.
+    bool config_is_complete = eepromConfigIsComplete(g_config);
+
+    // Setup Mode (Phase 6 step 2) entry: incomplete/invalid EEPROM (first
+    // boot, or a valid-but-incomplete reseed - no known WiFi/bridge IP to
+    // even attempt) or a request left by checkSetupButton()/
+    // checkWifiFallback() in a previous boot (RTC memory, one-shot).
+    // Mutually exclusive with normal bridging for this boot.
+    bool setup_requested = consumeSetupModeRequest();
+    if (!config_is_complete || setup_requested) {
+        debugPrintf("Entering Setup Mode (%s)\n",
+                    !config_is_complete
+                        ? (config_was_valid ? "config incomplete - missing bridge IP" : "no valid config")
+                        : "requested");
+        g_in_setup_mode = true;
+        setupModeBegin(g_config);
+        #if ENABLE_OLED_DISPLAY
+            display.showSetupMode(SETUP_MODE_AP_SSID, setupModeGetApIpString());
+        #endif
+        debugPrintf("=== Setup Mode ready ===\n\n");
+        return;
+    }
+
     router.getStateEngine().setInactivityTimeoutMs(g_config.loco_inactivity_timeout_ms);
     #if ENABLE_OLED_DISPLAY
         display.setEcosIp(g_config.ecos_ip);
@@ -155,7 +191,7 @@ void setup() {
             ecos_interface.setCommandRouter(&router);
         }
     #endif
-    
+
     #if ENABLE_LOCONET
         debugPrintf("Initializing LocoNet interface...\n");
         if (!loconet_interface.begin()) {
@@ -164,7 +200,7 @@ void setup() {
             debugPrintf("LocoNet interface initialized\n");
         }
     #endif
-    
+
     #if ENABLE_Z21_LAN
         debugPrintf("Initializing Z21 LAN interface...\n");
         if (!z21_interface.begin()) {
@@ -173,7 +209,7 @@ void setup() {
             debugPrintf("Z21 LAN interface initialized\n");
         }
     #endif
-    
+
     debugPrintf("=== Setup Complete - Ready to operate ===\n\n");
 }
 
@@ -182,11 +218,20 @@ void setup() {
 // ============================================================================
 
 void loop() {
+    // Setup Mode (Phase 6 step 2) is a completely separate operating mode -
+    // no XNet/Ecos/normal display work happens at all while active. A
+    // valid /save submission inside setupModeUpdate() reboots on its own.
+    if (g_in_setup_mode) {
+        setupModeUpdate();
+        yield();
+        return;
+    }
+
     // ========================================================================
     // PHASE 1: TIME-CRITICAL OPERATIONS (XpressNet priority)
     // ========================================================================
     // These must run every iteration to avoid missing messages
-    
+
     #if ENABLE_XPRESSNET
         // XpressNet is most timing-sensitive - update first
         // Message receive window is ~20-50ms, must not miss
@@ -215,7 +260,12 @@ void loop() {
     // PHASE 3: PERIODIC HOUSEKEEPING (low priority)
     // ========================================================================
     // These run on timers, not every loop iteration
-    
+
+    // Setup Mode triggers (Phase 6 step 2) - cheap, non-blocking checks;
+    // both can reboot straight into Setup Mode on their own.
+    checkSetupButton();
+    checkWifiFallback();
+
     // Check for inactive locos (expire after timeout)
     if (expiry_check_task.shouldExecute()) {
         router.update();  // Internal call to StateEngine::expungeInactiveLocos()

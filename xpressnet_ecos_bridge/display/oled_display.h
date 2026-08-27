@@ -96,6 +96,17 @@ public:
      */
     void setEcosIp(const char* ip);
 
+    /**
+     * Show a dedicated static "SETUP MODE" screen (Phase 6 step 2) - not
+     * part of the normal paged rotation, no auto-refresh needed since
+     * nothing on it changes while Setup Mode is active. Call once when
+     * entering Setup Mode; the caller (setup_mode.cpp) owns not calling
+     * the normal update() afterward until back in normal operation.
+     * @param ap_ssid The Setup Mode AP's SSID to connect to
+     * @param ap_ip The AP's IP to browse to (typically 192.168.4.1)
+     */
+    void showSetupMode(const char* ap_ssid, const char* ap_ip);
+
 private:
     // Hardware objects
     Adafruit_SSD1306 display;

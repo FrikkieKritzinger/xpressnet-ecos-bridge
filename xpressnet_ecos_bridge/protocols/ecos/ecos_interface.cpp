@@ -79,10 +79,15 @@ bool EcosInterface::begin() {
         const char* ssid = config ? config->wifi_ssid : WIFI_SSID;
         const char* password = config ? config->wifi_password : WIFI_PASSWORD;
 
-        // Bridge's own static IP (Phase 6 step 1) - off by default (DHCP,
-        // unchanged behavior) unless EEPROM has it explicitly enabled.
-        // Must be called before WiFi.begin().
-        if (config && config->use_static_ip) {
+        // Bridge's own static IP (Phase 6 step 1/2) - mandatory, no DHCP
+        // option (decided during step 2 design: Z21 LAN, Phase 6 step 4,
+        // will need to know the bridge's own address reliably). Must be
+        // called before WiFi.begin(). In real operation this is always
+        // present by the time begin() runs - blank/invalid EEPROM forces
+        // Setup Mode before normal operation is ever reached - but falls
+        // back to DHCP defensively rather than refusing to start at all
+        // if it's somehow missing (e.g. a direct/standalone begin() call).
+        if (config && config->bridge_ip[0] != '\0') {
             IPAddress ip, gateway, subnet;
             if (ip.fromString(config->bridge_ip) &&
                 gateway.fromString(config->bridge_gateway) &&
@@ -90,8 +95,10 @@ bool EcosInterface::begin() {
                 WiFi.config(ip, gateway, subnet);
                 DEBUG_ECOS_PRINTF("Using static IP %s\n", config->bridge_ip);
             } else {
-                DEBUG_ECOS_PRINTF("WARNING: static IP enabled but fields invalid - falling back to DHCP\n");
+                DEBUG_ECOS_PRINTF("WARNING: static IP fields invalid - falling back to DHCP\n");
             }
+        } else {
+            DEBUG_ECOS_PRINTF("WARNING: no static IP configured - falling back to DHCP (run Setup Mode)\n");
         }
 
         // Note: WiFi.begin() is fire-and-forget; actual connection happens asynchronously
