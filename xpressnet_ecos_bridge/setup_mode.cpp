@@ -5,6 +5,7 @@
 #include "setup_mode.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266HTTPUpdateServer.h>
 #include <Arduino.h>
 #include <cstring>
 #include "setup_web_form.h"
@@ -53,6 +54,7 @@ bool consumeSetupModeRequest() {
 // ============================================================================
 
 static ESP8266WebServer g_setup_server(SETUP_MODE_WEB_PORT);
+static ESP8266HTTPUpdateServer g_http_updater;
 static EepromConfig* g_setup_config = nullptr;
 static char g_html_buffer[4096];
 static char g_ap_ip_string[16];
@@ -63,6 +65,15 @@ static void handleRoot() {
         g_setup_server.send(200, "text/html", g_html_buffer);
     } else {
         g_setup_server.send(500, "text/plain", "Internal error building the config page.");
+    }
+}
+
+static void handleUpdatePage() {
+    size_t len = buildUpdatePageHtml(g_html_buffer, sizeof(g_html_buffer), FIRMWARE_VERSION, FIRMWARE_BUILD_INFO);
+    if (len > 0) {
+        g_setup_server.send(200, "text/html", g_html_buffer);
+    } else {
+        g_setup_server.send(500, "text/plain", "Internal error building the update page.");
     }
 }
 
@@ -123,6 +134,24 @@ void setupModeBegin(EepromConfig& config) {
 
     g_setup_server.on("/", HTTP_GET, handleRoot);
     g_setup_server.on("/save", HTTP_POST, handleSave);
+    g_setup_server.on("/update", HTTP_GET, handleUpdatePage);
+
+    // ESP8266HTTPUpdateServer (official core library) owns the actual
+    // upload/flash handling at "/doupdate" - not hand-rolled here. It
+    // writes the new image into the flash region reserved after the
+    // running sketch (confirmed via this board's actual linker script,
+    // eagle.flash.4m1m.ld - the ~2MB "empty" region between the sketch
+    // and the filesystem), verifies it completely, and only then lets
+    // eboot swap it in on reboot - a failed/interrupted upload leaves
+    // the currently-running firmware untouched, no USB recovery needed
+    // for that failure mode. No auth (matches this project's posture
+    // elsewhere - see config.h). handleUpdatePage() above serves our own
+    // styled "/update" entry page instead of this library's generic one
+    // (which also offers an unneeded "FileSystem" upload option - this
+    // project has no filesystem use); the custom page's form posts
+    // directly to "/doupdate".
+    g_http_updater.setup(&g_setup_server, "/doupdate");
+
     g_setup_server.begin();
 }
 

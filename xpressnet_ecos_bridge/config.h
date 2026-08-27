@@ -11,6 +11,24 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include "version.h"
+
+// ============================================================================
+// FIRMWARE IDENTITY (Phase 6 step 3)
+// ============================================================================
+// FIRMWARE_VERSION (version.h) is the primary, user-facing identifier -
+// a conventional version number, bumped by hand per release, shown on
+// the OLED and Setup Mode pages. FIRMWARE_BUILD_INFO is a secondary,
+// more precise compile date/time - useful during development for
+// disambiguating builds that share the same not-yet-bumped version
+// number, shown alongside the version on the setup page where there's
+// room, but not on the space-constrained OLED line. Re-invoking
+// __DATE__/__TIME__ in each file that uses this (rather than a single
+// shared global) can differ by a second or two across translation units
+// compiled at slightly different moments within the same build - a
+// cosmetic non-issue, not worth a shared-global workaround for.
+#define FIRMWARE_BUILD_INFO (__DATE__ " " __TIME__)
+
 // ============================================================================
 // PROTOCOL ENABLEMENT (Compile-time toggles)
 // ============================================================================

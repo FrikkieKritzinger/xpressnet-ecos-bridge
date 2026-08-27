@@ -256,6 +256,55 @@ void test_html_keeps_saved_subnet_when_not_blank(void) {
     TEST_ASSERT_NOT_NULL(strstr(buffer, "value=\"255.255.0.0\""));
 }
 
+void test_config_page_links_to_update_page(void) {
+    EepromConfig config = makeTestConfig();
+    char buffer[4096];
+    buildConfigPageHtml(buffer, sizeof(buffer), config);
+    TEST_ASSERT_NOT_NULL(strstr(buffer, "href=\"/update\""));
+}
+
+// ============================================================================
+// UPDATE PAGE (Phase 6 step 3)
+// ============================================================================
+
+void test_update_page_shows_current_version(void) {
+    char buffer[4096];
+    size_t len = buildUpdatePageHtml(buffer, sizeof(buffer), "1.0.0", "Aug 27 2026 14:32:10");
+    TEST_ASSERT_TRUE(len > 0);
+    TEST_ASSERT_NOT_NULL(strstr(buffer, "1.0.0"));
+    TEST_ASSERT_NOT_NULL(strstr(buffer, "Aug 27 2026 14:32:10"));
+}
+
+void test_update_page_posts_to_doupdate(void) {
+    char buffer[4096];
+    buildUpdatePageHtml(buffer, sizeof(buffer), "1.0.0", "test-build");
+    TEST_ASSERT_NOT_NULL(strstr(buffer, "action=\"/doupdate\""));
+}
+
+void test_update_page_links_back_to_settings(void) {
+    char buffer[4096];
+    buildUpdatePageHtml(buffer, sizeof(buffer), "1.0.0", "test-build");
+    TEST_ASSERT_NOT_NULL(strstr(buffer, "href=\"/\""));
+}
+
+void test_update_page_rejects_undersized_buffer(void) {
+    char buffer[16];
+    size_t len = buildUpdatePageHtml(buffer, sizeof(buffer), "1.0.0", "test-build");
+    TEST_ASSERT_EQUAL(0, len);
+}
+
+void test_update_page_rejects_null_version(void) {
+    char buffer[4096];
+    size_t len = buildUpdatePageHtml(buffer, sizeof(buffer), nullptr, "test-build");
+    TEST_ASSERT_EQUAL(0, len);
+}
+
+void test_update_page_rejects_null_build_info(void) {
+    char buffer[4096];
+    size_t len = buildUpdatePageHtml(buffer, sizeof(buffer), "1.0.0", nullptr);
+    TEST_ASSERT_EQUAL(0, len);
+}
+
 // ============================================================================
 // MAIN
 // ============================================================================
@@ -303,6 +352,14 @@ int main(void) {
     RUN_TEST(test_saved_confirmation_html_rejects_undersized_buffer);
     RUN_TEST(test_html_suggests_default_subnet_when_blank);
     RUN_TEST(test_html_keeps_saved_subnet_when_not_blank);
+    RUN_TEST(test_config_page_links_to_update_page);
+
+    RUN_TEST(test_update_page_shows_current_version);
+    RUN_TEST(test_update_page_posts_to_doupdate);
+    RUN_TEST(test_update_page_links_back_to_settings);
+    RUN_TEST(test_update_page_rejects_undersized_buffer);
+    RUN_TEST(test_update_page_rejects_null_version);
+    RUN_TEST(test_update_page_rejects_null_build_info);
 
     return UNITY_END();
 }

@@ -7,6 +7,103 @@ here. Newest entries first.
 
 ---
 
+**2026-08-27 — Phase 6 step 3: OTA firmware updates, confirmed live end-to-end**
+
+- **Design discussion before any code**: the user's stated goal was
+  explicit - a product-style update flow where an end user pushes a
+  firmware image from a phone or PC without needing a PlatformIO/Arduino
+  build environment or USB access, mirroring how ESU's own Ecos supports
+  updates. Two real decisions were made upfront: (1) where OTA lives -
+  as a page *within* the existing Setup Mode (reusing the button-hold/AP
+  entry already built for step 2) rather than a separate mode, keeping
+  the "normal operation never runs a web server" rule intact; (2) how
+  much safety-net to build - the user judged malicious-firmware risk not
+  worth defending against at all for a single-user device (no auth,
+  matching this project's posture everywhere else), while explicitly
+  separating that from failed-update risk, which is real but accepted:
+  "if the update fails, a USB flash will still fix it, but that can be a
+  standard service call to be dealt with." This meant the actual
+  engineering bar was "verify a failed update can't brick the device,"
+  not "prevent every possible bad outcome."
+- **Reused the official `ESP8266HTTPUpdateServer` library rather than
+  hand-rolling the upload/flash logic** - deliberately, given this is
+  safety-relevant code (the actual bytes that get written to flash and
+  potentially rebooted into). Read its actual implementation
+  (`ESP8266HTTPUpdateServer-impl.h`) before using it: it registers GET
+  (serves a page), OPTIONS (CORS preflight), and POST (upload handling)
+  routes together, and its default GET page is generic/unstyled and
+  offers an unneeded second upload form for "FileSystem" updates (this
+  project has no SPIFFS/LittleFS use). Solution: registered the library
+  at a background path (`/doupdate`, not its default `/update`) for just
+  the upload/flash handling, and built this project's own styled
+  `/update` GET page (`buildUpdatePageHtml()` in `setup_web_form.h/.cpp`,
+  matching the rest of Setup Mode's look) whose form POSTs directly to
+  `/doupdate` - official, tested logic for the risky part, a consistent
+  UI for the entry point.
+- **Verified the actual safety mechanism against this board's real
+  linker script, not assumed from general knowledge**: found and read
+  `eagle.flash.4m1m.ld` (the ldscript `d1_mini.json` actually references)
+  directly. Its own header comment lays out the real flash split:
+  sketch (~1019KB) followed by an "empty" ~2052KB region, then the
+  filesystem area. That "empty" region is the real OTA staging area the
+  `Update` library writes the new image into - large enough to hold a
+  full second copy of the app. The bootloader (`eboot`) only swaps the
+  staged image into the active slot after a complete, checksummed copy
+  is confirmed there, so a failed/interrupted upload (WiFi drop,
+  corrupt file) only affects the staging region - the currently-running
+  firmware is never touched by a failed write. This directly confirms
+  the user's framing that a failed update is recoverable and not a
+  bricking risk, grounded in this project's real board configuration
+  rather than general ESP8266 OTA folklore.
+- **Version scheme changed mid-implementation after a live test exposed
+  a real UX gap**. The first attempt used only the existing compile
+  date/time (`FIRMWARE_BUILD_INFO`, already added in step 1/2's work) -
+  shown as just the date on the OLED's space-constrained line (time
+  omitted to fit). Before actually testing an upload, the user asked how
+  they'd tell the version had changed at all - and the honest answer was
+  that it mostly wouldn't be visible: the currently-running debug build
+  and the freshly-built production `.bin` had been compiled on the same
+  calendar day, so the OLED's date-only line would show identically
+  before and after. The user then asked directly for a conventional
+  version/fix-number scheme instead - more recognizable to end users and
+  easier to track across releases, especially since they plan to publish
+  built `.bin` files directly to users without requiring a build
+  environment. Added `version.h` (a single dedicated file,
+  `FIRMWARE_VERSION`, starting at `1.0.0` - the user's choice among
+  `1.0.0` "first real release" / `0.6.0` "match the git tag numbering" /
+  `0.1.0` "signal pre-release"), included from `config.h` so it reaches
+  everywhere `FIRMWARE_BUILD_INFO` already did. The OLED's "FW:" line now
+  shows the version (e.g. "v1.0.0") instead of the date; the setup page
+  shows both the version and the more precise build date/time, useful
+  for disambiguating same-version development builds.
+- **Confirmed live, end-to-end, with a real version change the user
+  could see happen**: USB-flashed a `1.0.0` baseline first. Temporarily
+  bumped `version.h` to `1.0.1-test` and built a fresh `.bin`
+  specifically for this test (this dev machine has no WiFi adapter, so
+  the actual browser-based upload had to happen from the user's own
+  phone/PC - the same constraint already encountered testing step 2's
+  Setup Mode). The user entered Setup Mode, opened the new "Firmware
+  Update" link from the config page, uploaded the test `.bin` through
+  the real `/update` -> `/doupdate` path, and confirmed both the OLED
+  and the setup page showed `1.0.1-test` after the automatic reboot -
+  genuine proof the uploaded image was what actually started running
+  afterward, not just that the HTTP upload itself succeeded. Reverted
+  `version.h` to the real `1.0.0` release value and reflashed over USB
+  to restore it (the `1.0.1-test` bump was explicitly a throwaway test
+  value, never meant to ship) - hit the same transient COM4 upload
+  flakiness documented earlier in this project ("Timed out waiting for
+  packet content"), resolved by a simple retry once the port was
+  confirmed free, consistent with prior sessions' experience that this
+  is USB/driver flakiness, not a firmware issue.
+- 5 new tests (`test_setup_web_form`, covering `buildUpdatePageHtml()`
+  and the config page's new "Firmware Update" nav link); native suite
+  198/198 passing; `env:wemos` builds clean (RAM 55.1% from 53.9%, Flash
+  35.9% from 34.7% - `ESP8266HTTPUpdateServer`'s modest overhead on top
+  of step 2's `ESP8266WebServer`, still well within budget). Real
+  hardware is flashed at the genuine `1.0.0` release version.
+
+---
+
 **2026-08-27 — Phase 6 step 2: web-based config UI / Setup Mode, confirmed live (all 4 entry paths)**
 
 - **Design discussion before any code**: two real risks were unpacked with

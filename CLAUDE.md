@@ -657,9 +657,9 @@ All disabled features = zero compiled code overhead.
   verified by code review only; step 10 is v1-scoped, Ecos→XpressNet and a
   dedicated display page deliberately deferred) - see the dedicated section
   below for the full roadmap.
-- **Phase 6 (Future Improvements)**: 🔧 In progress - steps 1-2 (EEPROM
-  storage, web config UI/Setup Mode) done and confirmed live; steps 3-6
-  (OTA, Z21, LocoNet, TBD) not started - see the dedicated section below.
+- **Phase 6 (Future Improvements)**: 🔧 In progress - steps 1-3 (EEPROM
+  storage, web config UI/Setup Mode, OTA updates) done and confirmed live;
+  steps 4-6 (Z21, LocoNet, TBD) not started - see the dedicated section below.
 
 ---
 
@@ -1021,7 +1021,7 @@ rather than completed, since it served no design purpose.
 
 ---
 
-## 🎯 Phase 6: Future Improvements 🔧 IN PROGRESS (steps 1-2 of 6 done)
+## 🎯 Phase 6: Future Improvements 🔧 IN PROGRESS (steps 1-3 of 6 done)
 
 Ordered and agreed 2026-08-14. CV/programming-track support was audited
 during Phase 5 planning but pulled out entirely - not currently planned,
@@ -1151,7 +1151,59 @@ since the user's Ecos already handles this conveniently on a program track.
    - 20 new tests (`test_setup_web_form`) + 4 more in `test_eeprom_config`
      for `eepromConfigIsComplete()`; native suite 191/191 passing;
      `env:wemos` builds clean (RAM 53.9%, Flash 34.7%).
-3. ⬜ **OTA (over-the-air) firmware updates**
+3. ✅ **OTA (over-the-air) firmware updates - implemented and confirmed
+   live (2026-08-27)**. A web page within Setup Mode (not a separate
+   mode/trigger - reuses the same button-hold/AP entry already built for
+   step 2) at `/update`, showing the current version and a single
+   firmware-upload form. No auth (matches this project's posture
+   elsewhere) - the user judged malicious-firmware risk not worth
+   defending against for a single-user device, while an accidentally
+   failed/interrupted update is an accepted risk with USB reflash as an
+   acceptable rare fallback (framed as "a standard service call," not
+   something requiring elaborate safety nets).
+   - **Uses the official `ESP8266HTTPUpdateServer` library** for the
+     actual upload/flash handling at a background path (`/doupdate`),
+     rather than hand-rolling it - safety-relevant code where reusing
+     well-tested standard library logic beats a custom implementation.
+     This project's own `/update` GET page (styled to match the rest of
+     Setup Mode, and without the library's own default page's unneeded
+     "FileSystem" upload option - no SPIFFS/LittleFS use here) just
+     POSTs to that path.
+   - **Verified the actual safety mechanism against this board's real
+     linker script** (`eagle.flash.4m1m.ld`) rather than assuming: it
+     reserves a ~2MB "empty" region between the running sketch (~1019KB)
+     and the filesystem area - the real OTA staging area the `Update`
+     library writes the new image into. A failed/interrupted upload
+     only affects that staging region; the bootloader (`eboot`) only
+     swaps the new image in after a complete, verified copy exists, so
+     the currently-running firmware is never touched by a failed
+     upload - confirmed not a bricking risk, matching what the user was
+     designing around.
+   - **New version scheme**: `version.h`, a single dedicated file
+     (`FIRMWARE_VERSION`, starting at `1.0.0`) - added mid-implementation
+     after a live test surfaced a real problem with the original
+     date/time-only approach: the OLED's compact "FW:" line only showed
+     the *date*, and two test builds compiled the same day were
+     indistinguishable there. The user asked for a conventional
+     version/fix-number scheme instead (more recognizable to end users,
+     easier to track across releases - they plan to publish built `.bin`
+     files directly to users, without requiring a PlatformIO
+     environment). `FIRMWARE_BUILD_INFO` (date+time) still exists
+     alongside it as a secondary, more precise detail shown on the
+     update page for disambiguating same-version development builds.
+   - **Confirmed live end-to-end**: flashed a `1.0.0` baseline over USB,
+     built a second `.bin` with a temporary `1.0.1-test` version bump,
+     uploaded it through the real `/update` page from the user's own
+     phone/PC (this dev machine has no WiFi adapter to test it directly
+     with), and confirmed the version visibly changed to `1.0.1-test` on
+     both the OLED and the setup page after the automatic reboot -
+     genuine proof the uploaded image was what actually started running,
+     not just that the upload succeeded. Reverted to `1.0.0` afterward
+     (the real release value) and reflashed over USB.
+   - 5 new tests (`test_setup_web_form`, covering `buildUpdatePageHtml()`
+     and the config page's new nav link); native suite 198/198 passing;
+     `env:wemos` builds clean (RAM 55.1%, Flash 35.9% - `ESP8266HTTPUpdateServer`'s
+     modest overhead, on top of step 2's `ESP8266WebServer`).
 4. ⬜ **Z21 LAN protocol support** - for WLANmaus
 5. ⬜ **LocoNet support** - parallel to XpressNet
 6. ⬜ **TBD** - deliberately left open; revisit once steps 1-5 are further
@@ -1172,22 +1224,30 @@ section above. Full narrative detail for every step lives in
 `docs/CHANGELOG.md` (dated entries); this section is intentionally just
 current status.
 
-Most recent: **Phase 6 step 2 (web-based config UI / Setup Mode)**
-implemented and confirmed live (2026-08-27) - a dedicated AP+web-form mode
-(never live-editable during normal bridging) for all 6 EEPROM fields, new
-`setup_web_form.h/.cpp` (native-testable, 20 new tests) + `setup_mode.h/.cpp`
-(Arduino-only) module pair. Entered via blank EEPROM, a technically-valid-
-but-incomplete config (a real gap found and fixed with a new
-`eepromConfigIsComplete()` check), a 3s hold on a dedicated D7/GPIO13
-button, or 5 minutes of continuous WiFi disconnection - all 4 confirmed
-live. Also revised step 1's bridge static IP from optional/DHCP to
-mandatory (Z21 LAN will need to depend on it reliably), bumping
-`EEPROM_CONFIG_VERSION` to 2. One real design correction found live: the
-original plan assumed the Wemos D1 Mini's onboard button was wired to
-GPIO0 (reusable, no new wiring) - confirmed on real hardware it's wired
-to RST instead (a hardware reset, unusable in software), so a genuinely
-new pushbutton was wired to D7/GPIO13. Native suite 191/191 passing;
-`env:wemos` builds clean and is flashed to the real hardware, fully
-configured (static IP, corrected subnet, real WiFi/Ecos settings) via
-the new Setup Mode itself. Next session should start with step 3 (OTA
-updates) unless redirected.
+Most recent: **Phase 6 step 3 (OTA firmware updates)** implemented and
+confirmed live (2026-08-27) - a `/update` page inside the existing Setup
+Mode (not a separate mode), using the official `ESP8266HTTPUpdateServer`
+library for the actual upload/flash handling (a background `/doupdate`
+path) rather than hand-rolling it, with this project's own styled entry
+page in front of it. No auth, matching this project's posture elsewhere -
+the user judged malicious-firmware risk not worth defending against for
+a single-user device, and an accidentally failed update an accepted risk
+(USB reflash as a rare fallback). Verified the actual safety mechanism
+against this board's real linker script (`eagle.flash.4m1m.ld`) rather
+than assuming: a ~2MB staging region exists between the sketch and
+filesystem specifically for this, so a failed/interrupted upload can't
+touch the currently-running firmware. New `version.h` (`FIRMWARE_VERSION`,
+starting at `1.0.0`) replaces a first attempt at date/time-only version
+display, after live testing showed two same-day test builds were
+indistinguishable on the OLED's compact line - the user asked for a
+conventional version number instead, since they plan to publish built
+`.bin` releases directly to users. Confirmed live end-to-end: a real
+`.bin` built with a temporary version bump, uploaded through the actual
+`/update` page from the user's phone, correctly changed the running
+version on both the OLED and setup page after reboot. Native suite
+198/198 passing; `env:wemos` builds clean and is flashed to the real
+hardware at the real `1.0.0` release version. Next session should start
+with step 4 (Z21 LAN) unless redirected - note it's also where the
+"does WLANmaus need our static IP, or does it use broadcast discovery"
+question from step 2's design discussion should get a real answer
+against the actual Z21 LAN spec, not general protocol familiarity.

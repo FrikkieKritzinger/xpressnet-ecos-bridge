@@ -403,9 +403,17 @@ void OledDisplay::drawDeviceStatusScreen() {
     display.print(getCpuFreqMhz());
     display.print(F("MHz"));
     
-    // Memory warning if critical
+    // Firmware version (Phase 6 step 3) - a conventional version number
+    // (version.h), not a raw build timestamp - easier to recognize and
+    // track across releases. Confirms an OTA update actually took effect.
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 4);
+    display.print(F("FW: v"));
+    display.print(F(FIRMWARE_VERSION));
+
+    // Memory warning if critical - separate line, doesn't compete with
+    // the always-shown firmware line above.
     if (current_status.current_heap_bytes < 10000) {
-        display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 4);
+        display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 5);
         display.println(F("!WARNING: Low memory"));
     }
 }

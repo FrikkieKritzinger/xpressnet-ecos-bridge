@@ -161,7 +161,9 @@ size_t buildConfigPageHtml(char* buffer, size_t buffer_size, const EepromConfig&
         "<label>Subnet<input type=\"text\" name=\"bridge_subnet\" value=\"%s\" required></label>"
         "</fieldset>"
         "<input type=\"submit\" value=\"Save and Reboot\">"
-        "</form></body></html>",
+        "</form>"
+        "<p><a href=\"/update\">Firmware Update</a></p>"
+        "</body></html>",
         config.wifi_ssid,
         config.wifi_password,
         config.ecos_ip,
@@ -184,6 +186,32 @@ size_t buildSavedConfirmationHtml(char* buffer, size_t buffer_size) {
         "<h1>Settings saved</h1>"
         "<p>Rebooting into normal operation...</p>"
         "</body></html>");
+
+    if (len < 0 || (size_t)len >= buffer_size) return 0;
+    return (size_t)len;
+}
+
+size_t buildUpdatePageHtml(char* buffer, size_t buffer_size, const char* current_version,
+                           const char* current_build_info) {
+    if (!buffer || buffer_size == 0 || !current_version || !current_build_info) return 0;
+
+    int len = snprintf(buffer, buffer_size,
+        "<!DOCTYPE html><html><head><title>Firmware Update</title>"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<style>"
+        "body{font-family:sans-serif;max-width:480px;margin:20px auto;padding:0 12px}"
+        "h1{font-size:1.3em}"
+        "input[type=submit]{padding:10px 20px;font-size:1em}"
+        "</style></head><body>"
+        "<h1>XpressNet-Ecos Bridge - Firmware Update</h1>"
+        "<p>Current version: %s<br>Build: %s</p>"
+        "<form method=\"POST\" action=\"/doupdate\" enctype=\"multipart/form-data\">"
+        "<input type=\"file\" name=\"firmware\" accept=\".bin\" required>"
+        "<input type=\"submit\" value=\"Upload and Flash\">"
+        "</form>"
+        "<p><a href=\"/\">Back to Settings</a></p>"
+        "</body></html>",
+        current_version, current_build_info);
 
     if (len < 0 || (size_t)len >= buffer_size) return 0;
     return (size_t)len;
