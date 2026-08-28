@@ -188,6 +188,7 @@ bool EcosMessageParser::processLine(const char* line, EcosReply& reply) {
     // Regular content line — parse immediately and queue if block in progress
     if (block_in_progress) {
         if (block_reply_count < MAX_BLOCK_REPLIES) {
+            DEBUG_ECOS_PRINTF("Ecos RX raw: %s\n", line);
             EcosReply entry;
             parsePropertyLine(line, entry);
             block_replies[block_reply_count++] = entry;

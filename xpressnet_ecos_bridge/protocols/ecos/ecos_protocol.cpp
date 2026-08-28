@@ -73,6 +73,21 @@ uint16_t ecosBuildSystemGoCmd(char* buffer, uint16_t buffer_size) {
     return (len > 0) ? len : 0;
 }
 
+uint16_t ecosBuildGetPropertyCmd(char* buffer, uint16_t buffer_size,
+                                uint16_t object_id, const char* property) {
+    if (!buffer || buffer_size < 40 || !property) return 0;
+    int len = snprintf(buffer, buffer_size, "get(%u, %s)\n", object_id, property);
+    return (len > 0) ? len : 0;
+}
+
+uint16_t ecosBuildGetFunctionCmd(char* buffer, uint16_t buffer_size,
+                                uint16_t object_id, uint8_t function_index) {
+    if (!buffer || buffer_size < 40 || function_index > 31) return 0;
+    int len = snprintf(buffer, buffer_size, "get(%u, func[%u])\n",
+                      object_id, (uint16_t)function_index);
+    return (len > 0) ? len : 0;
+}
+
 uint16_t
 ecosBuildSetAccessoryCmd(char* buffer, uint16_t buffer_size, uint16_t address, bool diverging) {
     if (!buffer || buffer_size < 30) return 0;

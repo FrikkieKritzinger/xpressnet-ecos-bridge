@@ -152,6 +152,42 @@ uint16_t ecosBuildSetFunctionCmd(char* buffer, uint16_t buffer_size,
 uint16_t ecosBuildSystemStopCmd(char* buffer, uint16_t buffer_size);
 
 /**
+ * Build a "get" command to query a locomotive's current speed or direction.
+ * Returns: "get(1000, speed)\n" or "get(1000, dir)\n"
+ *
+ * request(id, view) only subscribes to FUTURE change events - it does not
+ * report the loco's state as it stood before subscribing. Real bug found
+ * live 2026-08-28: a freshly-subscribed loco's speed/direction/function
+ * baseline was never queried at all, so anything Ecos already had (e.g. a
+ * function left on from earlier) stayed invisible to the bridge until it
+ * happened to change again.
+ *
+ * @param buffer Destination for the command string
+ * @param buffer_size Size of the destination buffer
+ * @param object_id Ecos object ID
+ * @param property Either "speed" or "dir"
+ * @return Number of bytes written, or 0 if buffer too small
+ */
+uint16_t ecosBuildGetPropertyCmd(char* buffer, uint16_t buffer_size,
+                                uint16_t object_id, const char* property);
+
+/**
+ * Build a "get" command to query one function's current state.
+ * Returns: "get(1000, func[8])\n"
+ * No bulk "all functions" query exists in the real Ecos protocol (confirmed
+ * against docs/ecos_pc_interface3.pdf section 7.11) - each function must be
+ * queried individually by index.
+ *
+ * @param buffer Destination for the command string
+ * @param buffer_size Size of the destination buffer
+ * @param object_id Ecos object ID
+ * @param function_index 0-31
+ * @return Number of bytes written, or 0 if buffer too small
+ */
+uint16_t ecosBuildGetFunctionCmd(char* buffer, uint16_t buffer_size,
+                                uint16_t object_id, uint8_t function_index);
+
+/**
  * Build the system-wide resume command - "equivalent to the GO button on
  * the Ecos" (official spec).
  * Returns: "set(1, go)\n"

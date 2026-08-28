@@ -85,7 +85,7 @@ void test_encode_decode_address_roundtrip(void) {
 void test_decode_speed_128_stop(void) {
     uint8_t dir, speed;
     TEST_ASSERT_TRUE(z21DecodeSpeed(Z21_SPEED_STEPS_128, 0x80, dir, speed));  // R=1,V=0
-    TEST_ASSERT_EQUAL_UINT8(1, dir);
+    TEST_ASSERT_EQUAL_UINT8(0, dir);  // inverted convention - see z21DecodeSpeed()'s comment
     TEST_ASSERT_EQUAL_UINT8(0, speed);
 }
 
@@ -101,9 +101,20 @@ void test_decode_speed_128_max(void) {
     TEST_ASSERT_EQUAL_UINT8(126, speed);
 }
 
+void test_decode_speed_128_forward(void) {
+    // Direction bit is intentionally inverted from the textbook Z21 spec
+    // meaning (R=1=forward) - see z21DecodeSpeed()'s comment: real-hardware
+    // testing 2026-08-28 showed the literal spec mapping lands the wrong
+    // direction on Ecos for this loco/WLANmaus combination, and inverting
+    // to match XpressNet's own already-proven-correct decode fixes it.
+    uint8_t dir, speed;
+    z21DecodeSpeed(Z21_SPEED_STEPS_128, 0x40, dir, speed);  // R=0 -> forward (inverted)
+    TEST_ASSERT_EQUAL_UINT8(1, dir);
+}
+
 void test_decode_speed_128_reverse(void) {
     uint8_t dir, speed;
-    z21DecodeSpeed(Z21_SPEED_STEPS_128, 0x40, dir, speed);  // R=0
+    z21DecodeSpeed(Z21_SPEED_STEPS_128, 0xC0, dir, speed);  // R=1 -> reverse (inverted)
     TEST_ASSERT_EQUAL_UINT8(0, dir);
 }
 
@@ -173,15 +184,17 @@ void test_decode_speed_unknown_step_mode_rejected(void) {
 // ============================================================================
 
 void test_encode_speed128_stop(void) {
-    TEST_ASSERT_EQUAL_HEX8(0x80, z21EncodeSpeed128(1, 0));
+    // direction=1 (forward, internal convention) encodes to R=0 - inverted
+    // from the textbook Z21 spec meaning, see z21EncodeSpeed128()'s comment.
+    TEST_ASSERT_EQUAL_HEX8(0x00, z21EncodeSpeed128(1, 0));
 }
 
 void test_encode_speed128_max(void) {
-    TEST_ASSERT_EQUAL_HEX8(0xFF, z21EncodeSpeed128(1, 126));
+    TEST_ASSERT_EQUAL_HEX8(0x7F, z21EncodeSpeed128(1, 126));
 }
 
 void test_encode_speed128_reverse(void) {
-    TEST_ASSERT_EQUAL_HEX8(0x00, z21EncodeSpeed128(0, 0));
+    TEST_ASSERT_EQUAL_HEX8(0x80, z21EncodeSpeed128(0, 0));
 }
 
 void test_encode_decode_speed128_roundtrip(void) {
@@ -345,6 +358,7 @@ int main(void) {
     RUN_TEST(test_decode_speed_128_stop);
     RUN_TEST(test_decode_speed_128_estop_treated_as_stop);
     RUN_TEST(test_decode_speed_128_max);
+    RUN_TEST(test_decode_speed_128_forward);
     RUN_TEST(test_decode_speed_128_reverse);
 
     RUN_TEST(test_decode_speed_14_stop);

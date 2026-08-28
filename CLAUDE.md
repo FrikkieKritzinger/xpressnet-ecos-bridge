@@ -1206,11 +1206,72 @@ since the user's Ecos already handles this conveniently on a program track.
      and the config page's new nav link); native suite 198/198 passing;
      `env:wemos` builds clean (RAM 55.1%, Flash 35.9% - `ESP8266HTTPUpdateServer`'s
      modest overhead, on top of step 2's `ESP8266WebServer`).
-4. 🔧 **Z21 LAN protocol support - implemented, code-complete, NOT YET
-   confirmed live (2026-08-27)**. Distinct from every other Phase 6 step
-   so far - this one is paused before real-hardware validation, not
-   after, so treat it as unproven until a live WLANmaus session says
-   otherwise.
+4. 🔧 **Z21 LAN protocol support - extensively live-tested 2026-08-28,
+   most functionality confirmed working, one item still open.** A single
+   marathon WLANmaus + tethered-MultiMaus session found and fixed eight
+   real bugs (full dated diagnosis in `docs/CHANGELOG.md`); drive/
+   direction/function control between Ecos and each individual throttle
+   protocol is now confirmed correct, but cross-protocol propagation
+   (XpressNet's own changes reaching Z21 and vice versa, both via Ecos)
+   is still unconfirmed - the last live test showed Ecos itself reporting
+   `control[none]` for the test loco right after a bridge-issued command,
+   which looks like leftover session state on Ecos from today's unusually
+   heavy stress-testing (many reconnects/resubscribes/get-bursts) rather
+   than a code bug. **Resume here**: restart the Ecos software (or at
+   least deselect/reselect the test loco on Ecos to force it to drop and
+   cleanly reacquire control) for a fresh baseline, then re-verify
+   XpressNet<->Z21 cross-propagation with the already-fixed code before
+   calling this step done, bumping `version.h`, or tagging a release.
+   - **Confirmed working live 2026-08-28**: WLANmaus drive/direction/
+     function control reaching Ecos; Ecos-direct changes reaching
+     WLANmaus (direction, speed, functions); Ecos-direct changes reaching
+     XpressNet/MultiMaus (including the "stolen" icon refresh); a fresh
+     loco's real Ecos baseline (speed/direction/all 32 functions) now
+     gets pulled in in when subscribing, instead of the bridge assuming
+     all-zero; XNet bus timing holds up correctly (no more err13) even
+     with WLANmaus simultaneously active.
+   - **Real bugs found and fixed this session** (see CHANGELOG for full
+     diagnosis of each): (1) `LAN_X_GET_LOCO_INFO` request decode used the
+     wrong byte offsets, subscribing clients to a garbage address; (2) Z21
+     function-command confirmation relied entirely on an Ecos round trip
+     that gets echo-suppressed for the very client that sent it - added
+     an immediate self-confirm mirroring real Z21 hardware; (3) real
+     WLANmaus hardware never sends `LAN_SET_BROADCASTFLAGS` at all despite
+     expecting broadcasts to work - defaulted new clients to broadcasts-on
+     rather than requiring the explicit opt-in the spec describes; (4) the
+     Z21 direction bit was decoded per the literal spec meaning (R=1=
+     forward) but needed inverting to match XpressNet's own convention,
+     already proven correct against this specific Ecos/loco setup,
+     despite both readings being individually "spec-correct" for their
+     own protocol; (5) a plain speed/direction command was unconditionally
+     re-sending the ENTIRE function bitmap downstream too - harmless in
+     steady state, but capable of wiping out real Ecos-side function
+     state (e.g. sound toggles) with a stale all-zero bitmap right after
+     any reboot; (6) `request(id, view)` only subscribes to *future* Ecos
+     events - it never reports current state, and the real protocol has
+     no bulk query, so a freshly-subscribed loco's baseline was never
+     actually queried at all (the `get()` command builder needed for this
+     had been deleted as "dead code" in an earlier audit, not realizing
+     it was actually a missing feature); (7) sending the resulting 34
+     `get()` baseline queries as one synchronous burst blocked long enough
+     to starve XpressNet's time-critical bus polling, causing real
+     MultiMaus err13 timeouts - paced to one query per main-loop tick
+     instead; (8) the router's echo-prevention was a single shared gate
+     that dropped an Ecos-originated update *entirely* whenever it matched
+     any recently-active protocol - correct for not echoing a protocol's
+     own command back to itself, but with three protocols now in play it
+     also silently dropped the copy meant for the *other* one. Replaced
+     with a per-destination check (skip only the actual originator,
+     always forward to the rest); a now-fully-redundant, separately-buggy
+     echo mechanism inside `EcosInterface` was removed as dead code in the
+     same pass.
+   - 4 new native tests (`get()` command builders); native suite
+     254/254 passing throughout; every fix confirmed against real
+     hardware via targeted serial captures, not guessed.
+
+   Distinct from every other Phase 6 step so far in how it was validated
+   - this paragraph below is the original pre-live-test status, kept for
+   history:
    - **Scope agreed with the user before implementation**: loco speed/
      direction/function control, track power on/off, and emergency stop -
      all mapped onto this project's existing `CommandRouter` mechanisms.
@@ -1286,7 +1347,7 @@ since the user's Ecos already handles this conveniently on a program track.
 
 ---
 
-**Last Updated**: 2026-08-27. **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-08-28. **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,
@@ -1320,23 +1381,24 @@ version on both the OLED and setup page after reboot. Native suite
 198/198 passing; `env:wemos` builds clean and is flashed to the real
 hardware at the real `1.0.0` release version.
 
-**Since then**: **Phase 6 step 4 (Z21 LAN for WLANmaus) is implemented
-and code-complete, but explicitly NOT yet confirmed live** - the session
-was paused before a real WLANmaus test could run. The static-IP question
-from step 2 got its real answer: confirmed against the actual Z21 LAN
-Protocol Specification v1.13 (docs/z21-lan-protokoll-en.pdf, gitignored)
-that the base protocol has no broadcast auto-discovery, only the
-separate "Z21 pro LINK" accessory does - the mandatory static IP
-decision was correct, not just a good guess. New `z21_protocol.h/.cpp`
-(native-testable, 42 new tests, several asserting byte-for-byte against
-the spec's own examples) + `z21lan_interface.h/.cpp` (real WiFiUDP,
-Arduino-only) module pair, plus the same small CommandRouter extension
-XpressNet already has (a `z21` member/setter, `handleZ21Command()`/
-`handleZ21FunctionCommand()`, one new `broadcastCommand()` branch).
-Native suite 249/249 passing; `env:wemos` builds clean (RAM 56.2%, Flash
-36.6%); confirmed on real hardware only that the interface boots and
-binds UDP 21105 - no loco control has actually been exercised through a
-real WLANmaus yet. **Next session should resume here**: connect a real
-WLANmaus to the bridge's static IP (`192.168.0.51`) and validate speed/
-direction/function/track-power control end-to-end before marking this
-step done, bumping `version.h`, or tagging a release.
+**Since then**: **Phase 6 step 4 (Z21 LAN for WLANmaus) had an extensive
+live-test session 2026-08-28** - a single marathon run with both WLANmaus
+and a tethered MultiMaus connected simultaneously, which found and fixed
+eight real bugs (see the dedicated bullet above and `docs/CHANGELOG.md`
+for full diagnosis of each). Drive/direction/function control between
+Ecos and each individual throttle protocol (WLANmaus<->Ecos and
+MultiMaus<->Ecos, both directions) is now confirmed working live,
+including a fresh loco's real Ecos baseline (speed/direction/all 32
+functions) actually being pulled in on subscribe instead of assumed
+zero, and XNet bus timing holding up correctly even with WLANmaus
+simultaneously active (no more err13). **One item is still open**:
+cross-protocol propagation (an XpressNet change reaching Z21 through
+Ecos, and vice versa) isn't confirmed yet - the architectural fix for it
+is in and native-tested (254/254), but the last live check showed Ecos
+itself reporting `control[none]` for the test loco, which looks like
+leftover state from today's unusually heavy stress-testing on the Ecos
+side rather than a code issue. **Next session should resume here**:
+restart the Ecos software (or deselect/reselect the test loco on Ecos)
+for a clean baseline, then re-verify XpressNet<->Z21 cross-propagation
+before marking this step done, bumping `version.h`, or tagging a
+release.

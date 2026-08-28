@@ -193,6 +193,29 @@ private:
     void queryAddressMap();
 
     // ========================================================================
+    // BASELINE STATE QUERY (paced across multiple update() calls)
+    // ========================================================================
+    // request(id, view/control) only subscribes to future change events - it
+    // never reports a loco's state as it stood before subscribing, and the
+    // real Ecos protocol has no bulk query, so seeding a freshly-subscribed
+    // loco's real speed/direction/all-32-functions baseline takes 34
+    // separate get() commands. Real bug found live 2026-08-28: sending all
+    // 34 synchronously in one call (inside subscribeToLoco() itself)
+    // starved XpressNet's time-critical bus polling badly enough to cause
+    // real MultiMaus err13 bus timeouts - this project's non-blocking rule
+    // exists for exactly this reason. Paced to one get() per update() call
+    // instead, same cooperative-multitasking pattern as everything else here.
+
+    uint16_t baseline_query_object_id;  // 0 = no baseline query in progress
+    uint8_t baseline_query_step;        // 0=speed, 1=dir, 2..33=func[0..31]
+
+    /**
+     * If a baseline query is in progress, send its next single get() step
+     * and advance. No-op if none is pending. Called once per update().
+     */
+    void sendNextBaselineQueryStep();
+
+    // ========================================================================
     // PENDING QUERY BUFFER
     // ========================================================================
 
@@ -233,36 +256,6 @@ private:
      * (has_speed_direction/has_functions), not both unconditionally.
      */
     void flushPendingQueries();
-
-    // ========================================================================
-    // ECHO PREVENTION QUEUE
-    // ========================================================================
-
-    static const int MAX_ECHO_QUEUE = 10;
-    static const int ECHO_TYPE_SPEED = 0;
-    static const int ECHO_TYPE_FUNCTION = 1;
-
-    struct EchoEntry {
-        uint16_t address;
-        uint8_t cmd_type;
-        uint8_t value;
-        unsigned long timestamp;
-    };
-
-    EchoEntry echo_queue[MAX_ECHO_QUEUE];
-    uint16_t echo_queue_head;
-    uint16_t echo_queue_tail;
-
-    /**
-     * Add outgoing command to echo queue (so we can suppress our own echoes)
-     */
-    void addToEchoQueue(uint16_t address, uint8_t cmd_type, uint8_t value);
-
-    /**
-     * Check if a received command is an echo of our own recent outgoing command
-     * Window: ECOS_ECHO_WINDOW_MS from config.h (2 seconds, accounts for TCP latency)
-     */
-    bool isEchoCommand(uint16_t address, uint8_t cmd_type, uint8_t value) const;
 
     // ========================================================================
     // CONNECTION/BACKOFF MANAGEMENT

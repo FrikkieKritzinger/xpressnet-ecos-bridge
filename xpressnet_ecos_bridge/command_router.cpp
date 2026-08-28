@@ -139,9 +139,9 @@ void CommandRouter::handleXpressNetCommand(uint16_t address, uint8_t speed, uint
         DEBUG_STATE_PRINTF("New loco from XpressNet: requesting Ecos subscription\n");
         requestEcosSubscription(address);
     }
-    
-    // Broadcast to other protocols
-    broadcastCommand(address, new_state, LocoSource::XPRESSNET);
+
+    // Broadcast to other protocols - drive-only, functions untouched here
+    broadcastCommand(address, new_state, LocoSource::XPRESSNET, false);
 
     total_commands_count++;
     last_command.address = address;
@@ -276,7 +276,8 @@ void CommandRouter::handleZ21Command(uint16_t address, uint8_t speed, uint8_t di
         requestEcosSubscription(address);
     }
 
-    broadcastCommand(address, new_state, LocoSource::Z21_LAN);
+    // Drive-only, functions untouched here
+    broadcastCommand(address, new_state, LocoSource::Z21_LAN, false);
 
     total_commands_count++;
     last_command.address = address;
@@ -348,16 +349,16 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
                                        bool has_speed, bool has_direction) {
     /*
      * Process speed/direction update from Ecos
-     * 
+     *
      * Flow:
      * 1. Create/update locomotive in state engine
-     * 2. Check echo prevention (is this echoed from XpressNet?)
-     * 3. Broadcast to XpressNet
-     * 4. Update echo prevention state
+     * 2. Broadcast to other protocols (broadcastCommand() skips whichever
+     *    one was the recent source, per destination - see wasRecentSource())
+     * 3. Update echo prevention state
      */
-    
+
     DEBUG_ECOS_PRINTF("Ecos: Loco %u Speed %u Dir %u\n", address, speed, direction);
-    
+
     // Validate
     if (!isValidDccAddress(address)) {
         DEBUG_ECOS_PRINTF("ERROR: Invalid Ecos address: %u\n", address);
@@ -365,13 +366,6 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
     }
     if (!isValidSpeed(speed) || !isValidDirection(direction)) {
         DEBUG_ECOS_PRINTF("ERROR: Invalid speed (%u) or direction (%u)\n", speed, direction);
-        return;
-    }
-    
-    // Check echo prevention BEFORE updating
-    if (isEchoCommand(address, LocoSource::ECOS)) {
-        DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u speed command (from XpressNet)\n", address);
-        echo_prevented_count++;
         return;
     }
 
@@ -407,8 +401,8 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
         state_engine.addOrUpdateLoco(address, new_state);
     }
 
-    // Broadcast to XpressNet (if enabled)
-    broadcastCommand(address, new_state, LocoSource::ECOS);
+    // Broadcast to XpressNet/Z21 (if enabled) - drive-only, functions untouched here
+    broadcastCommand(address, new_state, LocoSource::ECOS, false);
 
     total_commands_count++;
     last_command.address = address;
@@ -426,7 +420,9 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
 
 void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functions, uint32_t functions_mask) {
     /*
-     * Process function state update from Ecos
+     * Process function state update from Ecos. Forwarding to other
+     * protocols (broadcastCommand()) skips whichever one was the recent
+     * source, per destination - see wasRecentSource().
      */
 
     DEBUG_ECOS_PRINTF("Ecos: Loco %u Functions 0x%08x (mask 0x%08x)\n", address, functions, functions_mask);
@@ -434,13 +430,6 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
     // Validate
     if (!isValidDccAddress(address)) {
         DEBUG_ECOS_PRINTF("ERROR: Invalid Ecos address: %u\n", address);
-        return;
-    }
-
-    // Check echo prevention
-    if (isEchoCommand(address, LocoSource::ECOS)) {
-        DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u function command (from XpressNet)\n", address);
-        echo_prevented_count++;
         return;
     }
 
@@ -697,14 +686,40 @@ bool CommandRouter::isEchoCommand(uint16_t address, LocoSource source) const {
     return true;
 }
 
-void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, LocoSource source) {
+bool CommandRouter::wasRecentSource(uint16_t address, LocoSource source) const {
+    unsigned long now = now_ms();
+    if (now - echo_state.last_timestamp_ms > ECHO_PREVENTION_WINDOW) {
+        return false;
+    }
+    if (address != echo_state.last_loco_address) {
+        return false;
+    }
+    return echo_state.last_source == source;
+}
+
+void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, LocoSource source,
+                                     bool functions_changed) {
     /*
      * Send command to all protocols except the source
-     * 
+     *
      * If came from XpressNet, send to Ecos
      * If came from Ecos, send to XpressNet
+     *
+     * functions_changed=false (passed by the drive-only handlers) skips
+     * resending the function bitmap. Real bug found live 2026-08-28: a
+     * plain speed/direction command used to unconditionally resend the
+     * WHOLE function bitmap downstream too. Harmless in steady state (it's
+     * a no-op resend of the same values), but destructive right after a
+     * bridge reboot: StateEngine starts functions=0 for every loco, and the
+     * very FIRST drive command from a reconnecting throttle - fired before
+     * Ecos's own subscription reply had a chance to populate the real
+     * value - would blast that all-zero bitmap at Ecos, silently wiping out
+     * whatever real function state (e.g. sound toggles) Ecos actually had.
+     * Confirmed live: F8/F9/F10/F11 stayed genuinely desynced from Ecos
+     * across reconnects, unfixable by re-selecting the loco, because every
+     * subsequent speed change re-asserted the bridge's stale belief.
      */
-    
+
     if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN) {
         // Any throttle-facing protocol forwards to Ecos only - Ecos's own
         // echo back through the ECOS branch below is what reaches every
@@ -714,18 +729,35 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
         if (ecos != nullptr) {
             DEBUG_PRINTF("Broadcasting %s command to Ecos\n", locoSourceToString(source));
             ecos->sendSpeedCommand(address, state.speed, state.direction);
-            ecos->sendFunctionCommand(address, state.functions);
+            if (functions_changed) {
+                ecos->sendFunctionCommand(address, state.functions);
+            }
         }
         #endif
     }
     else if (source == LocoSource::ECOS) {
-        // Send to every throttle-facing protocol - Ecos is the single
-        // source of truth all of them need to stay in sync with.
+        // Send to every throttle-facing protocol EXCEPT whichever one just
+        // sent the command that produced this Ecos update (if any) - that
+        // protocol already has its own knowledge of what it just did
+        // (XpressNet optimistically updates its own display locally; Z21
+        // gets its own immediate confirmation via broadcastConfirmedState()).
+        //
+        // Real bug found live 2026-08-28: this used to be gated by a single
+        // shared isEchoCommand() check up in handleEcosCommand()/
+        // handleEcosFunctionCommand() that dropped the ENTIRE update when it
+        // matched ANY recent source - correct for not echoing XpressNet's
+        // own command back to XpressNet, but with three protocols that also
+        // meant Z21 (or XpressNet) never learned about a change that
+        // genuinely originated from the OTHER throttle-facing protocol.
+        // wasRecentSource() checks per destination instead, so the
+        // non-originating protocol still gets forwarded to.
         #if ENABLE_XPRESSNET
-        if (xpressnet != nullptr) {
+        if (xpressnet != nullptr && !wasRecentSource(address, LocoSource::XPRESSNET)) {
             DEBUG_PRINTF("Broadcasting Ecos command to XpressNet\n");
             xpressnet->sendSpeedCommand(address, state.speed, state.direction);
-            xpressnet->sendFunctionCommand(address, state.functions);
+            if (functions_changed) {
+                xpressnet->sendFunctionCommand(address, state.functions);
+            }
             // A MultiMaus that already has this loco selected doesn't reliably
             // apply the plain broadcast above to its own display/button-latch
             // model - only a directed reply it recognizes as authoritative.
@@ -734,10 +766,12 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
         }
         #endif
         #if ENABLE_Z21_LAN
-        if (z21 != nullptr) {
+        if (z21 != nullptr && !wasRecentSource(address, LocoSource::Z21_LAN)) {
             DEBUG_PRINTF("Broadcasting Ecos command to Z21\n");
             z21->sendSpeedCommand(address, state.speed, state.direction);
-            z21->sendFunctionCommand(address, state.functions);
+            if (functions_changed) {
+                z21->sendFunctionCommand(address, state.functions);
+            }
         }
         #endif
     }

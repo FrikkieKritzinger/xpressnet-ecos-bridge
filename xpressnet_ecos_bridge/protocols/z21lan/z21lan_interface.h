@@ -121,6 +121,14 @@ private:
      * client subscribed to it (and with broadcast flag 0x00000001 set).
      */
     void broadcastLocoInfo(uint16_t address, uint8_t direction, uint8_t speed, uint32_t functions);
+
+    /**
+     * Immediately confirms a just-processed SET_LOCO_DRIVE/SET_LOCO_FUNCTION
+     * request by broadcasting the loco's current StateEngine state, rather
+     * than waiting on Ecos's echo (which the router's echo-prevention
+     * logic deliberately suppresses for the originating protocol).
+     */
+    void broadcastConfirmedState(uint16_t address);
 };
 
 #endif  // Z21LAN_INTERFACE_H

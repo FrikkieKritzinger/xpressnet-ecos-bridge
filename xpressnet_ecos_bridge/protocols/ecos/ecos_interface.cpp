@@ -36,16 +36,15 @@ EcosInterface::EcosInterface()
       address_map_last_refresh(0),
       awaiting_query_reply(false),
       last_heartbeat_latency_ms(NO_TIMESTAMP),
+      baseline_query_object_id(0),
+      baseline_query_step(0),
       pending_query_count(0),
-      echo_queue_head(0),
-      echo_queue_tail(0),
       heartbeat_timer(ECOS_HEARTBEAT_INTERVAL),
       address_map_refresh_timer(ECOS_ADDRESS_MAP_REFRESH_INTERVAL),
       reconnect_attempt(0),
       last_reconnect_attempt(0) {
     memset(address_map, 0, sizeof(address_map));
     memset(pending_queries, 0, sizeof(pending_queries));
-    memset(echo_queue, 0, sizeof(echo_queue));
 }
 
 EcosInterface::~EcosInterface() {
@@ -160,6 +159,11 @@ void EcosInterface::update() {
     // object ID - including everything queued while disconnected, since the
     // address map is empty then too - see sendSpeedCommand())
     flushPendingQueries();
+
+    // Phase 5: Advance any in-progress baseline state query, one get() per
+    // call - see sendNextBaselineQueryStep()'s header comment for why this
+    // must stay paced rather than sent as one synchronous burst.
+    sendNextBaselineQueryStep();
 }
 
 // ============================================================================
@@ -461,7 +465,6 @@ void EcosInterface::flushPendingQueries() {
                 len = ecosBuildSetSpeedCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, pending_queries[i].speed);
                 if (len > 0) {
                     wifi_client.write((uint8_t*)cmd_buffer, len);
-                    addToEchoQueue(pending_queries[i].address, ECHO_TYPE_SPEED, pending_queries[i].speed);
                 }
 
                 DEBUG_ECOS_PRINTF("Ecos TX: Flushed queued speed/direction for loco %u (speed=%u dir=%u)\n",
@@ -492,46 +495,6 @@ void EcosInterface::flushPendingQueries() {
     }
 
     pending_query_count = remaining;
-}
-
-// ============================================================================
-// ECHO PREVENTION QUEUE
-// ============================================================================
-
-void EcosInterface::addToEchoQueue(uint16_t address, uint8_t cmd_type, uint8_t value) {
-    uint16_t next_tail = (echo_queue_tail + 1) % MAX_ECHO_QUEUE;
-
-    if (next_tail == echo_queue_head) {
-        // Queue full, discard oldest
-        echo_queue_head = (echo_queue_head + 1) % MAX_ECHO_QUEUE;
-    }
-
-    echo_queue[echo_queue_tail].address = address;
-    echo_queue[echo_queue_tail].cmd_type = cmd_type;
-    echo_queue[echo_queue_tail].value = value;
-    echo_queue[echo_queue_tail].timestamp = millis();
-
-    echo_queue_tail = next_tail;
-}
-
-bool EcosInterface::isEchoCommand(uint16_t address, uint8_t cmd_type, uint8_t value) const {
-    unsigned long now = millis();
-    uint16_t i = echo_queue_head;
-
-    while (i != echo_queue_tail) {
-        const auto& entry = echo_queue[i];
-
-        // Check if this command matches and is within echo window
-        if (entry.address == address &&
-            entry.cmd_type == cmd_type &&
-            now - entry.timestamp < ECOS_ECHO_WINDOW_MS) {
-            return true;  // This is our own echo
-        }
-
-        i = (i + 1) % MAX_ECHO_QUEUE;
-    }
-
-    return false;  // Not our echo
 }
 
 // ============================================================================
@@ -585,6 +548,9 @@ void EcosInterface::handleReply(const EcosReply& reply) {
 
     // Handle locomotive state update (from subscription or get query)
     if (reply.object_id > 0 && (reply.has_speed || reply.has_direction || reply.has_functions)) {
+        DEBUG_ECOS_PRINTF("Ecos RX: obj=%u has_speed=%d speed=%u has_dir=%d dir=%u has_func=%d func=0x%08lX mask=0x%08lX\n",
+                          reply.object_id, reply.has_speed, reply.speed, reply.has_direction, reply.direction,
+                          reply.has_functions, (unsigned long)reply.functions, (unsigned long)reply.functions_mask);
         // This is a loco state update; find the DCC address
         uint16_t dcc_address = 0;
 
@@ -600,22 +566,29 @@ void EcosInterface::handleReply(const EcosReply& reply) {
             }
         }
 
-        if (dcc_address > 0) {
-            // Check echo prevention
-            if (isEchoCommand(dcc_address, ECHO_TYPE_SPEED, reply.speed)) {
-                DEBUG_ECOS_PRINTF("Echo suppressed for loco %u\n", dcc_address);
-                return;
+        if (dcc_address > 0 && router) {
+            // Real bug found live 2026-08-28, fixed in two stages: this
+            // block used to gate itself (and, transitively, function data
+            // riding along with a speed/direction reply) behind a local
+            // isEchoCommand(ECHO_TYPE_SPEED) match, AND CommandRouter's own
+            // handleEcosCommand()/handleEcosFunctionCommand() had a SECOND,
+            // separate echo gate that dropped the entire update (speed,
+            // direction, and functions together) whenever it matched ANY
+            // recently-active protocol - correct for not echoing a
+            // protocol's own command back to itself, but with three
+            // protocols that also meant the OTHER throttle-facing protocol
+            // never learned about a genuine cross-protocol change either
+            // (confirmed live: XpressNet<->Z21 changes never propagated to
+            // each other through Ecos, only Ecos itself ever saw them).
+            // Both gates removed - CommandRouter::broadcastCommand() now
+            // does correct PER-DESTINATION skipping via wasRecentSource()
+            // instead of an all-or-nothing drop.
+            if (reply.has_speed || reply.has_direction) {
+                router->handleEcosCommand(dcc_address, reply.speed, reply.direction,
+                                           reply.has_speed, reply.has_direction);
             }
-
-            // Route to CommandRouter
-            if (router) {
-                if (reply.has_speed || reply.has_direction) {
-                    router->handleEcosCommand(dcc_address, reply.speed, reply.direction,
-                                               reply.has_speed, reply.has_direction);
-                }
-                if (reply.has_functions) {
-                    router->handleEcosFunctionCommand(dcc_address, reply.functions, reply.functions_mask);
-                }
+            if (reply.has_functions) {
+                router->handleEcosFunctionCommand(dcc_address, reply.functions, reply.functions_mask);
             }
         }
         return;
@@ -690,7 +663,6 @@ void EcosInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t di
     len = ecosBuildSetSpeedCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, speed);
     if (len > 0) {
         wifi_client.write((uint8_t*)cmd_buffer, len);
-        addToEchoQueue(address, ECHO_TYPE_SPEED, speed);
         DEBUG_ECOS_PRINTF("Ecos TX: Speed loco %u = %u\n", address, speed);
     }
 }
@@ -756,7 +728,46 @@ void EcosInterface::subscribeToLoco(uint16_t address) {
         wifi_client.write((uint8_t*)cmd_buffer, len);
     }
 
-    DEBUG_ECOS_PRINTF("Subscribed to loco %u (Ecos ID %u)\n", address, obj_id);
+    // request(id, view/control) only subscribes to FUTURE change events - it
+    // does not report the loco's current state. Query the real baseline
+    // explicitly so anything Ecos already had (e.g. a function left on from
+    // before this bridge session) is actually picked up, instead of the
+    // bridge silently assuming speed=0/dir=1/functions=0 until something
+    // happens to change again. No bulk "all functions" query exists in the
+    // real protocol - each of the 32 has to be asked for individually.
+    // Paced one per update() call rather than sent here as one 34-command
+    // burst - see sendNextBaselineQueryStep()'s header comment for why.
+    baseline_query_object_id = obj_id;
+    baseline_query_step = 0;
+
+    DEBUG_ECOS_PRINTF("Subscribed to loco %u (Ecos ID %u), querying baseline state\n", address, obj_id);
+}
+
+void EcosInterface::sendNextBaselineQueryStep() {
+    if (baseline_query_object_id == 0) {
+        return;  // nothing pending
+    }
+
+    char cmd_buffer[80];
+    uint16_t len = 0;
+
+    if (baseline_query_step == 0) {
+        len = ecosBuildGetPropertyCmd(cmd_buffer, sizeof(cmd_buffer), baseline_query_object_id, "speed");
+    } else if (baseline_query_step == 1) {
+        len = ecosBuildGetPropertyCmd(cmd_buffer, sizeof(cmd_buffer), baseline_query_object_id, "dir");
+    } else {
+        uint8_t fn = baseline_query_step - 2;
+        len = ecosBuildGetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), baseline_query_object_id, fn);
+    }
+
+    if (len > 0) {
+        wifi_client.write((uint8_t*)cmd_buffer, len);
+    }
+
+    baseline_query_step++;
+    if (baseline_query_step >= 34) {  // 1 speed + 1 dir + 32 functions
+        baseline_query_object_id = 0;  // done
+    }
 }
 
 void EcosInterface::unsubscribeFromLoco(uint16_t address) {

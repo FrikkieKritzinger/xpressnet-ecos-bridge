@@ -180,6 +180,33 @@ void test_ecos_build_system_stop_rejects_undersized_buffer(void) {
     TEST_ASSERT_EQUAL_INT(0, len);
 }
 
+// ============================================================================
+// TESTS - BASELINE STATE QUERY (Phase 6 step 4 follow-up, 2026-08-28)
+// ============================================================================
+
+void test_ecos_build_get_speed(void) {
+    int len = ecosBuildGetPropertyCmd(cmd_buffer, sizeof(cmd_buffer), 1009, "speed");
+    TEST_ASSERT_TRUE(len > 0);
+    TEST_ASSERT_EQUAL_STRING("get(1009, speed)\n", cmd_buffer);
+}
+
+void test_ecos_build_get_dir(void) {
+    int len = ecosBuildGetPropertyCmd(cmd_buffer, sizeof(cmd_buffer), 1009, "dir");
+    TEST_ASSERT_TRUE(len > 0);
+    TEST_ASSERT_EQUAL_STRING("get(1009, dir)\n", cmd_buffer);
+}
+
+void test_ecos_build_get_function(void) {
+    int len = ecosBuildGetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), 1009, 8);
+    TEST_ASSERT_TRUE(len > 0);
+    TEST_ASSERT_EQUAL_STRING("get(1009, func[8])\n", cmd_buffer);
+}
+
+void test_ecos_build_get_function_rejects_out_of_range(void) {
+    int len = ecosBuildGetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), 1009, 32);
+    TEST_ASSERT_EQUAL_INT(0, len);
+}
+
 void test_ecos_build_accessory_straight(void) {
     // Port letter confirmed live 2026-08-05 - r=straight, g=diverging
     // (the initial spec-inferred guess was backwards)
@@ -279,6 +306,10 @@ int main(void) {
 
     RUN_TEST(test_ecos_build_system_stop);
     RUN_TEST(test_ecos_build_system_go);
+    RUN_TEST(test_ecos_build_get_speed);
+    RUN_TEST(test_ecos_build_get_dir);
+    RUN_TEST(test_ecos_build_get_function);
+    RUN_TEST(test_ecos_build_get_function_rejects_out_of_range);
     RUN_TEST(test_ecos_build_system_stop_rejects_undersized_buffer);
     RUN_TEST(test_ecos_build_accessory_straight);
     RUN_TEST(test_ecos_build_accessory_diverging);

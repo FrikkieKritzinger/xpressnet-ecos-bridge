@@ -27,7 +27,18 @@ void z21EncodeAddress(uint16_t address, uint8_t& adr_msb, uint8_t& adr_lsb) {
 }
 
 bool z21DecodeSpeed(uint8_t step_mode, uint8_t speed_byte, uint8_t& out_direction, uint8_t& out_speed) {
-    out_direction = (speed_byte & 0x80) ? 1 : 0;
+    // Per the official Z21 spec, R=1 means forward. However, real-hardware
+    // testing 2026-08-28 (same loco already validated correct via
+    // XpressNet) showed passing that through literally lands the OPPOSITE
+    // direction on Ecos from what WLANmaus itself displays - while
+    // XpressNet's own decode (xpressnet_interface.cpp onLocoDrive128) maps
+    // its wire bit the other way and is the one proven to match Ecos.
+    // Inverting here to match, for the same reason ecos_message_parser.cpp
+    // documents passing Ecos's own "dir" property through un-inverted
+    // despite ESU's spec too: something in this real loco/Ecos/WLANmaus
+    // chain doesn't follow the textbook bit meaning, and matching what
+    // XpressNet already does empirically wins over the spec text.
+    out_direction = (speed_byte & 0x80) ? 0 : 1;
 
     if (step_mode == Z21_SPEED_STEPS_128) {
         // RVVVVVVV, V=0 Stop, V=1 E-Stop, V=2..127 -> steps 1..126 - a
@@ -68,9 +79,12 @@ bool z21DecodeSpeed(uint8_t step_mode, uint8_t speed_byte, uint8_t& out_directio
 }
 
 uint8_t z21EncodeSpeed128(uint8_t direction, uint8_t speed) {
+    // Inverted from the textbook R=1=forward meaning - see z21DecodeSpeed()
+    // for why. Keeps our own outgoing LOCO_INFO replies self-consistent
+    // with what we decode, so WLANmaus's own display matches Ecos.
     uint8_t v = (speed == 0) ? 0 : (uint8_t)(speed + 1);
     uint8_t byte = v & 0x7F;
-    if (direction) {
+    if (!direction) {
         byte |= 0x80;
     }
     return byte;

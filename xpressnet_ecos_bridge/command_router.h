@@ -87,8 +87,10 @@ public:
     /**
      * Handle incoming command from Ecos
      * 1. Update state engine
-     * 2. Check echo prevention
-     * 3. Broadcast to other protocols
+     * 2. Broadcast to other protocols (broadcastCommand() itself skips
+     *    whichever protocol was the recent source for this address, so a
+     *    throttle never gets its own command echoed back - see
+     *    wasRecentSource())
      *
      * @param has_speed Whether this Ecos event actually reported a speed
      *                  value - if false, the loco's existing speed is kept
@@ -99,7 +101,7 @@ public:
      */
     void handleEcosCommand(uint16_t address, uint8_t speed, uint8_t direction,
                            bool has_speed = true, bool has_direction = true);
-    
+
     /**
      * Handle incoming function command from Ecos
      * @param functions Bitmap F0-F31, but only the bits set in functions_mask
@@ -242,11 +244,29 @@ private:
      * @return true if echo (suppress), false if new command (process)
      */
     bool isEchoCommand(uint16_t address, LocoSource source) const;
-    
+
+    /**
+     * True if `source` was the protocol that most recently sent a command
+     * for this address, within the echo window. Used by broadcastCommand()'s
+     * ECOS branch to skip echoing an Ecos-originated update back to whichever
+     * throttle-facing protocol just sent the command that produced it -
+     * per-destination, unlike isEchoCommand() which is all-or-nothing.
+     *
+     * Real bug found live 2026-08-28: handleEcosCommand()/
+     * handleEcosFunctionCommand() used to call isEchoCommand() and drop the
+     * ENTIRE update on a match - correct for not echoing XpressNet's own
+     * command back to XpressNet, but it also silently dropped the SAME
+     * update for Z21 (and vice versa), since one shared echo_state can't
+     * distinguish "skip the originator" from "skip everyone". A three-
+     * protocol bridge needs per-destination skipping, not a single gate.
+     */
+    bool wasRecentSource(uint16_t address, LocoSource source) const;
+
     /**
      * Broadcast command to all active protocols except source
      */
-    void broadcastCommand(uint16_t address, const LocoState& state, LocoSource source);
+    void broadcastCommand(uint16_t address, const LocoState& state, LocoSource source,
+                          bool functions_changed = true);
     
     /**
      * Attempt to subscribe to unknown locomotive on Ecos

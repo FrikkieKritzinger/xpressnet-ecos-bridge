@@ -75,7 +75,16 @@ int Z21LanInterface::findOrAddClient(const IPAddress& ip, uint16_t port) {
     clients[free_slot].active = true;
     clients[free_slot].ip = ip;
     clients[free_slot].port = port;
-    clients[free_slot].broadcast_flags = 0;
+    // Default to driving/switching broadcasts already enabled (spec's
+    // LAN_SET_BROADCASTFLAGS bit 0x00000001). Real-hardware testing
+    // 2026-08-28 confirmed a physical WLANmaus never sends
+    // LAN_SET_BROADCASTFLAGS at all (across a fresh connect and a full
+    // WLANmaus reboot/reconnect) despite clearly expecting broadcasts to
+    // work - it apparently treats "subscribed via LAN_X_GET_LOCO_INFO" as
+    // sufficient opt-in on its own. Defaulting the flag on means such
+    // clients still receive updates; a client that explicitly calls
+    // LAN_SET_BROADCASTFLAGS (including to disable) still overrides this.
+    clients[free_slot].broadcast_flags = 0x00000001;
     clients[free_slot].subscribed_count = 0;
     DEBUG_PRINTF("Z21: new client %s:%u (slot %d)\n", ip.toString().c_str(), (unsigned)port, free_slot);
     return free_slot;
@@ -190,8 +199,16 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
     uint8_t x_header = data[0];
 
     if (x_header == Z21_X_GET_LOCO_INFO && data_len >= 4 && data[1] == 0xF0) {
-        // DB0=0xF0, DB1=Adr_MSB, DB2=Adr_LSB, DB3=XOR
-        uint16_t address = z21DecodeAddress(data[1], data[2]);
+        // data[0]=X-Header(0xE3), data[1]=DB0(0xF0), data[2]=DB1=Adr_MSB,
+        // data[3]=DB2=Adr_LSB, data[4]=DB3=XOR. Real bug found live
+        // 2026-08-27: this used data[1]/data[2] (DB0/Adr_MSB) instead of
+        // data[2]/data[3] (Adr_MSB/Adr_LSB), decoding a garbage address
+        // for every subscription request - the client would then never
+        // receive any LAN_X_LOCO_INFO update for the loco it actually
+        // asked about, matching the live symptom (WLANmaus sends commands
+        // fine, but its own display never reflects the resulting state).
+        uint16_t address = z21DecodeAddress(data[2], data[3]);
+        DEBUG_PRINTF("Z21 RX: GetLocoInfo Addr=%u (subscribing client %d)\n", address, client_index);
         if (client_index >= 0) {
             subscribeClientToLoco(client_index, address);
         }
@@ -215,6 +232,7 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         if (z21DecodeSpeed(step_mode, data[4], direction, speed) && router) {
             DEBUG_PRINTF("Z21 RX: Drive Addr=%u Speed=%u Dir=%u\n", address, speed, direction);
             router->handleZ21Command(address, speed, direction);
+            broadcastConfirmedState(address);
         }
         return;
     }
@@ -229,6 +247,8 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
             if (router->getStateEngine().getLoco(address, loco)) {
                 functions = loco.functions;
             }
+            DEBUG_PRINTF("Z21 RX: Function raw DB3=0x%02X TT=%u F%u current-bridge-state=%d\n",
+                         data[4], switch_type, function_index, (functions & (1UL << function_index)) ? 1 : 0);
             uint32_t bit = (1UL << function_index);
             bool new_state;
             if (switch_type == Z21_FUNCTION_SWITCH_ON) {
@@ -241,6 +261,7 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
             functions = new_state ? (functions | bit) : (functions & ~bit);
             DEBUG_PRINTF("Z21 RX: Function Addr=%u F%u=%d\n", address, function_index, new_state ? 1 : 0);
             router->handleZ21FunctionCommand(address, functions);
+            broadcastConfirmedState(address);
         }
         return;
     }
@@ -295,17 +316,54 @@ void Z21LanInterface::sendToClient(int client_index, const uint8_t* buffer, size
 // OUTGOING (Ecos-sourced updates -> Z21 clients)
 // ============================================================================
 
+void Z21LanInterface::broadcastConfirmedState(uint16_t address) {
+    // Real Z21 hardware confirms a SET_LOCO_DRIVE/SET_LOCO_FUNCTION request
+    // by broadcasting LAN_X_LOCO_INFO to subscribed clients immediately,
+    // synchronously with processing the request - it has no DCC ACK to wait
+    // for. This bridge instead normally waits for Ecos's own echo to come
+    // back through CommandRouter::broadcastCommand()'s ECOS branch - but
+    // that echo is deliberately suppressed by the router's echo-prevention
+    // logic for the very protocol that originated the request (the same
+    // mechanism that already relies on XpressNet throttles optimistically
+    // updating their own display locally). WLANmaus does NOT do that for
+    // functions (confirmed live 2026-08-28: speed/direction appeared to
+    // work only because of its own local slider echo, but function button
+    // state silently never updated) - so mirror real Z21 hardware and
+    // confirm the request ourselves immediately, independent of the Ecos
+    // round trip.
+    if (!router) return;
+    LocoState loco;
+    if (router->getStateEngine().getLoco(address, loco)) {
+        broadcastLocoInfo(address, loco.direction, loco.speed, loco.functions);
+    }
+}
+
 void Z21LanInterface::broadcastLocoInfo(uint16_t address, uint8_t direction, uint8_t speed, uint32_t functions) {
     uint8_t packet[16];
     size_t packet_len = z21BuildLocoInfo(packet, sizeof(packet), address, direction, speed, functions);
+    DEBUG_PRINTF("Z21 TX: LocoInfo Addr=%u Dir=%u Speed=%u Fn=0x%08lX len=%u\n",
+                 address, direction, speed, (unsigned long)functions, (unsigned)packet_len);
     if (packet_len == 0) return;
+    DEBUG_PRINTF("Z21 TX: bytes = %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                 packet[0], packet[1], packet[2], packet[3], packet[4], packet[5], packet[6],
+                 packet[7], packet[8], packet[9], packet[10], packet[11], packet[12], packet[13]);
 
+    int sent_count = 0;
     for (int i = 0; i < MAX_Z21_CLIENTS; i++) {
         if (!clients[i].active) continue;
-        if (!(clients[i].broadcast_flags & 0x00000001)) continue;  // hasn't enabled driving/switching broadcasts
-        if (!isClientSubscribed(i, address)) continue;
+        if (!(clients[i].broadcast_flags & 0x00000001)) {
+            DEBUG_PRINTF("Z21 TX: client %d active but broadcast flags 0x%08lX don't include 0x1 - skipping\n",
+                         i, (unsigned long)clients[i].broadcast_flags);
+            continue;
+        }
+        if (!isClientSubscribed(i, address)) {
+            DEBUG_PRINTF("Z21 TX: client %d not subscribed to addr %u - skipping\n", i, address);
+            continue;
+        }
         sendToClient(i, packet, packet_len);
+        sent_count++;
     }
+    DEBUG_PRINTF("Z21 TX: sent to %d client(s)\n", sent_count);
 }
 
 void Z21LanInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) {
