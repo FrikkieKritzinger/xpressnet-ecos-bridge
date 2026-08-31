@@ -326,9 +326,10 @@ size_t z21BuildTurnoutInfo(uint8_t* buffer, size_t buffer_size, uint16_t address
     z21EncodeAddress(address, adr_msb, adr_lsb);
 
     // DB2 = turnout position/status byte. For now, always report straight (position 0)
-    // Spec format: bit 7-4 reserved, bit 3 = activate (not relevant for reply), bit 2-0 = position
-    // We don't track turnout state, so default to 0 (straight)
-    uint8_t position_byte = 0x00;
+    // Spec format per Z21 LAN Protokoll: bit 7 = turnout valid/present (must be 1 for
+    // WLANmaus UI to enable throw controls), bit 0 = position (0=straight, 1=diverging).
+    // We don't track turnout state, so default to 0x80 (valid, straight).
+    uint8_t position_byte = 0x80;
 
     uint8_t data[4];
     data[0] = Z21_X_TURNOUT_INFO;  // 0xEF
