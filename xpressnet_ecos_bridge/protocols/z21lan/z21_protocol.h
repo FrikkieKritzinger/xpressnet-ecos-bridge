@@ -52,7 +52,7 @@
 #define Z21_X_GET_FIRMWARE_VERSION  0xF1
 #define Z21_X_FIRMWARE_VERSION      0xF3
 #define Z21_X_GET_LOCO_INFO         0xE3  // + DB0 0xF0
-#define Z21_X_GET_TURNOUT_INFO      0xE3  // + DB0 0xF8 (shares X-Header with GET_LOCO_INFO)
+#define Z21_X_GET_TURNOUT_INFO      0x43  // Request X-Header per spec 5.1 (with FAdr_MSB/LSB)
 #define Z21_X_SET_LOCO_DRIVE        0xE4  // + DB0 0x1S
 #define Z21_X_SET_LOCO_FUNCTION     0xE4  // + DB0 0xF8
 #define Z21_X_LOCO_INFO             0xEF
