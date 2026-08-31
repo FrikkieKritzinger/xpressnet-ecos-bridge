@@ -857,6 +857,26 @@ SystemStatus CommandRouter::getSystemStatus() const {
     status.ecos_status = ComponentStatus::DISCONNECTED;
     #endif
 
+    #if ENABLE_Z21_LAN
+    status.z21_status = (z21 != nullptr) ?
+                         z21->getStatus() :
+                         ComponentStatus::DISCONNECTED;
+    status.z21_client_count = (z21 != nullptr) ? z21->getActiveClientCount() : 0;
+    status.z21_last_message_age_ms = (z21 != nullptr) ?
+                         z21->getLastMessageAgeMs() :
+                         ProtocolInterface::NO_TIMESTAMP;
+    if (z21 != nullptr) {
+        z21->getLastMessageSourceIp(status.z21_last_message_ip, sizeof(status.z21_last_message_ip));
+    } else {
+        status.z21_last_message_ip[0] = '\0';
+    }
+    #else
+    status.z21_status = ComponentStatus::DISCONNECTED;
+    status.z21_client_count = 0;
+    status.z21_last_message_age_ms = ProtocolInterface::NO_TIMESTAMP;
+    status.z21_last_message_ip[0] = '\0';
+    #endif
+
     // Deferred OLED fields (Phase 5 step 8)
     #if ENABLE_XPRESSNET
     status.xnet_last_message_age_ms = (xpressnet != nullptr) ?

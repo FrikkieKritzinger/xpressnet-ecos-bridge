@@ -736,6 +736,50 @@ void test_router_ecos_heartbeat_latency_defaults_to_no_timestamp(void) {
     TEST_ASSERT_EQUAL_UINT32(ProtocolInterface::NO_TIMESTAMP, status.ecos_heartbeat_latency_ms);
 }
 
+void test_router_surfaces_z21_status_in_system_status(void) {
+    CommandRouter router;
+    MockProtocolInterface z21_mock;
+    z21_mock.setStatus(ComponentStatus::CONNECTED);
+    router.setZ21Interface(&z21_mock);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_INT((int)ComponentStatus::CONNECTED, (int)status.z21_status);
+}
+
+void test_router_surfaces_z21_client_count(void) {
+    // Phase 6 step 4 follow-up: OLED Z21 page needs client count and last
+    // message source.
+    CommandRouter router;
+    MockProtocolInterface z21_mock;
+    z21_mock.setActiveClientCount(2);
+    router.setZ21Interface(&z21_mock);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT8(2, status.z21_client_count);
+}
+
+void test_router_surfaces_z21_last_message_age_and_source_ip(void) {
+    CommandRouter router;
+    MockProtocolInterface z21_mock;
+    z21_mock.setLastMessageAgeMs(1500);
+    z21_mock.setLastMessageSourceIp("192.168.0.115");
+    router.setZ21Interface(&z21_mock);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT32(1500, status.z21_last_message_age_ms);
+    TEST_ASSERT_EQUAL_STRING("192.168.0.115", status.z21_last_message_ip);
+}
+
+void test_router_z21_status_defaults_when_no_interface_set(void) {
+    CommandRouter router;
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_INT((int)ComponentStatus::DISCONNECTED, (int)status.z21_status);
+    TEST_ASSERT_EQUAL_UINT8(0, status.z21_client_count);
+    TEST_ASSERT_EQUAL_UINT32(ProtocolInterface::NO_TIMESTAMP, status.z21_last_message_age_ms);
+    TEST_ASSERT_EQUAL_STRING("", status.z21_last_message_ip);
+}
+
 void test_router_xpressnet_speed_command_surfaces_existing_functions(void) {
     // A speed-only command must not blank out functions already known for
     // that loco - last_command_functions should reflect current state.
@@ -983,6 +1027,10 @@ int main(void) {
     RUN_TEST(test_router_xnet_last_message_age_defaults_to_no_timestamp);
     RUN_TEST(test_router_surfaces_ecos_heartbeat_latency);
     RUN_TEST(test_router_ecos_heartbeat_latency_defaults_to_no_timestamp);
+    RUN_TEST(test_router_surfaces_z21_status_in_system_status);
+    RUN_TEST(test_router_surfaces_z21_client_count);
+    RUN_TEST(test_router_surfaces_z21_last_message_age_and_source_ip);
+    RUN_TEST(test_router_z21_status_defaults_when_no_interface_set);
 
     RUN_TEST(test_router_xpressnet_speed_command_surfaces_existing_functions);
     RUN_TEST(test_router_xpressnet_function_command_updates_last_command);

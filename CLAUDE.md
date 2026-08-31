@@ -1288,6 +1288,32 @@ since the user's Ecos already handles this conveniently on a program track.
      254/254 passing throughout; every fix confirmed against real
      hardware via targeted serial captures and raw wire-byte inspection,
      not guessed. Tagged `v1.1.0`.
+   - **Follow-up housekeeping, tagged `v1.1.1`**: Z21 had never gotten an
+     OLED page (unlike XpressNet/Ecos, which each have their own). Added
+     a fifth page (`PAGE_Z21`) showing client count, time since the last
+     genuine action, and that action's source IP - deliberately NOT a
+     full connected-client list (could be any number on a layout with
+     more throttles than this project's own test setup) and NOT padded
+     with the same `active_locos`/`total_commands` figures already shown
+     on the XpressNet page, since neither is actually Z21-specific.
+     `Z21LanInterface::getStatus()` also changed to mean "at least one
+     client active" instead of "socket bound" - the previous meaning was
+     true almost the entire time the bridge is up, regardless of whether
+     any WLANmaus was actually connected, so it carried no real signal.
+     A real bug surfaced immediately in live testing: "Last Msg" stayed
+     stuck near 0 even after 20+ seconds of the throttle sitting
+     completely idle. Traced with added debug logging to real WLANmaus
+     hardware polling `LAN_X_GET_STATUS` roughly twice a second even at
+     rest - a genuine, spec-documented request type our dispatch code
+     already handled correctly, just without a debug print, so it was
+     invisible in earlier wire captures while still counting as "a
+     message" for the age calculation. Not a bug in the arithmetic, but
+     not a useful signal either - the user asked for "last genuine
+     action" instead of "last packet of any kind" once this was
+     understood. Moved the tracked timestamp from `handlePacket()`
+     (fires for every packet) to individual calls at the drive/function/
+     emergency-stop/track-power branches only. 4 new native tests
+     covering the new `SystemStatus` fields; native suite 258/258.
 
    The paragraph below is the original pre-live-test status from the
    2026-08-27 checkpoint, kept for history:
@@ -1366,7 +1392,7 @@ since the user's Ecos already handles this conveniently on a program track.
 
 ---
 
-**Last Updated**: 2026-08-28. **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-08-31. **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,
@@ -1397,6 +1423,14 @@ symptom traced at length and found to be genuine Ecos/decoder-side data
 (confirmed by the user directly in Ecos, across multiple locomotives),
 not a bridge bug. Native suite 254/254 passing; `env:wemos` builds clean
 and is flashed to the real hardware at `1.1.0`. Tagged `v1.1.0`.
+
+**Since then**: a small follow-up (`v1.1.1`) added the Z21 LAN OLED page
+that had been missing since step 4 shipped - see the dedicated bullet
+above for the full story, including a real bug found in live testing
+(WLANmaus's background status polls were making "Last Msg" stay stuck
+near zero; fixed by tracking genuine actions only, not every packet).
+Native suite 258/258 passing; flashed to the real hardware at `1.1.1`.
+Tagged `v1.1.1`.
 
 **Next**: Phase 6 steps 5 (LocoNet) and 6 (open/TBD) remain - see the
 roadmap section above. No specific next step has been chosen yet.

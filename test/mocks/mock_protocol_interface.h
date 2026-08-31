@@ -9,6 +9,7 @@
 #define MOCK_PROTOCOL_INTERFACE_H
 
 #include <cstdint>
+#include <cstddef>
 #include "../../xpressnet_ecos_bridge/interfaces/interface_base.h"
 
 class MockProtocolInterface : public ProtocolInterface {
@@ -90,6 +91,19 @@ public:
         accessory_command_count++;
     }
 
+    uint8_t getActiveClientCount() const override {
+        return mock_client_count;
+    }
+
+    void getLastMessageSourceIp(char* buf, size_t buf_size) const override {
+        if (buf == nullptr || buf_size == 0) return;
+        size_t i = 0;
+        for (; i < buf_size - 1 && mock_last_message_ip[i] != '\0'; i++) {
+            buf[i] = mock_last_message_ip[i];
+        }
+        buf[i] = '\0';
+    }
+
     // ========================================================================
     // TESTING INTERFACE - Verification and control
     // ========================================================================
@@ -136,6 +150,14 @@ public:
     void setStatus(ComponentStatus status) { current_status = status; }
     void setLastMessageAgeMs(unsigned long age_ms) { mock_last_message_age_ms = age_ms; }
     void setHeartbeatLatencyMs(unsigned long latency_ms) { mock_heartbeat_latency_ms = latency_ms; }
+    void setActiveClientCount(uint8_t count) { mock_client_count = count; }
+    void setLastMessageSourceIp(const char* ip) {
+        size_t i = 0;
+        for (; i < sizeof(mock_last_message_ip) - 1 && ip != nullptr && ip[i] != '\0'; i++) {
+            mock_last_message_ip[i] = ip[i];
+        }
+        mock_last_message_ip[i] = '\0';
+    }
 
     // Reset all tracking
     void reset() {
@@ -162,6 +184,8 @@ private:
     ComponentStatus current_status;
     unsigned long mock_last_message_age_ms;
     unsigned long mock_heartbeat_latency_ms;
+    uint8_t mock_client_count = 0;
+    char mock_last_message_ip[16] = {0};
 
     // Call tracking
     bool begin_called;

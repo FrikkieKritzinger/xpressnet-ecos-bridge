@@ -201,6 +201,9 @@ void OledDisplay::update(const SystemStatus& status) {
         case PAGE_ECOS:
             drawEcosScreen();
             break;
+        case PAGE_Z21:
+            drawZ21Screen();
+            break;
         default:
             current_page = PAGE_MAIN;
             drawMainScreen();
@@ -510,6 +513,55 @@ void OledDisplay::drawEcosScreen() {
     } else {
         display.print(current_status.ecos_heartbeat_latency_ms);
         display.print(F("ms"));
+    }
+}
+
+// ============================================================================
+// PAGE 4: Z21 LAN STATUS
+// ============================================================================
+
+void OledDisplay::drawZ21Screen() {
+    // ========== YELLOW SECTION ==========
+    display.setTextSize(1);
+    display.setCursor(0, YELLOW_TITLE_Y);
+    display.println(F("Z21 LAN"));
+
+    // Connection icon - page-local. Unlike XNet/Ecos, "connected" here
+    // means "at least one client currently active", not "socket bound" -
+    // see Z21LanInterface::getStatus()'s comment for why a UDP socket
+    // being bound isn't a meaningful signal on its own.
+    drawConnectionIcon(PROTOCOL_ICON_X, ICON_Y, current_status.z21_status);
+
+    // ========== BLUE SECTION ==========
+    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
+
+    // Client count - the one piece of information no other page has any
+    // equivalent of (XpressNet has no concept of "how many devices" on
+    // its shared bus; Ecos is a single TCP link).
+    display.setCursor(0, BLUE_CONTENT_Y);
+    display.print(F("Clients: "));
+    display.print(current_status.z21_client_count);
+
+    // Last message age
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
+    display.print(F("Last Msg: "));
+    if (current_status.z21_last_message_age_ms == ProtocolInterface::NO_TIMESTAMP) {
+        display.print(F("N/A"));
+    } else {
+        display.print(current_status.z21_last_message_age_ms / 1000);
+        display.print(F("s"));
+    }
+
+    // Source of that last message - deliberately the single most recent
+    // sender, not a list of every connected client (which could be any
+    // number on a layout with more throttles than this project's own test
+    // setup) - "who's actively driving right now" is the useful signal.
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
+    display.print(F("From: "));
+    if (current_status.z21_last_message_ip[0] == '\0') {
+        display.print(F("N/A"));
+    } else {
+        display.print(current_status.z21_last_message_ip);
     }
 }
 

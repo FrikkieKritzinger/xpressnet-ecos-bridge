@@ -44,7 +44,15 @@ public:
     void sendEmergencyStop() override;
     void sendResumeOperation() override;
 
-    ComponentStatus getStatus() const override { return current_status; }
+    /**
+     * ERROR if the UDP socket failed to bind (begin() failure); otherwise
+     * CONNECTED if at least one client is currently active, DISCONNECTED
+     * if not - "socket bound and listening" on its own turned out to be a
+     * poor OLED signal (true almost the entire time the bridge is up,
+     * regardless of whether any WLANmaus is actually talking to it), so
+     * this is computed from the client table rather than a static field.
+     */
+    ComponentStatus getStatus() const override;
     const char* getName() const override { return "Z21 LAN"; }
 
     /**
@@ -56,7 +64,21 @@ public:
     /**
      * Number of currently-active client sessions, for OLED display.
      */
-    uint8_t getActiveClientCount() const;
+    uint8_t getActiveClientCount() const override;
+
+    /**
+     * Milliseconds since the most recent packet from ANY client, for OLED
+     * "Last Msg" age display - see interface_base.h's doc comment.
+     */
+    unsigned long getLastMessageAgeMs() const override;
+
+    /**
+     * IP address of whichever client most recently sent a packet, for OLED
+     * display alongside the "Last Msg" age - see interface_base.h's doc
+     * comment on why this is "most recent sender" rather than a full
+     * client list.
+     */
+    void getLastMessageSourceIp(char* buf, size_t buf_size) const override;
 
 private:
     WiFiUDP udp;
@@ -75,6 +97,27 @@ private:
     };
 
     Z21Client clients[MAX_Z21_CLIENTS];
+
+    // Most recent genuine ACTION (drive/function/emergency-stop/track-power),
+    // across all clients - for the OLED "Last Msg" line. Deliberately NOT
+    // updated by every packet: real-hardware testing 2026-08-28 showed
+    // WLANmaus polling LAN_X_GET_STATUS roughly twice a second even while
+    // completely idle, which made "last packet" stay near-zero at all
+    // times and useless as a "when did someone last actually touch the
+    // throttle" signal - the user asked for the latter specifically.
+    // Separate from each client's own last_seen_ms (used for the
+    // MAX_Z21_CLIENTS-timeout expiry, which legitimately does want ANY
+    // packet, status polls included, to count as "still alive").
+    IPAddress last_action_ip;
+    unsigned long last_action_time = 0;
+    bool has_last_action = false;
+
+    /**
+     * Record client_index's IP/now as the most recent action - called from
+     * handleDataset()'s drive/function/emergency-stop/track-power branches
+     * only, not from handlePacket() for every packet.
+     */
+    void recordAction(int client_index);
 
     /**
      * Find an existing client session by IP+port, or create one in the

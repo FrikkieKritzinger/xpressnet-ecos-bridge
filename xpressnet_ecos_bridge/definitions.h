@@ -103,6 +103,7 @@ struct SystemStatus {
     // Component status
     ComponentStatus xnet_status;
     ComponentStatus ecos_status;
+    ComponentStatus z21_status;
     
     // Session info
     int active_locos;               // Number of locos in state engine
@@ -132,6 +133,11 @@ struct SystemStatus {
     // display (Phase 5 step 10, v1)
     uint16_t last_accessory_address;
     bool last_accessory_diverging;
+
+    // Z21 LAN OLED page (Phase 6 step 4 follow-up)
+    uint8_t z21_client_count;
+    unsigned long z21_last_message_age_ms;
+    char z21_last_message_ip[16];  // Dotted-quad IPv4, e.g. "192.168.0.115"
 };
 
 // ============================================================================

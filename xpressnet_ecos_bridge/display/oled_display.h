@@ -117,7 +117,8 @@ private:
         PAGE_DEVICE = 1,
         PAGE_XNET = 2,
         PAGE_ECOS = 3,
-        PAGE_COUNT = 4
+        PAGE_Z21 = 4,
+        PAGE_COUNT = 5
     };
     
     DisplayPage current_page;
@@ -150,6 +151,7 @@ private:
     void drawDeviceStatusScreen();
     void drawXpressNetScreen();
     void drawEcosScreen();
+    void drawZ21Screen();
     void drawErrorPopup();
     void drawBootLogo();
 

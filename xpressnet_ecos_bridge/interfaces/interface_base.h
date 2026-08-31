@@ -12,6 +12,7 @@
 #define INTERFACE_BASE_H
 
 #include <cstdint>
+#include <cstddef>
 #include <Arduino.h>
 #include "../config.h"
 #include "../definitions.h"
@@ -158,6 +159,30 @@ public:
     virtual void sendAccessoryCommand(uint16_t address, bool diverging) {
         (void)address;
         (void)diverging;
+    }
+
+    /**
+     * Number of currently-connected client sessions, for OLED display.
+     * No-op by default, returning 0. Only Z21LanInterface overrides this -
+     * it's the only UDP client-server protocol here (XpressNet is a shared
+     * bus with no concept of "how many devices", Ecos is a single TCP link).
+     */
+    virtual uint8_t getActiveClientCount() const { return 0; }
+
+    /**
+     * IP address (as a dotted-quad string) of whichever client most
+     * recently sent this protocol a message, for OLED display - "who's
+     * actively driving right now" rather than listing every connected
+     * client, which could be any number for a layout with more throttles
+     * than this project's own test setup. No-op by default, writing an
+     * empty string. Only Z21LanInterface overrides this.
+     * @param buf Destination buffer
+     * @param buf_size Size of buf - implementations must not overrun it
+     */
+    virtual void getLastMessageSourceIp(char* buf, size_t buf_size) const {
+        if (buf != nullptr && buf_size > 0) {
+            buf[0] = '\0';
+        }
     }
 };
 

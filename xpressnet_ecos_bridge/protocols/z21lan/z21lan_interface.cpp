@@ -137,6 +137,42 @@ uint8_t Z21LanInterface::getActiveClientCount() const {
     return count;
 }
 
+ComponentStatus Z21LanInterface::getStatus() const {
+    if (current_status == ComponentStatus::ERROR) {
+        return ComponentStatus::ERROR;  // Genuine UDP bind failure - always surface this
+    }
+    return (getActiveClientCount() > 0) ? ComponentStatus::CONNECTED : ComponentStatus::DISCONNECTED;
+}
+
+unsigned long Z21LanInterface::getLastMessageAgeMs() const {
+    if (!has_last_action) {
+        return NO_TIMESTAMP;
+    }
+    return millis() - last_action_time;
+}
+
+void Z21LanInterface::getLastMessageSourceIp(char* buf, size_t buf_size) const {
+    if (buf == nullptr || buf_size == 0) {
+        return;
+    }
+    if (!has_last_action) {
+        buf[0] = '\0';
+        return;
+    }
+    String ip_str = last_action_ip.toString();
+    strncpy(buf, ip_str.c_str(), buf_size - 1);
+    buf[buf_size - 1] = '\0';
+}
+
+void Z21LanInterface::recordAction(int client_index) {
+    if (client_index < 0 || client_index >= MAX_Z21_CLIENTS) {
+        return;
+    }
+    last_action_ip = clients[client_index].ip;
+    last_action_time = millis();
+    has_last_action = true;
+}
+
 // ============================================================================
 // INCOMING PACKET HANDLING
 // ============================================================================
@@ -231,6 +267,7 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         uint8_t direction, speed;
         if (z21DecodeSpeed(step_mode, data[4], direction, speed) && router) {
             DEBUG_PRINTF("Z21 RX: Drive Addr=%u Speed=%u Dir=%u\n", address, speed, direction);
+            recordAction(client_index);
             router->handleZ21Command(address, speed, direction);
             broadcastConfirmedState(address);
         }
@@ -260,6 +297,7 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
             }
             functions = new_state ? (functions | bit) : (functions & ~bit);
             DEBUG_PRINTF("Z21 RX: Function Addr=%u F%u=%d\n", address, function_index, new_state ? 1 : 0);
+            recordAction(client_index);
             router->handleZ21FunctionCommand(address, functions);
             broadcastConfirmedState(address);
         }
@@ -268,6 +306,7 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
 
     if (x_header == Z21_X_SET_STOP) {
         DEBUG_PRINTF("Z21 RX: Emergency stop\n");
+        recordAction(client_index);
         if (router) router->emergencyStopAll(LocoSource::Z21_LAN);
         return;
     }
@@ -280,12 +319,14 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
 
     if (x_header == Z21_X_HEADER_SYSTEM && data_len >= 2 && data[1] == Z21_X_DB0_TRACK_POWER_OFF) {
         DEBUG_PRINTF("Z21 RX: Track power OFF\n");
+        recordAction(client_index);
         if (router) router->emergencyStopAll(LocoSource::Z21_LAN);
         return;
     }
 
     if (x_header == Z21_X_HEADER_SYSTEM && data_len >= 2 && data[1] == Z21_X_DB0_TRACK_POWER_ON) {
         DEBUG_PRINTF("Z21 RX: Track power ON\n");
+        recordAction(client_index);
         if (router) router->resumeOperation(LocoSource::Z21_LAN);
         return;
     }
