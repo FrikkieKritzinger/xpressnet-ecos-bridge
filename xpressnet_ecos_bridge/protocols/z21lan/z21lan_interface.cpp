@@ -260,15 +260,21 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
 
     if (x_header == Z21_X_GET_TURNOUT_INFO && data_len >= 4) {
         // X-Header(0x43), DB0=FAdr_MSB, DB1=FAdr_LSB, DB2=XOR per spec 5.1
-        // TEMPORARILY DISABLED: responding to every GET_TURNOUT_INFO query causes
-        // err13 on XpressNet (queries from WLANmaus turnout screen poll at 2+ Hz per
-        // address, consuming enough CPU to starve the 20-50ms XpressNet windows).
-        // TODO Phase 7: implement response rate-limiting or caching instead of
-        // disabling entirely. See Phase 6 step 4 notes on similar high-frequency
-        // poll starvation (GET_STATUS, baseline query bursts).
-        // uint16_t address = z21DecodeAddress(data[1], data[2]);
-        // reply_len = z21BuildTurnoutInfo(reply, sizeof(reply), address);
-        // sendToClient(client_index, reply, reply_len);
+        // Rate-limit to 1 response per second per client to avoid starving XpressNet.
+        // WLANmaus turnout screen polls at 2+ Hz per address; responding to every
+        // query consumed enough CPU to cause MultiMaus err13. Limiting to 1/sec still
+        // allows UI responsiveness (100ms lag acceptable) while leaving headroom for
+        // XpressNet's 20-50ms message windows. Phase 6 step 4 notes similar issue with
+        // high-frequency polls (GET_STATUS, baseline query bursts).
+        unsigned long now = millis();
+        if (client_index >= 0 && clients[client_index].active) {
+            if (now - clients[client_index].last_turnout_query_response_ms >= 1000) {
+                uint16_t address = z21DecodeAddress(data[1], data[2]);
+                reply_len = z21BuildTurnoutInfo(reply, sizeof(reply), address);
+                sendToClient(client_index, reply, reply_len);
+                clients[client_index].last_turnout_query_response_ms = now;
+            }
+        }
         return;
     }
 
@@ -316,6 +322,11 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
             broadcastConfirmedState(address);
         }
         return;
+    }
+
+    // Debug: log what x_header we get when looking for SET_TURNOUT
+    if (x_header == 0x53 || (x_header >= 0x50 && x_header <= 0x60)) {
+        DEBUG_PRINTF("Z21 DEBUG: x_header=0x%02X data_len=%zu (checking for SET_TURNOUT 0x53)\n", x_header, data_len);
     }
 
     if (x_header == Z21_X_SET_TURNOUT && data_len >= 5) {

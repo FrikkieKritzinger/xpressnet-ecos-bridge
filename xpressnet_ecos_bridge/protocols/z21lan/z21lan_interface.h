@@ -94,6 +94,7 @@ private:
         unsigned long last_seen_ms = 0;
         uint16_t subscribed_addresses[MAX_Z21_SUBSCRIBED_PER_CLIENT] = {0};
         uint8_t subscribed_count = 0;
+        unsigned long last_turnout_query_response_ms = 0;  // Rate-limit GET_TURNOUT_INFO to 1/sec per client
     };
 
     Z21Client clients[MAX_Z21_CLIENTS];
