@@ -286,6 +286,49 @@ void test_decode_turnout_high_address(void) {
     TEST_ASSERT_FALSE(diverging);
 }
 
+void test_build_turnout_info_low_address(void) {
+    // Phase 7 step 1 extension: z21BuildTurnoutInfo for GET_TURNOUT_INFO reply
+    // Build response for address 1 (straight position by default)
+    // Packet structure: DataLen(2) + Header(2) + X-Header(1) + Adr_MSB + Adr_LSB + Position + XOR
+    uint8_t buffer[32];
+    size_t len = z21BuildTurnoutInfo(buffer, sizeof(buffer), 1);
+    TEST_ASSERT_EQUAL(9, len);
+    TEST_ASSERT_EQUAL_HEX8(0x09, buffer[0]);    // DataLen LSB=9
+    TEST_ASSERT_EQUAL_HEX8(0x00, buffer[1]);    // DataLen MSB=0
+    TEST_ASSERT_EQUAL_HEX8(0x40, buffer[2]);    // Header LSB=0x40
+    TEST_ASSERT_EQUAL_HEX8(0x00, buffer[3]);    // Header MSB=0x00 (Z21_HEADER_LAN_X=0x0040)
+    TEST_ASSERT_EQUAL_HEX8(0xEF, buffer[4]);    // X-Header TURNOUT_INFO
+    // buffer[5]=Adr_MSB, buffer[6]=Adr_LSB for address 1
+    TEST_ASSERT_EQUAL_HEX8(0x00, buffer[7]);    // Position: straight (default)
+}
+
+void test_build_turnout_info_high_address(void) {
+    // Test with a long address (>= 128)
+    uint8_t buffer[32];
+    size_t len = z21BuildTurnoutInfo(buffer, sizeof(buffer), 300);
+    TEST_ASSERT_EQUAL(9, len);
+    TEST_ASSERT_EQUAL_HEX8(0x09, buffer[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xEF, buffer[4]);    // X-Header at buffer[4]
+    TEST_ASSERT_EQUAL_HEX8(0x00, buffer[7]);    // Position still defaults to straight (at buffer[7])
+}
+
+void test_build_turnout_info_checksum_present(void) {
+    // Verify the packet has a valid checksum at the end
+    uint8_t buffer[32];
+    size_t len = z21BuildTurnoutInfo(buffer, sizeof(buffer), 1);
+    TEST_ASSERT_EQUAL(9, len);
+    // Checksum is computed over buffer[4..7] (X-Header, Adr_MSB, Adr_LSB, Position)
+    uint8_t expected_checksum = z21Checksum(&buffer[4], 4);
+    TEST_ASSERT_EQUAL_HEX8(expected_checksum, buffer[8]);
+}
+
+void test_build_turnout_info_buffer_too_small(void) {
+    // Test buffer size validation
+    uint8_t buffer[8];
+    size_t len = z21BuildTurnoutInfo(buffer, sizeof(buffer), 1);
+    TEST_ASSERT_EQUAL(0, len);  // Should return 0 for insufficient buffer
+}
+
 // ============================================================================
 // PACKET BUILDERS
 // ============================================================================
@@ -438,6 +481,11 @@ int main(void) {
     RUN_TEST(test_decode_turnout_deactivate_rejected);
     RUN_TEST(test_decode_turnout_invalid_upper_nibble_rejected);
     RUN_TEST(test_decode_turnout_high_address);
+
+    RUN_TEST(test_build_turnout_info_low_address);
+    RUN_TEST(test_build_turnout_info_high_address);
+    RUN_TEST(test_build_turnout_info_checksum_present);
+    RUN_TEST(test_build_turnout_info_buffer_too_small);
 
     RUN_TEST(test_build_loco_info_header_and_length);
     RUN_TEST(test_build_loco_info_checksum_valid);

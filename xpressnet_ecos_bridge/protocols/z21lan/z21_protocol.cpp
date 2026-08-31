@@ -316,3 +316,35 @@ size_t z21BuildUnknownCommandReply(uint8_t* buffer, size_t buffer_size) {
 
     return offset;
 }
+
+size_t z21BuildTurnoutInfo(uint8_t* buffer, size_t buffer_size, uint16_t address) {
+    // LAN_X_TURNOUT_INFO reply: DataLen(2) + Header(2) + X-Header(1) + Adr_MSB + Adr_LSB + Position(1) + XOR = 9 bytes
+    static const size_t kPacketLen = 9;
+    if (!buffer || buffer_size < kPacketLen) return 0;
+
+    uint8_t adr_msb, adr_lsb;
+    z21EncodeAddress(address, adr_msb, adr_lsb);
+
+    // DB2 = turnout position/status byte. For now, always report straight (position 0)
+    // Spec format: bit 7-4 reserved, bit 3 = activate (not relevant for reply), bit 2-0 = position
+    // We don't track turnout state, so default to 0 (straight)
+    uint8_t position_byte = 0x00;
+
+    uint8_t data[4];
+    data[0] = Z21_X_TURNOUT_INFO;  // 0xEF
+    data[1] = adr_msb;
+    data[2] = adr_lsb;
+    data[3] = position_byte;
+    uint8_t xor_byte = z21Checksum(data, sizeof(data));
+
+    size_t offset = 0;
+    buffer[offset++] = (uint8_t)(kPacketLen & 0xFF);
+    buffer[offset++] = (uint8_t)((kPacketLen >> 8) & 0xFF);
+    buffer[offset++] = (uint8_t)(Z21_HEADER_LAN_X & 0xFF);
+    buffer[offset++] = (uint8_t)((Z21_HEADER_LAN_X >> 8) & 0xFF);
+    memcpy(buffer + offset, data, sizeof(data));
+    offset += sizeof(data);
+    buffer[offset++] = xor_byte;
+
+    return offset;
+}

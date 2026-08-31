@@ -52,9 +52,11 @@
 #define Z21_X_GET_FIRMWARE_VERSION  0xF1
 #define Z21_X_FIRMWARE_VERSION      0xF3
 #define Z21_X_GET_LOCO_INFO         0xE3  // + DB0 0xF0
+#define Z21_X_GET_TURNOUT_INFO      0xE3  // + DB0 0xF8 (shares X-Header with GET_LOCO_INFO)
 #define Z21_X_SET_LOCO_DRIVE        0xE4  // + DB0 0x1S
 #define Z21_X_SET_LOCO_FUNCTION     0xE4  // + DB0 0xF8
 #define Z21_X_LOCO_INFO             0xEF
+#define Z21_X_TURNOUT_INFO          0xEF  // Same as LOCO_INFO (shares X-Header with response)
 #define Z21_X_SET_TURNOUT           0x53
 #define Z21_X_UNKNOWN_COMMAND       0x61  // + DB0 0x82
 
@@ -203,5 +205,16 @@ size_t z21BuildUnknownCommandReply(uint8_t* buffer, size_t buffer_size);
  */
 bool z21DecodeTurnoutCommand(uint8_t adr_msb, uint8_t adr_lsb, uint8_t db0_byte,
                               uint16_t& out_address, bool& out_diverging);
+
+/**
+ * Build a LAN_X_TURNOUT_INFO reply (phase 7 step 1 extension - Z21 turnout query).
+ * Responds to a LAN_X_GET_TURNOUT_INFO request to let Z21 clients subscribe to
+ * and control turnouts. The response uses the same 0xEF X-Header as LOCO_INFO
+ * but with different data fields. Since this bridge doesn't track per-turnout
+ * state persistence, responses always report the default state (straight=0).
+ * @param address DCC accessory address
+ * @return bytes written, or 0 if buffer_size was too small
+ */
+size_t z21BuildTurnoutInfo(uint8_t* buffer, size_t buffer_size, uint16_t address);
 
 #endif  // Z21_PROTOCOL_H

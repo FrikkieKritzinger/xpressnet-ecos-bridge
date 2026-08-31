@@ -258,6 +258,17 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         return;
     }
 
+    if (x_header == Z21_X_GET_TURNOUT_INFO && data_len >= 4 && data[1] == 0xF8) {
+        // data[0]=X-Header(0xE3), data[1]=DB0(0xF8), data[2]=Adr_MSB,
+        // data[3]=Adr_LSB, data[4]=XOR. Phase 7 step 1 extension - Z21 turnout query.
+        // Responds to a GET_TURNOUT_INFO request so WLANmaus UI enables turnout controls.
+        uint16_t address = z21DecodeAddress(data[2], data[3]);
+        DEBUG_PRINTF("Z21 RX: GetTurnoutInfo Addr=%u (client %d)\n", address, client_index);
+        reply_len = z21BuildTurnoutInfo(reply, sizeof(reply), address);
+        sendToClient(client_index, reply, reply_len);
+        return;
+    }
+
     if (x_header == Z21_X_SET_LOCO_DRIVE && data_len >= 5 && (data[1] & 0xF0) == 0x10) {
         // DB0=0x1S (upper nibble 0x1 distinguishes this from
         // SET_LOCO_FUNCTION below, which shares this same X-header 0xE4
