@@ -1407,16 +1407,15 @@ project's history. Named "TBD" rather than a themed name like Phase 6's
 "Future Improvements" - deliberately open-ended, add to this list as
 real needs come up rather than pre-committing to a fixed scope.
 
-1. ⬜ **Z21 turnout/accessory command support** - mirrors the existing
+1. ✅ **Z21 turnout/accessory command support** (2026-09-XX) - mirrors the existing
    XpressNet→Ecos v1 accessory path (Phase 5 step 10): a WLANmaus throws
    a turnout, Ecos receives it. No new Ecos-side machinery needed - Ecos's
    `set(11, switch[...])` already addresses by protocol+address+port
    directly, no per-accessory object ID lookup or subscription required
-   for this direction, so this is genuinely small, self-contained work
-   mirroring code that already exists and is proven live. Deliberately
-   sequenced *before* step 2 (Accessory/Turnout v2) even though v2 is the
-   architecturally bigger item - this step doesn't depend on v2's new
-   backend at all, so there's no reason to make it wait.
+   for this direction. Implementation: added Z21_X_SET_TURNOUT (0x53) decode
+   in z21_protocol, dispatch handler in z21lan_interface, and forwarding
+   support in command_router. All 265 native tests passing, firmware builds
+   clean for ESP8266. See `docs/CHANGELOG.md` for full details.
 2. ⬜ **Accessory/Turnout v2** - the real Ecos→throttle direction (Ecos-
    originated turnout changes reaching XpressNet *and* Z21) plus a
    dedicated OLED accessory page, both deliberately deferred out of v1

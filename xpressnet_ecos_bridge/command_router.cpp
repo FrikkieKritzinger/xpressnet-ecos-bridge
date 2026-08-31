@@ -529,11 +529,11 @@ void CommandRouter::handleAccessoryCommand(uint16_t address, bool diverging, Loc
     last_accessory.address = address;
     last_accessory.diverging = diverging;
 
-    // v1: XpressNet -> Ecos only. No Ecos-sourced accessory path exists
-    // yet, and no echo prevention is needed for that reason - Ecos has no
-    // way to report an accessory change back to us in v1 that could ever
-    // loop back to XpressNet.
-    if (source == LocoSource::XPRESSNET) {
+    // v1: XpressNet -> Ecos only (Phase 5 step 10). Phase 7 step 1 adds
+    // Z21 -> Ecos support. No Ecos-sourced accessory path exists yet, and no
+    // echo prevention is needed for that reason - Ecos has no way to report an
+    // accessory change back to us that could ever loop back to XpressNet/Z21.
+    if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN) {
         #if ENABLE_ECOS_LAN
         if (ecos != nullptr) {
             ecos->sendAccessoryCommand(address, diverging);

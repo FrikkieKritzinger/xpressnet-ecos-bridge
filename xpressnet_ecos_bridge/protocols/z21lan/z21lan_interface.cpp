@@ -304,6 +304,19 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         return;
     }
 
+    if (x_header == Z21_X_SET_TURNOUT && data_len >= 5) {
+        // data[0]=X-Header(0x53), data[1]=DB0(10Q0A00P), data[2]=Adr_MSB,
+        // data[3]=Adr_LSB, data[4]=XOR. Phase 7 step 1 - Z21 accessory support
+        uint16_t address;
+        bool diverging;
+        if (z21DecodeTurnoutCommand(data[2], data[3], data[1], address, diverging) && router) {
+            DEBUG_PRINTF("Z21 RX: Accessory - Addr=%u -> %s\n", address, diverging ? "diverging" : "straight");
+            recordAction(client_index);
+            router->handleAccessoryCommand(address, diverging, LocoSource::Z21_LAN);
+        }
+        return;
+    }
+
     if (x_header == Z21_X_SET_STOP) {
         DEBUG_PRINTF("Z21 RX: Emergency stop\n");
         recordAction(client_index);

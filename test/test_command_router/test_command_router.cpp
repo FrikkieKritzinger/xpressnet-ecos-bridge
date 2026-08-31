@@ -235,6 +235,32 @@ void test_router_accessory_command_surfaces_in_system_status(void) {
     TEST_ASSERT_TRUE(status.last_accessory_diverging);
 }
 
+void test_router_accessory_command_from_z21_forwards_to_ecos(void) {
+    // Phase 7 step 1: Z21 accessory support - should forward to Ecos
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(7, false, LocoSource::Z21_LAN);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getAccessoryCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(7, ecos_mock.getLastAccessoryCommand().address);
+    TEST_ASSERT_FALSE(ecos_mock.getLastAccessoryCommand().diverging);
+}
+
+void test_router_accessory_command_from_z21_surfaces_in_status(void) {
+    // Phase 7 step 1: verify Z21-sourced accessory is tracked in system status
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(12, true, LocoSource::Z21_LAN);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT16(12, status.last_accessory_address);
+    TEST_ASSERT_TRUE(status.last_accessory_diverging);
+}
+
 // ============================================================================
 // TESTS - ECHO PREVENTION
 // ============================================================================
@@ -983,6 +1009,8 @@ int main(void) {
     RUN_TEST(test_router_accessory_command_from_ecos_does_not_forward_anywhere);
     RUN_TEST(test_router_accessory_command_rejects_invalid_address);
     RUN_TEST(test_router_accessory_command_surfaces_in_system_status);
+    RUN_TEST(test_router_accessory_command_from_z21_forwards_to_ecos);
+    RUN_TEST(test_router_accessory_command_from_z21_surfaces_in_status);
 
     RUN_TEST(test_router_echo_prevention_opposite_source_suppressed);
     RUN_TEST(test_router_xpressnet_command_not_suppressed_right_after_ecos_command);

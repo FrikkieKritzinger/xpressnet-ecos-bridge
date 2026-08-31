@@ -55,6 +55,7 @@
 #define Z21_X_SET_LOCO_DRIVE        0xE4  // + DB0 0x1S
 #define Z21_X_SET_LOCO_FUNCTION     0xE4  // + DB0 0xF8
 #define Z21_X_LOCO_INFO             0xEF
+#define Z21_X_SET_TURNOUT           0x53
 #define Z21_X_UNKNOWN_COMMAND       0x61  // + DB0 0x82
 
 // ============================================================================
@@ -188,5 +189,19 @@ size_t z21BuildFirmwareVersionReply(uint8_t* buffer, size_t buffer_size);
  * received but not understood, rather than silently ignored.
  */
 size_t z21BuildUnknownCommandReply(uint8_t* buffer, size_t buffer_size);
+
+/**
+ * Decode a LAN_X_SET_TURNOUT command (phase 7 step 1 - Z21 accessory support).
+ * Extracts the turnout address, diverging port flag, and activate bit.
+ * @param adr_msb First address byte
+ * @param adr_lsb Second address byte
+ * @param db0_byte The 10Q0A00P byte
+ * @param out_address DCC accessory address (decoded from MSB/LSB)
+ * @param out_diverging false = straight (P=0), true = diverging (P=1)
+ * @return false if db0_byte upper nibble is not 0b1000, indicating this is
+ *         not actually a SET_TURNOUT packet; out params left unset in that case
+ */
+bool z21DecodeTurnoutCommand(uint8_t adr_msb, uint8_t adr_lsb, uint8_t db0_byte,
+                              uint16_t& out_address, bool& out_diverging);
 
 #endif  // Z21_PROTOCOL_H

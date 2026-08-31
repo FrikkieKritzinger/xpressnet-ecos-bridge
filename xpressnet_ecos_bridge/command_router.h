@@ -114,8 +114,8 @@ public:
     void handleEcosFunctionCommand(uint16_t address, uint32_t functions, uint32_t functions_mask);
 
     /**
-     * Handle an accessory/turnout command (Phase 5 step 10, v1: XpressNet
-     * source only - a throttle threw a turnout). Forwards to Ecos via
+     * Handle an accessory/turnout command (Phase 5 step 10 v1: XpressNet→Ecos,
+     * Phase 7 step 1: Z21→Ecos also supported). Forwards to Ecos via
      * ProtocolInterface::sendAccessoryCommand() and records it as the
      * single most recent accessory command for OLED display. No
      * StateEngine/expiry involved - accessories aren't ephemeral the way
@@ -123,7 +123,8 @@ public:
      * last one commanded."
      * @param address DCC accessory address
      * @param diverging false = straight, true = diverging
-     * @param source Only LocoSource::XPRESSNET does anything in v1
+     * @param source LocoSource::XPRESSNET or LocoSource::Z21_LAN (v2+ will add
+     *               more sources for Ecos-originated changes)
      */
     void handleAccessoryCommand(uint16_t address, bool diverging, LocoSource source);
 
