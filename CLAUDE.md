@@ -1407,7 +1407,7 @@ project's history. Named "TBD" rather than a themed name like Phase 6's
 "Future Improvements" - deliberately open-ended, add to this list as
 real needs come up rather than pre-committing to a fixed scope.
 
-1. ✅ **Z21 turnout/accessory command support** (2026-09-XX) - mirrors the existing
+1. ✅ **Z21 turnout/accessory command support** (2026-08-31) - mirrors the existing
    XpressNet→Ecos v1 accessory path (Phase 5 step 10): a WLANmaus throws
    a turnout, Ecos receives it. No new Ecos-side machinery needed - Ecos's
    `set(11, switch[...])` already addresses by protocol+address+port
