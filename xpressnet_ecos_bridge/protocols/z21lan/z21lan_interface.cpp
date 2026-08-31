@@ -262,8 +262,11 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         // data[0]=X-Header(0xE3), data[1]=DB0(0xF8), data[2]=Adr_MSB,
         // data[3]=Adr_LSB, data[4]=XOR. Phase 7 step 1 extension - Z21 turnout query.
         // Responds to a GET_TURNOUT_INFO request so WLANmaus UI enables turnout controls.
+        // Note: no DEBUG_PRINTF here - this is a high-frequency poll (like GET_STATUS
+        // below), and blocking Serial.print() at 115200 baud starves XpressNet in the
+        // main loop, causing err13 on real hardware. See Phase 6 step 4 notes on the
+        // same issue with baseline query bursts.
         uint16_t address = z21DecodeAddress(data[2], data[3]);
-        DEBUG_PRINTF("Z21 RX: GetTurnoutInfo Addr=%u (client %d)\n", address, client_index);
         reply_len = z21BuildTurnoutInfo(reply, sizeof(reply), address);
         sendToClient(client_index, reply, reply_len);
         return;
