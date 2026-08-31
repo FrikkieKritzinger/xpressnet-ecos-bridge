@@ -56,7 +56,7 @@
 #define Z21_X_SET_LOCO_DRIVE        0xE4  // + DB0 0x1S
 #define Z21_X_SET_LOCO_FUNCTION     0xE4  // + DB0 0xF8
 #define Z21_X_LOCO_INFO             0xEF
-#define Z21_X_TURNOUT_INFO          0xEF  // Same as LOCO_INFO (shares X-Header with response)
+#define Z21_X_TURNOUT_INFO          0x43  // TURNOUT_INFO response X-Header per spec 5.3
 #define Z21_X_SET_TURNOUT           0x53
 #define Z21_X_UNKNOWN_COMMAND       0x61  // + DB0 0x82
 
