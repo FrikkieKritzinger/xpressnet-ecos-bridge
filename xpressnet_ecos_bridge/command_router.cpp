@@ -98,12 +98,7 @@ void CommandRouter::handleXpressNetCommand(uint16_t address, uint8_t speed, uint
         return;
     }
     
-    // Check echo prevention BEFORE adding to state engine
-    if (isEchoCommand(address, LocoSource::XPRESSNET)) {
-        DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u speed command (from Ecos)\n", address);
-        echo_prevented_count++;
-        return;
-    }
+    // No echo check here - see the removal note on handleXpressNetFunctionCommand()
 
     // Create/update locomotive state
     LocoState new_state;
@@ -176,12 +171,23 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
         return;
     }
     
-    // Check echo prevention
-    if (isEchoCommand(address, LocoSource::XPRESSNET)) {
-        DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u function command (from Ecos)\n", address);
-        echo_prevented_count++;
-        return;
-    }
+    // No echo check here. Real bug found live 2026-08-28: this genuine
+    // incoming-command gate (distinct from wasRecentSource(), which only
+    // governs outgoing forwarding) could suppress a real new XpressNet
+    // command whenever echo_state had been touched recently by ANY other
+    // source for this address - and after today's fixes, that's often:
+    // direct XNet->Z21 fan-out and Ecos's own (now correctly-arriving)
+    // confirmations both update echo_state, so a second genuine XNet
+    // command arriving shortly after could get misread as an echo of
+    // something else, dropped entirely (matches the live symptom: function
+    // toggles intermittently just not registering). This check was mirror-
+    // added defensively alongside Ecos's own echo protection when only two
+    // protocols existed; XpressNet's master-polled bus has no real pathway
+    // for the bridge's own outgoing broadcast to loop back in as a fake
+    // incoming throttle request (the vendored library's notify* callbacks
+    // only fire for genuine polled throttle replies), so there was never
+    // an actual echo risk here to protect against. wasRecentSource() still
+    // correctly prevents a real ping-pong loop on the way OUT.
 
     // Get existing state or create new
     LocoState new_state;
@@ -245,11 +251,12 @@ void CommandRouter::handleZ21Command(uint16_t address, uint8_t speed, uint8_t di
         return;
     }
 
-    if (isEchoCommand(address, LocoSource::Z21_LAN)) {
-        DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u speed command (from Ecos)\n", address);
-        echo_prevented_count++;
-        return;
-    }
+    // No echo check here - Z21 is UDP client-server, not a shared bus, so
+    // there's no physical path for the bridge's own outgoing broadcast to
+    // loop back as a fake incoming client request - see the removal note
+    // on handleXpressNetFunctionCommand() for the fuller reasoning
+    // (applies equally here; this check caused the same intermittent
+    // dropped-command symptom).
 
     LocoState new_state;
     new_state.dcc_address = address;
@@ -300,11 +307,7 @@ void CommandRouter::handleZ21FunctionCommand(uint16_t address, uint32_t function
         return;
     }
 
-    if (isEchoCommand(address, LocoSource::Z21_LAN)) {
-        DEBUG_ECHO_PRINTF("Echo suppressed: Loco %u function command (from Ecos)\n", address);
-        echo_prevented_count++;
-        return;
-    }
+    // No echo check here - see handleZ21Command()/handleXpressNetFunctionCommand().
 
     LocoState new_state;
     if (!state_engine.getLoco(address, new_state)) {
@@ -371,6 +374,7 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
 
     // Get existing state or create new
     LocoState new_state;
+    bool changed = true;  // a brand-new loco is always worth announcing
     if (!state_engine.getLoco(address, new_state)) {
         // New from Ecos
         new_state.dcc_address = address;
@@ -390,6 +394,19 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
         // actually reported. A speed-only event must not silently reset
         // direction back to whatever default byte accompanied it, and vice
         // versa - the same class of bug already fixed for function merging.
+        //
+        // Real bug found live 2026-08-28: this used to broadcast
+        // unconditionally, even when Ecos's event just re-confirmed a
+        // value the bridge already had (a redundant echo of our own
+        // background traffic - baseline queries, Z21 activity - not a
+        // genuine change). Every one of those spuriously re-triggered
+        // XpressNet's "stolen" push (pushLocoStateToOwningSlot()), which a
+        // real MultiMaus visibly flashes even for a no-op update. Only
+        // treat this as a real change if a reported field actually differs
+        // from what was already known.
+        changed = (has_speed && speed != new_state.speed) ||
+                  (has_direction && direction != new_state.direction);
+
         if (has_speed) {
             new_state.speed = speed;
         }
@@ -399,6 +416,11 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
         new_state.subscribed_to_ecos = true;
         new_state.last_source = LocoSource::ECOS;
         state_engine.addOrUpdateLoco(address, new_state);
+    }
+
+    if (!changed) {
+        DEBUG_ECOS_PRINTF("Ecos: Loco %u speed/direction unchanged, not re-broadcasting\n", address);
+        return;
     }
 
     // Broadcast to XpressNet/Z21 (if enabled) - drive-only, functions untouched here
@@ -411,11 +433,18 @@ void CommandRouter::handleEcosCommand(uint16_t address, uint8_t speed, uint8_t d
     last_command.functions = new_state.functions;
     last_command.source = LocoSource::ECOS;
 
-    // Update echo prevention
-    echo_state.last_loco_address = address;
-    echo_state.last_command_type = 0;  // SPEED
-    echo_state.last_timestamp_ms = now_ms();
-    echo_state.last_source = LocoSource::ECOS;
+    // Deliberately NOT touching echo_state here. Real bug found live
+    // 2026-08-28: this used to unconditionally stamp echo_state to ECOS,
+    // which nothing ever actually needs to check (wasRecentSource() is
+    // only ever called for XPRESSNET/Z21_LAN, never ECOS) - but doing so
+    // clobbered a still-relevant XPRESSNET/Z21_LAN attribution whenever two
+    // of that protocol's commands were in flight close together: the first
+    // one's Ecos confirmation would overwrite echo_state to ECOS, so the
+    // second command's own confirmation, arriving shortly after, no longer
+    // looked like an echo of a recent XpressNet/Z21 command and got pushed
+    // straight back to it - XpressNet visibly flashing "stolen" for its own
+    // command, confirmed live with only XpressNet and Ecos connected (Z21
+    // powered off entirely, ruling out any Z21 involvement).
 }
 
 void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functions, uint32_t functions_mask) {
@@ -455,8 +484,18 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
     new_state.subscribed_to_ecos = true;
     new_state.last_source = LocoSource::ECOS;
 
+    // Same "did anything actually change" check as handleEcosCommand() -
+    // a redundant Ecos echo that merges back to the same bitmap shouldn't
+    // spuriously re-trigger XpressNet's "stolen" push.
+    bool changed = !known || (new_state.functions != existing_functions);
+
     if (!state_engine.addOrUpdateLoco(address, new_state)) {
         DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u\n", address);
+        return;
+    }
+
+    if (!changed) {
+        DEBUG_ECOS_PRINTF("Ecos: Loco %u functions unchanged, not re-broadcasting\n", address);
         return;
     }
 
@@ -470,11 +509,8 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
     last_command.functions = new_state.functions;
     last_command.source = LocoSource::ECOS;
 
-    // Update echo prevention
-    echo_state.last_loco_address = address;
-    echo_state.last_command_type = 1;  // FUNCTION
-    echo_state.last_timestamp_ms = now_ms();
-    echo_state.last_source = LocoSource::ECOS;
+    // Deliberately NOT touching echo_state here - see handleEcosCommand()'s
+    // comment for why.
 }
 
 // ============================================================================
@@ -640,55 +676,22 @@ void CommandRouter::update() {
 // PRIVATE HELPER FUNCTIONS
 // ============================================================================
 
-bool CommandRouter::isEchoCommand(uint16_t address, LocoSource source) const {
-    /*
-     * Check if incoming command is an echo of recent outgoing command
-     * 
-     * Echo scenario:
-     * 1. XpressNet sends speed command for loco 100
-     * 2. We send to Ecos
-     * 3. Ecos sends back update for loco 100
-     * 4. We check: is this an echo?
-     *    - Same address? YES
-     * - Same source (direction)? NO (came from Ecos, not XpressNet)
-     *    - Within 500ms? YES
-     *    - Result: SUPPRESS (it's an echo)
-     * 
-     * We want to prevent sending back to the originating protocol
-     * within the 500ms window
-     */
-    
-    unsigned long now = now_ms();
-    unsigned long time_since_last = now - echo_state.last_timestamp_ms;
-    
-    // Not an echo if more than 500ms has passed
-    if (time_since_last > ECHO_PREVENTION_WINDOW) {
-        return false;
-    }
-    
-    // Not an echo if different loco
-    if (address != echo_state.last_loco_address) {
-        return false;
-    }
-    
-    // This is an echo if:
-    // - Same loco
-    // - Same source (the source this came from is the source we last sent to)
-    // - Within 500ms window
-    
-    // If last update was from XpressNet and this is also XpressNet, it's not an echo
-    // (it's a separate XpressNet command)
-    if (echo_state.last_source == source) {
-        return false;  // Same source, not an echo
-    }
-    
-    // Different source, same loco, within window = ECHO
-    return true;
-}
-
 bool CommandRouter::wasRecentSource(uint16_t address, LocoSource source) const {
+    // Real bug found live 2026-08-28: ECHO_PREVENTION_WINDOW (500ms) is far
+    // shorter than Ecos's real confirmation round trip has shown itself to
+    // be under real load today (TCP latency, paced baseline queries,
+    // Ecos's own processing) - so a protocol's own command's confirmation
+    // could arrive AFTER this window closed, get misread as an
+    // independent Ecos-side change, and get pushed straight back to that
+    // same protocol as if someone else had changed it (XpressNet visibly
+    // flashing "stolen" for its own commands). Widened to
+    // ECOS_ECHO_ATTRIBUTION_WINDOW_MS, generous enough to cover realistic
+    // round-trip variance - the tradeoff (rarely, a genuine independent
+    // Ecos-direct change made within that window of recent throttle
+    // activity might be attributed to the throttle instead) is far less
+    // disruptive than the false-positive "stolen" flashes this caused.
     unsigned long now = now_ms();
-    if (now - echo_state.last_timestamp_ms > ECHO_PREVENTION_WINDOW) {
+    if (now - echo_state.last_timestamp_ms > ECOS_ECHO_ATTRIBUTION_WINDOW_MS) {
         return false;
     }
     if (address != echo_state.last_loco_address) {
@@ -721,16 +724,49 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
      */
 
     if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN) {
-        // Any throttle-facing protocol forwards to Ecos only - Ecos's own
-        // echo back through the ECOS branch below is what reaches every
-        // OTHER throttle-facing protocol (including this one, filtered by
-        // echo prevention), not a direct fan-out here.
+        // Forward to Ecos, the persistent source of truth for this loco's
+        // state.
         #if ENABLE_ECOS_LAN
         if (ecos != nullptr) {
             DEBUG_PRINTF("Broadcasting %s command to Ecos\n", locoSourceToString(source));
             ecos->sendSpeedCommand(address, state.speed, state.direction);
             if (functions_changed) {
                 ecos->sendFunctionCommand(address, state.functions);
+            }
+        }
+        #endif
+
+        // ALSO fan out directly, immediately, to every OTHER throttle-
+        // facing protocol - do not wait for Ecos to echo this back first.
+        // Real design change 2026-08-28, at the user's prompting: this used
+        // to rely entirely on Ecos's own confirmation event completing the
+        // loop to the other protocol (the ECOS branch below), which turned
+        // out to be fragile in practice - Ecos's echo behavior around
+        // control ownership, its own reply framing, and this bridge's own
+        // baseline-query/function-send traffic all turned out to be able to
+        // interfere with whether or when that confirmation ever arrived
+        // (see CHANGELOG 2026-08-28 for the specific bugs). There's no
+        // actual need to wait: the bridge already knows exactly what
+        // changed and for which loco, so telling the other protocol
+        // directly is simpler and doesn't depend on Ecos's cooperation.
+        // Ecos's own echo (below) still reaches this same protocol too when
+        // it arrives - redundant but harmless (same value re-applied).
+        #if ENABLE_XPRESSNET
+        if (source != LocoSource::XPRESSNET && xpressnet != nullptr) {
+            DEBUG_PRINTF("Broadcasting %s command directly to XpressNet\n", locoSourceToString(source));
+            xpressnet->sendSpeedCommand(address, state.speed, state.direction);
+            if (functions_changed) {
+                xpressnet->sendFunctionCommand(address, state.functions);
+            }
+            xpressnet->pushLocoStateToOwningSlot(address);
+        }
+        #endif
+        #if ENABLE_Z21_LAN
+        if (source != LocoSource::Z21_LAN && z21 != nullptr) {
+            DEBUG_PRINTF("Broadcasting %s command directly to Z21\n", locoSourceToString(source));
+            z21->sendSpeedCommand(address, state.speed, state.direction);
+            if (functions_changed) {
+                z21->sendFunctionCommand(address, state.functions);
             }
         }
         #endif
@@ -888,12 +924,12 @@ void CommandRouter::debugPrintEchoState() const {
     
     unsigned long age = now_ms() - echo_state.last_timestamp_ms;
     DEBUG_ECHO_PRINTF("Age:            %lu ms\n", age);
-    DEBUG_ECHO_PRINTF("Window:         %lu ms\n", (unsigned long)ECHO_PREVENTION_WINDOW);
-    
-    if (age < ECHO_PREVENTION_WINDOW) {
-        DEBUG_ECHO_PRINTF("Status:         ACTIVE (echoes will be suppressed)\n");
+    DEBUG_ECHO_PRINTF("Window:         %lu ms\n", (unsigned long)ECOS_ECHO_ATTRIBUTION_WINDOW_MS);
+
+    if (age < ECOS_ECHO_ATTRIBUTION_WINDOW_MS) {
+        DEBUG_ECHO_PRINTF("Status:         ACTIVE (wasRecentSource() would attribute an Ecos echo to this source)\n");
     } else {
-        DEBUG_ECHO_PRINTF("Status:         INACTIVE (echoes not suppressed)\n");
+        DEBUG_ECHO_PRINTF("Status:         INACTIVE (window expired)\n");
     }
     
     DEBUG_ECHO_PRINT("=============================\n\n");

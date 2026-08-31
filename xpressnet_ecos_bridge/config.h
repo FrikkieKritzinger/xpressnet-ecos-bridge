@@ -263,9 +263,19 @@
 // ============================================================================
 // ECHO PREVENTION CONFIGURATION
 // ============================================================================
-// Prevents command loops when updates come from Ecos and bounce back to XpressNet
-
-#define ECHO_PREVENTION_WINDOW      500   // ms - ignore echoed commands within this window
+// How long CommandRouter::wasRecentSource() attributes an Ecos-originated
+// confirmation to whichever throttle-facing protocol most recently sent a
+// command for that address, so broadcastCommand()'s ECOS branch doesn't
+// echo it straight back (e.g. XpressNet visibly flashing "stolen" for its
+// own command). Real bug found live 2026-08-28: the original 500ms was too
+// short for Ecos's real confirmation round trip under real load (TCP
+// latency, paced baseline queries), so late echoes of a protocol's own
+// command were misattributed as independent Ecos-side changes. Widened
+// with margin - the tradeoff (rarely, a genuine independent Ecos-direct
+// change made within this window of recent throttle activity might be
+// attributed to the throttle instead) is far less disruptive than the
+// false-positive "stolen" flashes the short window caused.
+#define ECOS_ECHO_ATTRIBUTION_WINDOW_MS   4000   // ms
 
 // ============================================================================
 // DEBUG CONFIGURATION

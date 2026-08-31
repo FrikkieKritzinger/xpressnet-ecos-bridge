@@ -238,27 +238,14 @@ private:
     
     // Helper methods
     /**
-     * Check if incoming command is an echo of our recent outgoing command
-     * @param address Locomotive address
-     * @param source Which protocol this came from
-     * @return true if echo (suppress), false if new command (process)
-     */
-    bool isEchoCommand(uint16_t address, LocoSource source) const;
-
-    /**
      * True if `source` was the protocol that most recently sent a command
-     * for this address, within the echo window. Used by broadcastCommand()'s
-     * ECOS branch to skip echoing an Ecos-originated update back to whichever
-     * throttle-facing protocol just sent the command that produced it -
-     * per-destination, unlike isEchoCommand() which is all-or-nothing.
-     *
-     * Real bug found live 2026-08-28: handleEcosCommand()/
-     * handleEcosFunctionCommand() used to call isEchoCommand() and drop the
-     * ENTIRE update on a match - correct for not echoing XpressNet's own
-     * command back to XpressNet, but it also silently dropped the SAME
-     * update for Z21 (and vice versa), since one shared echo_state can't
-     * distinguish "skip the originator" from "skip everyone". A three-
-     * protocol bridge needs per-destination skipping, not a single gate.
+     * for this address, within ECOS_ECHO_ATTRIBUTION_WINDOW_MS. Used by
+     * broadcastCommand()'s ECOS branch to skip echoing an Ecos-originated
+     * update back to whichever throttle-facing protocol just sent the
+     * command that produced it - per-destination, so the OTHER protocol
+     * still gets forwarded to (a single shared all-or-nothing echo gate
+     * used to drop the entire update instead - real bug found live
+     * 2026-08-28, since fixed).
      */
     bool wasRecentSource(uint16_t address, LocoSource source) const;
 

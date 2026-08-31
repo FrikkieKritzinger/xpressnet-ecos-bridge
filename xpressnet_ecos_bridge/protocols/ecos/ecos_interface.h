@@ -166,6 +166,8 @@ private:
     struct AddressMapEntry {
         uint16_t dcc_address;
         uint16_t ecos_id;
+        uint32_t last_sent_functions;    // What we last told Ecos, so sendFunctionCommand() can send only the bits that changed instead of resending all 32 every time
+        bool has_last_sent_functions;    // False until the first send - that one still sends all 32 (paced), since there's nothing to diff against yet
     };
 
     AddressMapEntry address_map[MAX_ECOS_OBJECTS];
@@ -179,6 +181,12 @@ private:
      * Returns 0 if not found
      */
     uint16_t findEcosObjectId(uint16_t dcc_address) const;
+
+    /**
+     * Find the full address map entry for a DCC address (for reading/
+     * updating last_sent_functions). Returns nullptr if not found.
+     */
+    AddressMapEntry* findAddressMapEntry(uint16_t dcc_address);
 
     /**
      * Add entry to address map
@@ -214,6 +222,31 @@ private:
      * and advance. No-op if none is pending. Called once per update().
      */
     void sendNextBaselineQueryStep();
+
+    // ========================================================================
+    // OUTGOING FUNCTION BITMAP (paced across multiple update() calls)
+    // ========================================================================
+    // sendFunctionCommand() used to write all 32 individual set(func[n,v])
+    // commands to the TCP socket synchronously in one call - the exact same
+    // blocking-burst anti-pattern as the baseline query above, just never
+    // paced. Real bug found live 2026-08-28: with a genuine XpressNet
+    // function change forwarded through this path, Ecos responded with
+    // "control[none]" (twice) instead of ever sending a real state
+    // confirmation event back - most likely Ecos's own request handling
+    // getting overwhelmed by 32 rapid commands for one object, which would
+    // also explain why no confirmation ever reached the OTHER throttle-
+    // facing protocol (there was nothing valid to forward). Paced to one
+    // set() per update() call, same pattern as sendNextBaselineQueryStep().
+
+    uint16_t pending_function_object_id;  // 0 = nothing pending
+    uint32_t pending_function_bitmap;
+    uint8_t pending_function_step;        // 0..31 = func[0..31]
+
+    /**
+     * If a paced function send is in progress, send its next single set()
+     * step and advance. No-op if none is pending. Called once per update().
+     */
+    void sendNextFunctionStep();
 
     // ========================================================================
     // PENDING QUERY BUFFER

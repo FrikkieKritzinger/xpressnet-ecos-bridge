@@ -2,18 +2,22 @@
  * Command Router Unit Tests
  *
  * Tests for:
- * - Protocol bridging (XpressNet <-> Ecos)
- * - Echo prevention (500ms window, opposite-source-only)
+ * - Protocol bridging (XpressNet <-> Ecos <-> Z21)
+ * - Echo attribution (wasRecentSource(), ECOS_ECHO_ATTRIBUTION_WINDOW_MS
+ *   window, per-destination - see command_router.h's doc comment)
  * - Command routing to correct protocol interface
  * - Multi-throttle consistency (broadcast updates)
  * - Subscription lifecycle (request -> subscribe -> expiry -> unsubscribe)
  * - Input validation (invalid address/speed rejected before state engine)
  *
- * Note: isEchoCommand() only compares (address, opposite source, time window) -
- * it does NOT compare command values. Two different-source commands for the
- * same loco within 500ms are suppressed regardless of whether speed/direction
- * differ; two same-source commands are never treated as echoes, regardless of
- * timing. Tests below reflect that actual behavior.
+ * Note: wasRecentSource() only compares (address, source, time window) - it
+ * does NOT compare command values, and it governs OUTGOING forwarding from
+ * broadcastCommand()'s ECOS branch only (skip re-echoing to whichever
+ * protocol was the recent source). Incoming commands from XpressNet/Z21 are
+ * no longer gated by any echo check at all (removed 2026-08-28 - see
+ * command_router.cpp for why). handleEcosCommand()/handleEcosFunctionCommand()
+ * also skip broadcasting when the reported value doesn't actually differ
+ * from what's already known, regardless of timing.
  */
 
 #include <cstdint>
@@ -264,33 +268,42 @@ void test_router_same_source_repeat_is_not_echo(void) {
 }
 
 void test_router_echo_prevention_window_expires(void) {
-    // Opposite-source update AFTER the 500ms window is not suppressed.
+    // Opposite-source update AFTER the attribution window is not suppressed.
+    // Uses a genuinely different speed for the second call - handleEcosCommand()
+    // now skips re-broadcasting a value that didn't actually change (2026-08-28
+    // fix), so reusing the same speed here would pass for the wrong reason.
+    // Window widened to ECOS_ECHO_ATTRIBUTION_WINDOW_MS (4000ms) the same day -
+    // 500ms proved too short for Ecos's real confirmation round trip under load.
     CommandRouter router;
     MockProtocolInterface xnet_mock;
     router.setXpressNetInterface(&xnet_mock);
 
     router.handleXpressNetCommand(100, 64, 1);   // t=0, from XPRESSNET
-    advanceMockNowMs(600);                        // past the 500ms window
-    router.handleEcosCommand(100, 64, 1);         // t=600, from ECOS
+    advanceMockNowMs(ECOS_ECHO_ATTRIBUTION_WINDOW_MS + 100);  // past the window
+    router.handleEcosCommand(100, 90, 1);         // from ECOS, genuinely different speed
 
     TEST_ASSERT_EQUAL_INT(1, xnet_mock.getSpeedCommandCount());  // Should pass through
 }
 
-void test_router_echo_prevention_reverse_direction_suppressed(void) {
-    // The opposite-source suppression test above only exercised
-    // handleEcosCommand's own echo check (XpressNet-first, Ecos-second).
-    // This exercises handleXpressNetCommand's own echo check (lines
-    // 90-92) by reversing the order: Ecos-first, XpressNet-second.
+void test_router_xpressnet_command_not_suppressed_right_after_ecos_command(void) {
+    // Design change 2026-08-28: handleXpressNetCommand() no longer has its
+    // own incoming-echo gate. That gate used to suppress a genuine new
+    // XpressNet command whenever echo_state had been touched recently by
+    // ANY other source for the same address - increasingly common once
+    // Ecos's own confirmations reliably reach XpressNet (a real, confirmed
+    // live bug: legitimate function toggles intermittently just not
+    // registering). XpressNet's master-polled bus has no real pathway for
+    // the bridge's own outgoing broadcast to loop back in as a fake
+    // incoming throttle request, so removing it doesn't reopen a real echo
+    // risk - wasRecentSource() still protects the outgoing direction.
     CommandRouter router;
     MockProtocolInterface ecos_mock;
     router.setEcosInterface(&ecos_mock);
 
     router.handleEcosCommand(100, 64, 1);         // t=0, from ECOS (broadcasts to xpressnet, not ecos)
-    router.handleXpressNetCommand(100, 90, 1);     // t=0, from XPRESSNET (opposite source) - should be suppressed
+    router.handleXpressNetCommand(100, 90, 1);     // t=0, from XPRESSNET - a genuine new command, must go through
 
-    // If NOT suppressed, this second call would broadcast to ecos_mock
-    // (source=XPRESSNET broadcasts to Ecos). Suppression means it never does.
-    TEST_ASSERT_EQUAL_INT(0, ecos_mock.getSpeedCommandCount());
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getSpeedCommandCount());
 }
 
 // ============================================================================
@@ -779,9 +792,9 @@ void test_router_debug_print_echo_state_does_not_crash(void) {
     CommandRouter router;
     router.handleXpressNetCommand(100, 64, 1);
 
-    router.debugPrintEchoState();       // age < ECHO_PREVENTION_WINDOW
-    advanceMockNowMs(600);
-    router.debugPrintEchoState();       // age >= ECHO_PREVENTION_WINDOW
+    router.debugPrintEchoState();       // age < ECOS_ECHO_ATTRIBUTION_WINDOW_MS
+    advanceMockNowMs(ECOS_ECHO_ATTRIBUTION_WINDOW_MS + 100);
+    router.debugPrintEchoState();       // age >= ECOS_ECHO_ATTRIBUTION_WINDOW_MS
 
     TEST_PASS();  // Reaching here without crashing is the assertion
 }
@@ -830,18 +843,20 @@ void test_router_route_ecos_to_z21(void) {
     TEST_ASSERT_EQUAL_UINT16(100, z21_mock.getLastSpeedCommand().address);
 }
 
-void test_router_z21_does_not_receive_direct_xpressnet_fanout(void) {
-    // A throttle-facing protocol forwards to Ecos only - it should NOT
-    // also fan out directly to another throttle-facing protocol. Only
-    // Ecos's own echo (a separate handleEcosCommand() call) closes that
-    // loop - see the broadcastCommand() comment this mirrors.
+void test_router_z21_receives_direct_xpressnet_fanout(void) {
+    // Design change 2026-08-28: a throttle-facing protocol now fans out
+    // directly to every OTHER throttle-facing protocol immediately, not
+    // just to Ecos - waiting on Ecos's own echo to complete the loop to
+    // the other protocol turned out to be fragile in practice (see
+    // CHANGELOG for the specific bugs this caused). See the
+    // broadcastCommand() comment this mirrors.
     CommandRouter router;
     MockProtocolInterface z21_mock;
     router.setZ21Interface(&z21_mock);
 
     router.handleXpressNetCommand(100, 64, 1);
 
-    TEST_ASSERT_EQUAL_INT(0, z21_mock.getSpeedCommandCount());
+    TEST_ASSERT_EQUAL_INT(1, z21_mock.getSpeedCommandCount());
 }
 
 void test_router_echo_prevention_z21_vs_ecos(void) {
@@ -926,7 +941,7 @@ int main(void) {
     RUN_TEST(test_router_accessory_command_surfaces_in_system_status);
 
     RUN_TEST(test_router_echo_prevention_opposite_source_suppressed);
-    RUN_TEST(test_router_echo_prevention_reverse_direction_suppressed);
+    RUN_TEST(test_router_xpressnet_command_not_suppressed_right_after_ecos_command);
     RUN_TEST(test_router_same_source_repeat_is_not_echo);
     RUN_TEST(test_router_echo_prevention_window_expires);
 
@@ -977,7 +992,7 @@ int main(void) {
     RUN_TEST(test_router_route_z21_speed_to_ecos);
     RUN_TEST(test_router_route_z21_function_to_ecos);
     RUN_TEST(test_router_route_ecos_to_z21);
-    RUN_TEST(test_router_z21_does_not_receive_direct_xpressnet_fanout);
+    RUN_TEST(test_router_z21_receives_direct_xpressnet_fanout);
     RUN_TEST(test_router_echo_prevention_z21_vs_ecos);
     RUN_TEST(test_router_emergency_stop_from_z21_reaches_ecos);
     RUN_TEST(test_router_emergency_stop_from_ecos_reaches_z21);

@@ -38,6 +38,9 @@ EcosInterface::EcosInterface()
       last_heartbeat_latency_ms(NO_TIMESTAMP),
       baseline_query_object_id(0),
       baseline_query_step(0),
+      pending_function_object_id(0),
+      pending_function_bitmap(0),
+      pending_function_step(0),
       pending_query_count(0),
       heartbeat_timer(ECOS_HEARTBEAT_INTERVAL),
       address_map_refresh_timer(ECOS_ADDRESS_MAP_REFRESH_INTERVAL),
@@ -164,6 +167,10 @@ void EcosInterface::update() {
     // call - see sendNextBaselineQueryStep()'s header comment for why this
     // must stay paced rather than sent as one synchronous burst.
     sendNextBaselineQueryStep();
+
+    // Phase 6: Advance any in-progress outgoing function bitmap send, one
+    // set() per call - see sendNextFunctionStep()'s header comment.
+    sendNextFunctionStep();
 }
 
 // ============================================================================
@@ -348,6 +355,15 @@ uint16_t EcosInterface::findEcosObjectId(uint16_t dcc_address) const {
     return 0;  // Not found
 }
 
+EcosInterface::AddressMapEntry* EcosInterface::findAddressMapEntry(uint16_t dcc_address) {
+    for (uint16_t i = 0; i < address_map_count; i++) {
+        if (address_map[i].dcc_address == dcc_address) {
+            return &address_map[i];
+        }
+    }
+    return nullptr;
+}
+
 bool EcosInterface::addAddressMapEntry(uint16_t dcc_address, uint16_t ecos_id) {
     // Upsert: queryObjects() now re-runs on every heartbeat (30s), so the
     // same locomotive list arrives repeatedly - update in place instead of
@@ -366,6 +382,8 @@ bool EcosInterface::addAddressMapEntry(uint16_t dcc_address, uint16_t ecos_id) {
 
     address_map[address_map_count].dcc_address = dcc_address;
     address_map[address_map_count].ecos_id = ecos_id;
+    address_map[address_map_count].last_sent_functions = 0;
+    address_map[address_map_count].has_last_sent_functions = false;
     address_map_count++;
     return true;
 }
@@ -472,14 +490,10 @@ void EcosInterface::flushPendingQueries() {
             }
 
             if (pending_queries[i].has_functions) {
-                // Same per-bit approach as sendFunctionCommand().
-                for (uint8_t fn = 0; fn < 32; fn++) {
-                    uint8_t state = (pending_queries[i].functions >> fn) & 1;
-                    uint16_t len = ecosBuildSetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, fn, state);
-                    if (len > 0) {
-                        wifi_client.write((uint8_t*)cmd_buffer, len);
-                    }
-                }
+                // Reuse sendFunctionCommand()'s own diff-against-last-sent
+                // logic rather than duplicating it - obj_id is already
+                // resolved so this re-lookup is cheap.
+                sendFunctionCommand(pending_queries[i].address, pending_queries[i].functions);
 
                 DEBUG_ECOS_PRINTF("Ecos TX: Flushed queued functions for loco %u = 0x%08x\n",
                                   pending_queries[i].address, pending_queries[i].functions);
@@ -683,20 +697,70 @@ void EcosInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
         return;
     }
 
-    // Send each function bit that differs from current state
-    // (For now, just send all 32 as individual commands — not optimal but safe)
-    char cmd_buffer[80];
-
-    for (uint8_t fn = 0; fn < 32; fn++) {
-        uint8_t state = (functions >> fn) & 1;
-        uint16_t len = ecosBuildSetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, fn, state);
-
-        if (len > 0) {
-            wifi_client.write((uint8_t*)cmd_buffer, len);
+    // Real bug found live 2026-08-28: resending all 32 bits every time,
+    // even paced, meant a *second* function change arriving before a
+    // still-in-progress 32-step sweep finished just restarted it - with
+    // several rapid real button presses (e.g. toggling F8 through F11 in
+    // quick succession), most of them never got far enough to complete at
+    // all before being superseded, so only roughly the last one in a burst
+    // ever actually reached Ecos. Fixed by tracking what was last sent per
+    // loco and diffing: once a baseline is known, only the bit(s) that
+    // actually changed get sent - typically 1, cheap enough to send
+    // synchronously with no pacing needed at all. Pacing is now only used
+    // for the genuine first-ever send (nothing to diff against yet, so all
+    // 32 bits are meaningful) via sendNextFunctionStep().
+    AddressMapEntry* entry = findAddressMapEntry(address);
+    if (entry != nullptr && entry->has_last_sent_functions) {
+        uint32_t changed = functions ^ entry->last_sent_functions;
+        if (changed == 0) {
+            return;  // Nothing actually changed - don't send anything
         }
+        char cmd_buffer[80];
+        for (uint8_t fn = 0; fn < 32; fn++) {
+            if (!(changed & (1UL << fn))) continue;
+            uint8_t state = (functions >> fn) & 1;
+            uint16_t len = ecosBuildSetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, fn, state);
+            if (len > 0) {
+                wifi_client.write((uint8_t*)cmd_buffer, len);
+            }
+        }
+        entry->last_sent_functions = functions;
+        DEBUG_ECOS_PRINTF("Ecos TX: Functions loco %u = 0x%08x (diff 0x%08x, immediate)\n",
+                          address, functions, changed);
+        return;
     }
 
-    DEBUG_ECOS_PRINTF("Ecos TX: Functions loco %u = 0x%08x\n", address, functions);
+    // First-ever send for this loco - nothing to diff against, so all 32
+    // bits are meaningful. Paced to one per update() tick - see the header
+    // comment on pending_function_object_id.
+    pending_function_object_id = obj_id;
+    pending_function_bitmap = functions;
+    pending_function_step = 0;
+    if (entry != nullptr) {
+        entry->last_sent_functions = functions;
+        entry->has_last_sent_functions = true;
+    }
+
+    DEBUG_ECOS_PRINTF("Ecos TX: Functions loco %u = 0x%08x (first send, queued, paced)\n", address, functions);
+}
+
+void EcosInterface::sendNextFunctionStep() {
+    if (pending_function_object_id == 0) {
+        return;  // nothing pending
+    }
+
+    uint8_t fn = pending_function_step;
+    uint8_t state = (pending_function_bitmap >> fn) & 1;
+    char cmd_buffer[80];
+    uint16_t len = ecosBuildSetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), pending_function_object_id, fn, state);
+    if (len > 0) {
+        wifi_client.write((uint8_t*)cmd_buffer, len);
+    }
+
+    pending_function_step++;
+    if (pending_function_step >= 32) {
+        pending_function_object_id = 0;  // done
+    }
 }
 
 // ============================================================================
