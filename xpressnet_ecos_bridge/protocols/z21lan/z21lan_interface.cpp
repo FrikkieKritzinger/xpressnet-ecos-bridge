@@ -324,14 +324,10 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         return;
     }
 
-    // Debug: log what x_header we get when looking for SET_TURNOUT
-    if (x_header == 0x53 || (x_header >= 0x50 && x_header <= 0x60)) {
-        DEBUG_PRINTF("Z21 DEBUG: x_header=0x%02X data_len=%zu (checking for SET_TURNOUT 0x53)\n", x_header, data_len);
-    }
-
     if (x_header == Z21_X_SET_TURNOUT && data_len >= 5) {
-        // data[0]=X-Header(0x53), data[1]=DB0(10Q0A00P), data[2]=Adr_MSB,
-        // data[3]=Adr_LSB, data[4]=XOR. Phase 7 step 1 - Z21 accessory support
+        // data[0]=X-Header(0x53), data[1]=DB0 (unused), data[2]=Adr_MSB (unused),
+        // data[3]=Adr_LSB (encodes turnout#/state), data[4]=checksum.
+        // Phase 7 step 1 - Z21 accessory support (WLANmaus format).
         uint16_t address;
         bool diverging;
         if (z21DecodeTurnoutCommand(data[2], data[3], data[1], address, diverging) && router) {

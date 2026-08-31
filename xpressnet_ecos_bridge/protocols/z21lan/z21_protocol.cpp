@@ -102,32 +102,18 @@ bool z21DecodeFunctionCommand(uint8_t data_byte, uint8_t& out_function_index, ui
 
 bool z21DecodeTurnoutCommand(uint8_t adr_msb, uint8_t adr_lsb, uint8_t db0_byte,
                               uint16_t& out_address, bool& out_diverging) {
-    // DB0 format per spec section 5.2: 10Q0A00P
-    // bit7=1, bit6=0, bit5=Q(queue), bit4=0, bit3=A(activate), bit2=0, bit1=0, bit0=P(port)
-    // Upper nibble = bits[7:4] = 10Q0, which is 0x8 (Q=0) or 0x9 (Q=1)
-    uint8_t upper_nibble = (db0_byte >> 4) & 0x0F;
-    if ((upper_nibble & 0x0E) != 0x08) {  // Check bits[6:4] = 100, ignoring Q bit
-        return false;  // Not a SET_TURNOUT packet
-    }
+    // Real Z21 LAN turnout command format (as implemented by WLANmaus, not the
+    // spec's DB0 format): The turnout number and state are encoded in the address
+    // bytes alone. DB0 is ignored (always 0x00 from WLANmaus).
+    // LSB encoding: bit3=diverging flag, bits[2:0]=turnout offset (0-7 = turnout 0-7 on wire)
+    // MSB is not used; only the LSB matters for the turnout address itself.
+    // Example: turnout 1 straight=0x00, diverging=0x08; turnout 2 straight=0x01, diverging=0x09
+    // Note: Ecos uses 0-indexed turnout addresses on the wire (user sees 1, wire sends 0)
 
-    // Bit 3 = A (activate bit)
-    uint8_t activate = (db0_byte >> 3) & 0x01;
-    if (!activate) {
-        return false;  // Only forward activate edge (A=1), ignore deactivate (A=0)
-    }
-
-    // Bit 0 = P (port: 0=straight, 1=diverging)
-    uint8_t port = db0_byte & 0x01;
-    out_diverging = (port == 1);
-
-    // Decode address using same helper as locos (MSB/LSB format is identical)
-    out_address = z21DecodeAddress(adr_msb, adr_lsb);
-
-    // Real hardware (confirmed with MultiMaus for XpressNet):
-    // Z21 wire addresses are 0-indexed (user enters 3 on throttle, wire=2),
-    // Ecos expects addresses as user-entered (address 3 receives wire value 2).
-    // Same +1 correction as XpressNet to reconstruct operator intent.
-    out_address += 1;
+    // Extract turnout number and diverging state from LSB only
+    uint16_t turnout_offset = adr_lsb & 0x07;  // bits[2:0] = 0-7 (wire offset)
+    out_address = turnout_offset + 1;           // +1 to match XpressNet: reconstruct user-entered address
+    out_diverging = (adr_lsb & 0x08) != 0;      // bit3 = diverging flag
 
     return true;
 }

@@ -240,50 +240,58 @@ void test_decode_function_invalid_tt_rejected(void) {
 // ============================================================================
 
 void test_decode_turnout_straight(void) {
-    // DB0 = 10Q0A00P: activate (A=1), straight (P=0)
-    // DB0 = 0b10001000 = 0x88
+    // WLANmaus format: LSB bits[2:0]=turnout offset, bit3=diverging flag
+    // Turnout 1 straight: LSB=0x00 (offset 0, +1 -> turnout 1 user address)
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x03, 0x88, address, diverging));
-    TEST_ASSERT_EQUAL_UINT16(4, address);  // wire=3, +1 correction -> user-entered 4
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x00, 0xFF, address, diverging));
+    TEST_ASSERT_EQUAL_UINT16(1, address);  // 0 + 1 = 1
     TEST_ASSERT_FALSE(diverging);
 }
 
 void test_decode_turnout_diverging(void) {
-    // DB0 = 10Q0A00P: activate (A=1), diverging (P=1)
-    // DB0 = 0b10001001 = 0x89
+    // Turnout 1 diverging: LSB=0x08 (offset 0 + bit3)
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x05, 0x89, address, diverging));
-    TEST_ASSERT_EQUAL_UINT16(6, address);  // wire=5, +1 correction -> 6
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x08, 0xFF, address, diverging));
+    TEST_ASSERT_EQUAL_UINT16(1, address);
     TEST_ASSERT_TRUE(diverging);
 }
 
-void test_decode_turnout_deactivate_rejected(void) {
-    // DB0 with A=0 (deactivate) should be rejected
-    // DB0 = 0b10000000 = 0x80
+void test_decode_turnout_turnout2_straight(void) {
+    // Turnout 2 straight: LSB=0x01 (offset 1, +1 -> turnout 2)
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_FALSE(z21DecodeTurnoutCommand(0x00, 0x03, 0x80, address, diverging));
-}
-
-void test_decode_turnout_invalid_upper_nibble_rejected(void) {
-    // DB0 with upper nibble != 0b1000 should be rejected
-    // DB0 = 0b01001000 = 0x48 (upper nibble = 0b0100)
-    uint16_t address;
-    bool diverging;
-    TEST_ASSERT_FALSE(z21DecodeTurnoutCommand(0x00, 0x03, 0x48, address, diverging));
-}
-
-void test_decode_turnout_high_address(void) {
-    // Test with a long address (>= 128)
-    uint16_t address;
-    bool diverging;
-    uint8_t msb, lsb;
-    z21EncodeAddress(300, msb, lsb);  // Reuse address encoder
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(msb, lsb, 0x88, address, diverging));
-    TEST_ASSERT_EQUAL_UINT16(301, address);  // 300 + 1 correction
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x01, 0x00, address, diverging));
+    TEST_ASSERT_EQUAL_UINT16(2, address);  // 1 + 1 = 2
     TEST_ASSERT_FALSE(diverging);
+}
+
+void test_decode_turnout_turnout2_diverging(void) {
+    // Turnout 2 diverging: LSB=0x09 (offset 1 + bit3)
+    uint16_t address;
+    bool diverging;
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x09, 0x00, address, diverging));
+    TEST_ASSERT_EQUAL_UINT16(2, address);  // 1 + 1 = 2
+    TEST_ASSERT_TRUE(diverging);
+}
+
+void test_decode_turnout_turnout8_straight(void) {
+    // Turnout 8 straight: LSB=0x07 (offset 7, +1 -> turnout 8)
+    uint16_t address;
+    bool diverging;
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x07, 0xFF, address, diverging));
+    TEST_ASSERT_EQUAL_UINT16(8, address);  // 7 + 1 = 8
+    TEST_ASSERT_FALSE(diverging);
+}
+
+void test_decode_turnout_turnout8_diverging(void) {
+    // Turnout 8 diverging: LSB=0x0F (offset 7 + bit3)
+    uint16_t address;
+    bool diverging;
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x0F, 0xFF, address, diverging));
+    TEST_ASSERT_EQUAL_UINT16(8, address);  // 7 + 1 = 8
+    TEST_ASSERT_TRUE(diverging);
 }
 
 void test_build_turnout_info_low_address(void) {
@@ -478,9 +486,10 @@ int main(void) {
 
     RUN_TEST(test_decode_turnout_straight);
     RUN_TEST(test_decode_turnout_diverging);
-    RUN_TEST(test_decode_turnout_deactivate_rejected);
-    RUN_TEST(test_decode_turnout_invalid_upper_nibble_rejected);
-    RUN_TEST(test_decode_turnout_high_address);
+    RUN_TEST(test_decode_turnout_turnout2_straight);
+    RUN_TEST(test_decode_turnout_turnout2_diverging);
+    RUN_TEST(test_decode_turnout_turnout8_straight);
+    RUN_TEST(test_decode_turnout_turnout8_diverging);
 
     RUN_TEST(test_build_turnout_info_low_address);
     RUN_TEST(test_build_turnout_info_high_address);
