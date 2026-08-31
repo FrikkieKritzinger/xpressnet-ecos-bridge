@@ -297,9 +297,9 @@ void test_build_turnout_info_low_address(void) {
     TEST_ASSERT_EQUAL_HEX8(0x00, buffer[1]);    // DataLen MSB=0
     TEST_ASSERT_EQUAL_HEX8(0x40, buffer[2]);    // Header LSB=0x40
     TEST_ASSERT_EQUAL_HEX8(0x00, buffer[3]);    // Header MSB=0x00 (Z21_HEADER_LAN_X=0x0040)
-    TEST_ASSERT_EQUAL_HEX8(0xEF, buffer[4]);    // X-Header TURNOUT_INFO
+    TEST_ASSERT_EQUAL_HEX8(0x43, buffer[4]);    // X-Header TURNOUT_INFO per Z21 spec section 5.3
     // buffer[5]=Adr_MSB, buffer[6]=Adr_LSB for address 1
-    TEST_ASSERT_EQUAL_HEX8(0x00, buffer[7]);    // Position: straight (default)
+    TEST_ASSERT_EQUAL_HEX8(0x01, buffer[7]);    // Position: 00000001 = straight (default, per spec 5.3)
 }
 
 void test_build_turnout_info_high_address(void) {
@@ -308,8 +308,8 @@ void test_build_turnout_info_high_address(void) {
     size_t len = z21BuildTurnoutInfo(buffer, sizeof(buffer), 300);
     TEST_ASSERT_EQUAL(9, len);
     TEST_ASSERT_EQUAL_HEX8(0x09, buffer[0]);
-    TEST_ASSERT_EQUAL_HEX8(0xEF, buffer[4]);    // X-Header at buffer[4]
-    TEST_ASSERT_EQUAL_HEX8(0x00, buffer[7]);    // Position still defaults to straight (at buffer[7])
+    TEST_ASSERT_EQUAL_HEX8(0x43, buffer[4]);    // X-Header per Z21 spec section 5.3
+    TEST_ASSERT_EQUAL_HEX8(0x01, buffer[7]);    // Position: 00000001 = straight (at buffer[7])
 }
 
 void test_build_turnout_info_checksum_present(void) {
