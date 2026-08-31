@@ -506,15 +506,16 @@ why this reordering turned out to be the right call.
      actually broke the earlier, fully-reverted `ReqLocoBusy()` attempt
      (tracked in the changelog at the time as "not fully root-caused") -
      that bug existed then too and was never fixed until now.
-   - **Known, deliberately-parked limitation, unrelated to the above**:
-     Ecos's dedicated hardware direction switch doesn't generate any
-     network event on its own (not even an unrecognized one) - only
-     combined with a following speed change (e.g. crossing the zero-speed
-     detent) does a real event reach the bridge. Best guess: Ecos treats
-     the switch as a local UI latch that only gets pushed onto the wire
-     alongside the next speed command. The detent-crossing method works
-     as a full substitute and reaches every code path the dedicated switch
-     would, so this is flagged and put on hold rather than chased further.
+   - **Limitation noted here at the time, since resolved (confirmed
+     2026-08-31)**: Ecos's dedicated hardware direction switch used to not
+     generate any network event on its own - only combined with a
+     following speed change (e.g. crossing the zero-speed detent) did a
+     real event reach the bridge. The detent-crossing method was a full
+     working substitute at the time, so this was flagged and parked
+     rather than chased. Confirmed fixed as an incidental side effect of
+     Phase 6 step 4's echo-handling fixes (2026-08-28) - the user
+     directly tested both direction-change mechanisms afterward and
+     confirmed both now work correctly on XpressNet and Z21.
    - Native suite 122/122 passing (2 new tests from the speed/direction
      merge fix; the push-mechanism itself has no native coverage, same
      `ecos_interface.cpp`/hardware-coupled boundary as the rest of that
@@ -657,11 +658,13 @@ All disabled features = zero compiled code overhead.
   verified by code review only; step 10 is v1-scoped, Ecos→XpressNet and a
   dedicated display page deliberately deferred) - see the dedicated section
   below for the full roadmap.
-- **Phase 6 (Future Improvements)**: 🔧 In progress - steps 1-3 (EEPROM
-  storage, web config UI/Setup Mode, OTA updates) done and confirmed live;
-  step 4 (Z21 LAN) code-complete but paused before live WLANmaus
-  validation; steps 5-6 (LocoNet, TBD) not started - see the dedicated
-  section below.
+- **Phase 6 (Future Improvements)**: ✅ Complete - steps 1-4 done and
+  confirmed live (EEPROM storage, web config UI/Setup Mode, OTA updates,
+  Z21 LAN for WLANmaus), tagged `v1.1.1`. LocoNet (originally step 5) is
+  blocked on hardware the user doesn't have yet and moves to Phase 7
+  instead of holding this phase open; the open/TBD slot (step 6) carries
+  forward as Phase 7's own open slot. See the dedicated section below.
+- **Phase 7 (TBD)**: 🔧 In progress - see the dedicated section below.
 
 ---
 
@@ -1023,11 +1026,14 @@ rather than completed, since it served no design purpose.
 
 ---
 
-## 🎯 Phase 6: Future Improvements 🔧 IN PROGRESS (steps 1-3 of 6 done)
+## 🎯 Phase 6: Future Improvements ✅ COMPLETE (steps 1-4 of original 6 done, 5-6 moved to Phase 7)
 
 Ordered and agreed 2026-08-14. CV/programming-track support was audited
-during Phase 5 planning but pulled out entirely - not currently planned,
-since the user's Ecos already handles this conveniently on a program track.
+during Phase 5 planning and placed **out of scope entirely, not deferred** -
+the user's stated intent (confirmed 2026-08-31) is that this bridge is
+envisaged as an *operational* interface, not a programming one; programming
+on the main or on a programming track is not planned to be supported at all,
+regardless of what the user's Ecos can already do on its own program track.
 
 1. ✅ **EEPROM storage - implemented and confirmed live (2026-08-27)**.
    Final scope, six real fields: WiFi SSID, WiFi password, Ecos IP,
@@ -1383,12 +1389,66 @@ since the user's Ecos already handles this conveniently on a program track.
      (`192.168.0.51`) to actually exercise speed/function/power control
      end-to-end before this step can be marked done, version-bumped, or
      tagged.
-5. ⬜ **LocoNet support** - parallel to XpressNet
-6. ⬜ **TBD** - deliberately left open; revisit once steps 1-5 are further
-   along and it's clearer what's still missing. Accessory/turnout v2
-   (Ecos-sourced changes reaching XpressNet, plus a dedicated OLED page -
-   deliberately parked during Phase 5 step 10) is the leading candidate but
-   not committed to yet.
+**Phase 6 closed out 2026-08-31** at the user's request, with steps 1-4
+done and confirmed live (tagged `v1.1.1`). The original steps 5 (LocoNet)
+and 6 (open/TBD) move to Phase 7 below rather than holding this phase
+open - LocoNet specifically is blocked on hardware the user doesn't have
+yet, not on anything code-side, so there was no reason to keep Phase 6
+"in progress" waiting on it.
+
+---
+
+## 🎯 Phase 7: TBD 🔧 IN PROGRESS
+
+Ordered and agreed 2026-08-31, picking up the two items left over from
+Phase 6 (LocoNet, open/TBD) plus real gaps identified from a status
+review of everything deliberately deferred or parked across the whole
+project's history. Named "TBD" rather than a themed name like Phase 6's
+"Future Improvements" - deliberately open-ended, add to this list as
+real needs come up rather than pre-committing to a fixed scope.
+
+1. ⬜ **Z21 turnout/accessory command support** - mirrors the existing
+   XpressNet→Ecos v1 accessory path (Phase 5 step 10): a WLANmaus throws
+   a turnout, Ecos receives it. No new Ecos-side machinery needed - Ecos's
+   `set(11, switch[...])` already addresses by protocol+address+port
+   directly, no per-accessory object ID lookup or subscription required
+   for this direction, so this is genuinely small, self-contained work
+   mirroring code that already exists and is proven live. Deliberately
+   sequenced *before* step 2 (Accessory/Turnout v2) even though v2 is the
+   architecturally bigger item - this step doesn't depend on v2's new
+   backend at all, so there's no reason to make it wait.
+2. ⬜ **Accessory/Turnout v2** - the real Ecos→throttle direction (Ecos-
+   originated turnout changes reaching XpressNet *and* Z21) plus a
+   dedicated OLED accessory page, both deliberately deferred out of v1
+   (Phase 5 step 10) and never picked back up since. Needs a new Ecos-side
+   accessory address-map + subscription mechanism (mirroring what locos
+   already have via `EcosInterface`'s loco address-map/subscribe/baseline-
+   query machinery) - that backend is inherently protocol-agnostic, so
+   build it once and wire its output to both XpressNet and Z21 through
+   `CommandRouter` (the same shape loco state already uses), rather than
+   building it for one protocol and redoing it for the other later. Design
+   discussion (address-map approach, OLED page layout, how much of the
+   loco-parity machinery is actually worth replicating vs. simplifying
+   for the accessory case, since accessories have no speed/function
+   complexity) still needed before implementation.
+3. ⬜ **LocoNet support** - parallel to XpressNet, carried over from
+   Phase 6 step 5. **Blocked on hardware** - the user doesn't currently
+   have a LocoNet throttle or the interface hardware built yet. Don't
+   start this until the user confirms hardware is available; there's
+   nothing useful to prototype against without it.
+4. ⬜ **Expand "stolen" icon refresh from F0-F4 to F0-F11** - the
+   `PushExternalLocoUpdate()` mechanism (Phase 5 step 9) that makes a
+   MultiMaus's display genuinely refresh (not just flash) for an
+   externally-originated change currently only builds and sends the F0-F4
+   function byte. Extending it to also cover F5-F8/F9-F12 (the same
+   groups XpressNet's own `buildFunctionGroupByte()` already knows how to
+   build, see `xpressnet_interface.cpp`) is small, bounded, low-priority
+   work - the user's own assessment is that F5-F11 is worth covering but
+   F13+ is unlikely to matter in practice. Fold into whenever this area
+   is next being touched rather than a dedicated session.
+5. ⬜ **Open/TBD** - deliberately left open, carried over from Phase 6
+   step 6. Add real candidates here as they come up rather than
+   pre-committing to a fixed scope; nothing currently queued.
 
 ---
 
@@ -1396,11 +1456,13 @@ since the user's Ecos already handles this conveniently on a program track.
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,
-tagged `v0.5.0-phase5-complete`. **Phase 6 (Future Improvements) is now in
-progress** - an ordered 6-item roadmap agreed 2026-08-14; see the dedicated
-section above. Full narrative detail for every step lives in
-`docs/CHANGELOG.md` (dated entries); this section is intentionally just
-current status.
+tagged `v0.5.0-phase5-complete`. **Phase 6 (Future Improvements) is
+complete** - steps 1-4 of the original 6-item roadmap (agreed 2026-08-14)
+done and confirmed live, tagged `v1.1.1`; steps 5-6 moved to Phase 7
+rather than holding this phase open (see below). **Phase 7 (TBD) is now
+in progress** - see the dedicated section above. Full narrative detail
+for every step lives in `docs/CHANGELOG.md` (dated entries); this section
+is intentionally just current status.
 
 Most recent: **Phase 6 step 4 (Z21 LAN for WLANmaus) is COMPLETE, confirmed
 live 2026-08-28** - a marathon session with WLANmaus and a tethered
@@ -1432,5 +1494,24 @@ near zero; fixed by tracking genuine actions only, not every packet).
 Native suite 258/258 passing; flashed to the real hardware at `1.1.1`.
 Tagged `v1.1.1`.
 
-**Next**: Phase 6 steps 5 (LocoNet) and 6 (open/TBD) remain - see the
-roadmap section above. No specific next step has been chosen yet.
+**Since then, again (2026-08-31)**: Phase 6 formally closed out at the
+user's request (steps 1-4 done, tagged `v1.1.1`; step 5/LocoNet moved to
+Phase 7 since it's blocked on hardware the user doesn't have yet, not on
+anything code-side). **Phase 7 (TBD) agreed the same day** - five items,
+ordered: (1) Z21 turnout/accessory support (small, mirrors existing
+XpressNet→Ecos v1 code), (2) Accessory/Turnout v2 (the real Ecos→
+throttle direction plus a dedicated OLED page, deliberately sequenced
+after step 1 rather than before, since step 1 doesn't depend on v2's new
+backend at all), (3) LocoNet (blocked on hardware), (4) extend "stolen"
+icon refresh from F0-F4 to F0-F11 (small, low-priority), (5) open/TBD.
+Also corrected during this planning discussion: CV/programming-track
+support is out of scope by explicit design (this bridge is meant as an
+*operational* interface, not a programming one), not merely deferred as
+earlier phases' notes implied; and the Ecos hardware direction-switch
+limitation flagged during Phase 5 is now confirmed resolved (an
+incidental side effect of Phase 6 step 4's echo-handling fixes - the
+user confirmed both direction-change mechanisms now work correctly on
+both XpressNet and Z21).
+
+**Next**: nothing started yet on Phase 7 - step 1 (Z21 accessory support)
+is the agreed starting point whenever picked up.

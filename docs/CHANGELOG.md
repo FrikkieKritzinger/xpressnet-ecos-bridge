@@ -7,6 +7,26 @@ here. Newest entries first.
 
 ---
 
+**2026-08-31 (continued) — Phase 6 formally closed out, Phase 7 (TBD) planned**
+
+Planning discussion, no code changes. Prompted by the user asking directly "is step 5 and 6 all that remains from our original planning?" - answered by actually re-reading the current CLAUDE.md roadmap rather than working from memory, which surfaced a few smaller deliberately-parked items scattered from earlier phases (accessory/turnout v2, Z21 accessory support, the F5+ "stolen" refresh gap) that hadn't been consolidated into one place before.
+
+Three corrections/updates from the user during this discussion:
+- **CV/programming-track support is out of scope by explicit design, not deferred.** Earlier phase notes (Phase 5 planning, Phase 6's own intro) had framed this as "not currently planned, since the user's Ecos already handles this conveniently on a program track" - the user clarified the actual reasoning is that this bridge is envisaged as an *operational* interface only, not a programming one, independent of what Ecos itself can already do. Corrected throughout CLAUDE.md.
+- **The Ecos hardware direction-switch limitation (flagged during Phase 5 step 9, 2026-08-03) is resolved.** The user tested both direction-change mechanisms directly and confirmed both now work correctly on XpressNet and Z21 - most likely an incidental side effect of Phase 6 step 4's echo-handling fixes (2026-08-28), since the switch's own event would have been passing through the same `handleEcosCommand()` path that used to have the various echo-attribution bugs fixed that day.
+- **Phase 6 should close now rather than stay open waiting on LocoNet** - LocoNet (originally step 5) is blocked on hardware the user doesn't have yet, not on anything code-side, so there's no reason to hold an otherwise-complete phase open for it.
+
+**Phase 7 ("TBD") agreed**, five items in order:
+1. Z21 turnout/accessory command support - small, mirrors the existing XpressNet→Ecos v1 accessory path (Phase 5 step 10) exactly; no new Ecos-side machinery needed.
+2. Accessory/Turnout v2 - the real Ecos→throttle direction (deferred out of v1) plus a dedicated OLED page. Discussed sequencing directly with the user: build the new Ecos-side accessory address-map/subscription backend once (mirroring what locos already have) and wire its output to both XpressNet and Z21 through `CommandRouter`, rather than building it for one protocol first and redoing it for the other later - the backend work is inherently protocol-agnostic, so there's no benefit to serializing it by protocol. Sequenced explicitly *after* step 1, since step 1 doesn't depend on v2's new backend and there's no reason to make it wait.
+3. LocoNet support - carried over from Phase 6 step 5, blocked on hardware.
+4. Extend "stolen" icon refresh (`PushExternalLocoUpdate()`, Phase 5 step 9) from F0-F4 to F0-F11 - small, bounded, low priority per the user's own assessment (F5-F11 worth covering, F13+ unlikely to matter).
+5. Open/TBD, carried over from Phase 6 step 6.
+
+CLAUDE.md updated: Phase 6 marked complete, new Phase 7 section added, the three corrections above applied to their original locations rather than just noted here, "Last Updated" trailing summary rewritten to reflect current state.
+
+---
+
 **2026-08-31 — Z21 LAN OLED page added, one real bug found in live testing, tagged v1.1.1**
 
 Housekeeping follow-up after Phase 6 step 4 (Z21 LAN support) shipped without ever getting its own OLED page, unlike XpressNet and Ecos. Design discussion before implementation, per the project's usual pattern: initial proposal (client count, last message age, active locos, command count - mirroring the XpressNet page's four-line shape) was explicitly pushed back on by the user ("telling me that there is n[oth]ing sensible and useful to display is also a valid comment") - `active_locos`/`total_commands` are global figures already shown elsewhere, not actually Z21-specific, and would have been padding. Revised to three genuinely new pieces of information: client count, time since the last action, and that action's source IP - deliberately the single most recent sender rather than a full client list, since a real layout could have more than the couple of throttles this project's own test setup has. `Z21LanInterface::getStatus()` also changed from "socket bound" (true almost the entire time the bridge is up, regardless of whether anything was connected) to "at least one client currently active," a real diagnostic signal the old meaning never was.
