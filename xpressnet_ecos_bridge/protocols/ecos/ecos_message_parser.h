@@ -62,6 +62,14 @@ struct EcosReply {
 
     SystemStatus system_status;     // Valid only if has_system_status
 
+    // Accessory/turnout "state" property (Phase 7 step 2) - the resting
+    // position of an individual Schaltartikel object, e.g. "20000 state[1]".
+    // Deliberately does NOT parse the accompanying "switching" property
+    // (a transient in-motion flag bracketing the transition, confirmed via
+    // real capture 2026-09-01: switching[1] before, switching[0] after -
+    // only the settled state matters to this bridge).
+    bool accessory_diverging;
+
     int16_t end_code;               // Code from <END> marker (0=OK, 1=error, -1=not parsed)
     char end_text[32];              // Text from <END>, e.g., "OK" or "ERR"
 
@@ -71,12 +79,15 @@ struct EcosReply {
     bool has_dcc_address;
     bool has_functions;
     bool has_system_status;
+    bool has_accessory_state;
 
     EcosReply() : kind(UNKNOWN), object_id(0), dcc_address(0), speed(0),
                  direction(0), functions(0), functions_mask(0),
-                 system_status(SYSTEM_STATUS_UNKNOWN), end_code(-1),
+                 system_status(SYSTEM_STATUS_UNKNOWN), accessory_diverging(false),
+                 end_code(-1),
                  has_speed(false), has_direction(false), has_dcc_address(false),
-                 has_functions(false), has_system_status(false) {
+                 has_functions(false), has_system_status(false),
+                 has_accessory_state(false) {
         end_text[0] = '\0';
     }
 };

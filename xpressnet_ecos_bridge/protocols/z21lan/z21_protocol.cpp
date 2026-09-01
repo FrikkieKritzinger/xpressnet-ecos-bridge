@@ -335,7 +335,7 @@ size_t z21BuildUnknownCommandReply(uint8_t* buffer, size_t buffer_size) {
     return offset;
 }
 
-size_t z21BuildTurnoutInfo(uint8_t* buffer, size_t buffer_size, uint16_t address) {
+size_t z21BuildTurnoutInfo(uint8_t* buffer, size_t buffer_size, uint16_t address, bool diverging) {
     // LAN_X_TURNOUT_INFO reply: DataLen(2) + Header(2) + X-Header(1) + Adr_MSB + Adr_LSB + Position(1) + XOR = 9 bytes
     static const size_t kPacketLen = 9;
     if (!buffer || buffer_size < kPacketLen) return 0;
@@ -345,8 +345,7 @@ size_t z21BuildTurnoutInfo(uint8_t* buffer, size_t buffer_size, uint16_t address
 
     // DB2 = turnout position/status byte per spec section 5.3: 000000ZZ
     // ZZ: 00=not switched yet, 01=straight/P=0, 10=diverging/P=1, 11=invalid
-    // We don't track state yet, so report 01 (straight position)
-    uint8_t position_byte = 0x01;
+    uint8_t position_byte = diverging ? 0x02 : 0x01;
 
     uint8_t data[4];
     data[0] = Z21_X_TURNOUT_INFO;  // 0xEF

@@ -218,7 +218,23 @@ class XpressNetMasterClass
 	//only go out via setFuncNtoM()'s plain broadcast and may not refresh a
 	//"stolen" MultiMaus's display for those functions.
 	void PushExternalLocoUpdate(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4);
-	
+
+	//Push an externally-sourced (non-XpressNet) accessory/turnout state
+	//change onto the bus, so every real device listening (not just one
+	//"owner" - turnouts have no ownership/stealing concept the way locos
+	//do) picks it up. Added by this project (2026-09-01, Phase 7 step 2)
+	//after a real Roco Z21 command station + two MultiMaus test confirmed
+	//genuine devices DO sync a turnout's state across throttles in real
+	//time - our plain SetTrntPos() broadcast did not achieve this, matching
+	//exactly why PushExternalLocoUpdate() above exists for locos: a plain
+	//broadcast isn't trusted, only a real call-byte-then-reply sequence is.
+	//Unlike PushExternalLocoUpdate(), this doesn't touch AddBusySlot/
+	//SlotLokUse at all - those are loco-address-keyed bookkeeping for the
+	//single-owner/stealing model, which doesn't apply here. Just injects
+	//one [call-byte for XNetExternalControllerSlot][unmarked accessory
+	//reply, same format as SetTrntPos()] sequence.
+	void PushExternalTurnoutUpdate(uint16_t Address, uint8_t state, uint8_t active);
+
 	// public only for easy access by interrupt handlers
 	static inline void handle_RX_interrupt();		//Serial RX Interrupt bearbeiten
 	static inline void handle_TX_interrupt();		//Serial TX Interrupt bearbeiten

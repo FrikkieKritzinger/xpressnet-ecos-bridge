@@ -201,6 +201,56 @@ private:
     void queryAddressMap();
 
     // ========================================================================
+    // ACCESSORY ADDRESS MAPPING (DCC address ↔ Ecos object ID) - Phase 7 step 2
+    // ========================================================================
+    // Separate from the locomotive map above - queryObjects(10, addr) and
+    // queryObjects(11, addr) both produce identically-shaped replies (object
+    // ID + addr, nothing else), disambiguated by ECOS_ACCESSORY_ID_MIN (see
+    // config.h for why that's safe). Unlike locomotives, queried once per
+    // connection rather than on a refresh timer - accessories are added to a
+    // layout far less often than locomotives come and go, and a bridge
+    // reconnect already picks up any change.
+
+    struct AccessoryAddressMapEntry {
+        uint16_t dcc_address;
+        uint16_t ecos_id;
+        bool subscribed;    // true once request(id, view) has been sent
+    };
+
+    AccessoryAddressMapEntry accessory_address_map[MAX_ECOS_ACCESSORIES];
+    uint16_t accessory_address_map_count;
+
+    /**
+     * Find the DCC address for an accessory's Ecos object ID. Returns 0 if
+     * not found (mirrors findEcosObjectId()'s "not found" convention).
+     */
+    uint16_t findAccessoryDccAddress(uint16_t ecos_id) const;
+
+    /**
+     * Add/update an entry in the accessory address map (upsert by address,
+     * mirroring addAddressMapEntry()).
+     */
+    bool addAccessoryAddressMapEntry(uint16_t dcc_address, uint16_t ecos_id);
+
+    /**
+     * Query Ecos for the list of all accessory/turnout items and their
+     * addresses. Results are accumulated in handleReply() into
+     * accessory_address_map. Called once per connection (attemptTcpConnect()),
+     * not on a periodic timer.
+     */
+    void queryAccessoryAddressMap();
+
+    /**
+     * If any accessory in the map hasn't been subscribed yet, send its
+     * request(id, view) and mark it subscribed - one per update() call, same
+     * pacing rationale as sendNextBaselineQueryStep() (a synchronous burst
+     * of subscribe commands is the exact anti-pattern that caused real
+     * XpressNet err13 in Phase 6 step 4). No-op once every known accessory
+     * is subscribed.
+     */
+    void sendNextAccessorySubscribeStep();
+
+    // ========================================================================
     // BASELINE STATE QUERY (paced across multiple update() calls)
     // ========================================================================
     // request(id, view/control) only subscribes to future change events - it

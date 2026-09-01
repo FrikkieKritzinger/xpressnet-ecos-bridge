@@ -45,6 +45,19 @@ public:
     void sendResumeOperation() override;
 
     /**
+     * Broadcast a real accessory/turnout state to every active client with
+     * the loco/switching broadcast flag set (0x00000001 - same flag section
+     * 5.3 of the spec documents for LAN_X_TURNOUT_INFO, confirmed already
+     * in use for loco broadcasts). Phase 7 step 2: called by CommandRouter
+     * when Ecos reports a real accessory state change, mirroring how
+     * XpressNetInterface pushes the same event via SetTrntPos(). Not scoped
+     * to per-turnout subscription like broadcastLocoInfo() is for locos -
+     * accessory events are rare enough that broadcasting to every
+     * broadcast-enabled client is a reasonable simplification.
+     */
+    void sendAccessoryCommand(uint16_t address, bool diverging) override;
+
+    /**
      * ERROR if the UDP socket failed to bind (begin() failure); otherwise
      * CONNECTED if at least one client is currently active, DISCONNECTED
      * if not - "socket bound and listening" on its own turned out to be a

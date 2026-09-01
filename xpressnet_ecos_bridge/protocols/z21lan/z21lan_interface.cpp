@@ -260,17 +260,28 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
 
     if (x_header == Z21_X_GET_TURNOUT_INFO && data_len >= 4) {
         // X-Header(0x43), DB0=FAdr_MSB, DB1=FAdr_LSB, DB2=XOR per spec 5.1
-        // Rate-limit to 1 response per second per client to avoid starving XpressNet.
-        // WLANmaus turnout screen polls at 2+ Hz per address; responding to every
-        // query consumed enough CPU to cause MultiMaus err13. Limiting to 1/sec still
-        // allows UI responsiveness (100ms lag acceptable) while leaving headroom for
-        // XpressNet's 20-50ms message windows. Phase 6 step 4 notes similar issue with
-        // high-frequency polls (GET_STATUS, baseline query bursts).
+        // Rate-limit to 1 response per second per client, a real fix for a
+        // real live err13 (Phase 7 step 1) - originally attributed to
+        // WLANmaus polling this at 2+ Hz, though a later live test (Phase 7
+        // step 2, 2026-09-01) found a real WLANmaus sends zero of these
+        // while idle on the turnout screen, relying entirely on the
+        // sendAccessoryCommand() broadcast instead - so this limiter mostly
+        // guards against some other client type polling this the way the
+        // original diagnosis assumed WLANmaus did. Left in place regardless,
+        // still cheap insurance against the same class of CPU-starvation
+        // err13.
         unsigned long now = millis();
         if (client_index >= 0 && clients[client_index].active) {
             if (now - clients[client_index].last_turnout_query_response_ms >= 1000) {
                 uint16_t address = z21DecodeAddress(data[1], data[2]);
-                reply_len = z21BuildTurnoutInfo(reply, sizeof(reply), address);
+                // Phase 7 step 2: real known state, via CommandRouter's
+                // cache (falls back to straight if this address has never
+                // been commanded or confirmed - same default as before).
+                bool diverging = false;
+                if (router) {
+                    router->getKnownAccessoryState(address, diverging);
+                }
+                reply_len = z21BuildTurnoutInfo(reply, sizeof(reply), address, diverging);
                 sendToClient(client_index, reply, reply_len);
                 clients[client_index].last_turnout_query_response_ms = now;
             }
@@ -488,4 +499,22 @@ void Z21LanInterface::sendResumeOperation() {
             sendToClient(i, packet, packet_len);
         }
     }
+}
+
+void Z21LanInterface::sendAccessoryCommand(uint16_t address, bool diverging) {
+    uint8_t packet[16];
+    size_t packet_len = z21BuildTurnoutInfo(packet, sizeof(packet), address, diverging);
+    if (packet_len == 0) return;
+    DEBUG_PRINTF("Z21 TX: TurnoutInfo Addr=%u -> %s len=%u\n", address, diverging ? "diverging" : "straight", (unsigned)packet_len);
+    DEBUG_PRINTF("Z21 TX: bytes = %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                 packet[0], packet[1], packet[2], packet[3], packet[4], packet[5],
+                 packet[6], packet[7], packet[8]);
+    int sent_count = 0;
+    for (int i = 0; i < MAX_Z21_CLIENTS; i++) {
+        if (clients[i].active && (clients[i].broadcast_flags & 0x00000001)) {
+            sendToClient(i, packet, packet_len);
+            sent_count++;
+        }
+    }
+    DEBUG_PRINTF("Z21 TX: TurnoutInfo sent to %d client(s)\n", sent_count);
 }

@@ -988,6 +988,27 @@ void XpressNetMasterClass::PushExternalLocoUpdate(uint16_t Adr, uint8_t Steps, u
 }
 
 //--------------------------------------------------------------------------------------------
+//Push an externally-sourced accessory/turnout state change onto the bus -
+//see header comment. No AddBusySlot/SetBusy involved (no ownership concept
+//for turnouts) - just one call-byte-then-reply injection, same TX-only
+//technique PushExternalLocoUpdate() above already uses safely.
+void XpressNetMasterClass::PushExternalTurnoutUpdate(uint16_t Address, uint8_t state, uint8_t active) {
+	uint8_t callbyte[] = { callByteParity(XNetExternalControllerSlot | 0x60) };
+	XNetsend(callbyte, 1);
+
+	//Same byte layout as SetTrntPos() above - Accessory Decoder operation
+	//request (0x52 | AAAA AAAA | 1000 ABBP | XOr)
+	uint8_t TrntInfo[] = {0x00, 0x52, 0x00, 0x00, 0x00 };
+	TrntInfo[2] = Address >> 2;
+	TrntInfo[3] = 0x80;
+	TrntInfo[3] |= (Address & 0x03) << 1;
+	TrntInfo[3] |= (active & 0x01) << 3;
+	TrntInfo[3] |= state & 0x01;
+	getXOR(TrntInfo, 5);
+	XNetsend(TrntInfo, 5);
+}
+
+//--------------------------------------------------------------------------------------------
 void XpressNetMasterClass::setSpeed(uint16_t Adr, uint8_t Steps, uint8_t Speed) {
 	//Locomotive speed and direction operation
 	// 0xE4 | Ident | AH | AL | RV | XOr

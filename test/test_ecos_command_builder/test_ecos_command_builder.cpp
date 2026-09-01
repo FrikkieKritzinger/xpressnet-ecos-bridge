@@ -117,6 +117,18 @@ void test_ecos_build_query_objects_buffer_too_small(void) {
     TEST_ASSERT_EQUAL_INT(0, len);  // Must reject buffers under 50 bytes
 }
 
+void test_ecos_build_query_accessory_objects_request(void) {
+    int len = ecosBuildQueryAccessoryObjectsCmd(cmd_buffer, sizeof(cmd_buffer));
+    TEST_ASSERT_TRUE(len > 0);
+    TEST_ASSERT_EQUAL_STRING("queryObjects(11, addr)\n", cmd_buffer);
+}
+
+void test_ecos_build_query_accessory_objects_buffer_too_small(void) {
+    char tiny[10];
+    int len = ecosBuildQueryAccessoryObjectsCmd(tiny, sizeof(tiny));
+    TEST_ASSERT_EQUAL_INT(0, len);
+}
+
 // ============================================================================
 // TESTS - REQUEST / RELEASE (SUBSCRIBE / UNSUBSCRIBE)
 // ============================================================================
@@ -295,6 +307,8 @@ int main(void) {
 
     RUN_TEST(test_ecos_build_query_objects_request);
     RUN_TEST(test_ecos_build_query_objects_buffer_too_small);
+    RUN_TEST(test_ecos_build_query_accessory_objects_request);
+    RUN_TEST(test_ecos_build_query_accessory_objects_buffer_too_small);
 
     RUN_TEST(test_ecos_build_request_view_mode);
     RUN_TEST(test_ecos_build_request_control_mode);

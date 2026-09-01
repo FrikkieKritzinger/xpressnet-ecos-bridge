@@ -16,6 +16,12 @@ uint16_t ecosBuildQueryObjectsCmd(char* buffer, uint16_t buffer_size) {
     return (len > 0) ? len : 0;
 }
 
+uint16_t ecosBuildQueryAccessoryObjectsCmd(char* buffer, uint16_t buffer_size) {
+    if (!buffer || buffer_size < 50) return 0;
+    int len = snprintf(buffer, buffer_size, "queryObjects(11, addr)\n");
+    return (len > 0) ? len : 0;
+}
+
 uint16_t ecosBuildRequestCmd(char* buffer, uint16_t buffer_size,
                             uint16_t object_id, const char* mode, bool force_control) {
     if (!buffer || !mode || buffer_size < 60) return 0;

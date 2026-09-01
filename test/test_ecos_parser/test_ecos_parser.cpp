@@ -483,6 +483,65 @@ void test_ecos_parse_single_function_on(void) {
     TEST_ASSERT_EQUAL_UINT32(0x01, reply.functions_mask);
 }
 
+void test_ecos_parse_accessory_state_diverging(void) {
+    // Phase 7 step 2: accessory/turnout state event, e.g. from a real
+    // Schaltartikel object subscription. state[0] -> diverging - confirmed
+    // live 2026-09-01 by correlating our own commands against the resulting
+    // events (see EcosMessageParser's doc comment for the full story).
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 20000>\n20000 state[0]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_TRUE(reply.has_accessory_state);
+    TEST_ASSERT_TRUE(reply.accessory_diverging);
+}
+
+void test_ecos_parse_accessory_state_straight(void) {
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 20000>\n20000 state[1]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_TRUE(reply.has_accessory_state);
+    TEST_ASSERT_FALSE(reply.accessory_diverging);
+}
+
+void test_ecos_parse_accessory_ignores_switching_property(void) {
+    // "switching" is a transient in-motion flag, not the resting state -
+    // must not set has_accessory_state on its own.
+    EcosMessageParser parser;
+    EcosReply reply;
+    bool completed = false;
+
+    const char* msg = "<EVENT 20000>\n20000 switching[1]\n<END 0 (OK)>\n";
+    for (const char* c = msg; *c != '\0'; c++) {
+        if (parser.processByte(*c, reply)) {
+            completed = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(completed);
+    TEST_ASSERT_FALSE(reply.has_accessory_state);
+}
+
 void test_ecos_parse_function_reply_only_masks_reported_bits(void) {
     // A real Ecos event usually reports just the one function that
     // changed - functions_mask must reflect only that bit, not every bit,
@@ -678,6 +737,9 @@ int main(void) {
     RUN_TEST(test_ecos_parse_addr_value);
 
     RUN_TEST(test_ecos_parse_single_function_on);
+    RUN_TEST(test_ecos_parse_accessory_state_diverging);
+    RUN_TEST(test_ecos_parse_accessory_state_straight);
+    RUN_TEST(test_ecos_parse_accessory_ignores_switching_property);
     RUN_TEST(test_ecos_parse_function_reply_only_masks_reported_bits);
     RUN_TEST(test_ecos_parse_function_bit_31_not_truncated);
     RUN_TEST(test_ecos_parse_function_off_still_masked);

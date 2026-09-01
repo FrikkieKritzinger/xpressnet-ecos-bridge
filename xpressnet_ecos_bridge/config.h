@@ -147,6 +147,26 @@
     // address map is empty in both cases). Upserted by address, so this
     // bounds concurrently-queued distinct locos, not total speed changes.
     #define MAX_PENDING_QUERIES         5
+
+    // Phase 7 step 2: accessory/turnout address map (DCC address <-> Ecos
+    // object ID), separate from the locomotive map above since both share
+    // the same "address-map-style" reply shape (object ID + addr, no
+    // speed/dir/func) and need to land in different arrays.
+    #define MAX_ECOS_ACCESSORIES        40
+
+    // Threshold used to tell a locomotive's address-map reply apart from an
+    // accessory's - both queryObjects(10, addr) and queryObjects(11, addr)
+    // produce identically-shaped replies (object ID + addr, nothing else),
+    // and the real protocol doesn't tag which command a reply answers.
+    // Confirmed via a real raw capture against this project's own Ecos
+    // (2026-09-01, Phase 7 step 2 investigation): locomotive object IDs sat
+    // in the 1000s, accessory object IDs at 20000+ - a real, structural
+    // separation from Ecos's own per-manager object ID allocation (LokManager
+    // id=10 and SchaltartikelManager id=11 are different managers with
+    // separate ID pools), not a coincidence of this one layout's creation
+    // order. Revisit if a real layout is ever seen with locomotive IDs at or
+    // above this threshold.
+    #define ECOS_ACCESSORY_ID_MIN       10000
 #endif
 
 // ============================================================================
@@ -259,6 +279,14 @@
 // value comes from EEPROM via StateEngine::setInactivityTimeoutMs().
 #define LOCO_INACTIVITY_TIMEOUT     300000  // 5 minutes - remove if no updates
 #define LOCO_EXPIRY_CHECK_INTERVAL  30000   // Check for expired locos every X ms
+
+// CommandRouter's known-accessory-state cache (Phase 7 step 2) - the best
+// currently-known straight/diverging position per address, from whichever
+// source (a handheld's command, or Ecos's own confirmation) touched it most
+// recently. Answers on-demand state queries (Z21 GET_TURNOUT_INFO, XpressNet
+// Accessory Info Request) - not gated behind ENABLE_ECOS_LAN since it's used
+// by the throttle-facing protocols regardless of which backend is active.
+#define MAX_KNOWN_ACCESSORIES       40
 
 // ============================================================================
 // ECHO PREVENTION CONFIGURATION

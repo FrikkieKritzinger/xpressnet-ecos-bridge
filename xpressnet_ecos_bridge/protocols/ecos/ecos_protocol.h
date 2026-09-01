@@ -66,6 +66,24 @@
 uint16_t ecosBuildQueryObjectsCmd(char* buffer, uint16_t buffer_size);
 
 /**
+ * Build a "queryObjects" command to list all accessory/turnout items on
+ * the system, against the SchaltartikelManager (id=11).
+ * Returns: "queryObjects(11, addr)\n"
+ * Used once per connection to build the DCC address -> Ecos object ID map
+ * for accessories, mirroring ecosBuildQueryObjectsCmd() for locomotives.
+ * Confirmed real against actual Ecos hardware 2026-09-01 (Phase 7 step 2
+ * investigation) - the official spec marks the individual per-accessory
+ * object API "(in Planung)" but queryObjects(11, addr) itself lives under
+ * the SchaltartikelManager base object (section 7.4), which is NOT marked
+ * in-planning and was already confirmed real for v1's set(11, switch[...]).
+ *
+ * @param buffer Destination for the command string
+ * @param buffer_size Size of the destination buffer
+ * @return Number of bytes written, or 0 if buffer too small
+ */
+uint16_t ecosBuildQueryAccessoryObjectsCmd(char* buffer, uint16_t buffer_size);
+
+/**
  * Build a "request" command to subscribe to an object or request control
  * Returns: "request(1000, view)\n" or "request(1000, control)\n"
  * Subscribes to unsolicited <EVENT> pushes for that object (view mode)

@@ -528,11 +528,13 @@ void CommandRouter::handleAccessoryCommand(uint16_t address, bool diverging, Loc
 
     last_accessory.address = address;
     last_accessory.diverging = diverging;
+    setKnownAccessoryState(address, diverging);
 
     // v1: XpressNet -> Ecos only (Phase 5 step 10). Phase 7 step 1 adds
-    // Z21 -> Ecos support. No Ecos-sourced accessory path exists yet, and no
-    // echo prevention is needed for that reason - Ecos has no way to report an
-    // accessory change back to us that could ever loop back to XpressNet/Z21.
+    // Z21 -> Ecos support. No echo prevention needed here - this function is
+    // only ever called for a throttle-originated command (source is always
+    // XPRESSNET or Z21_LAN), never for the Ecos-sourced direction, which
+    // goes through handleEcosAccessoryCommand() below instead.
     if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN) {
         #if ENABLE_ECOS_LAN
         if (ecos != nullptr) {
@@ -542,6 +544,71 @@ void CommandRouter::handleAccessoryCommand(uint16_t address, bool diverging, Loc
     }
 
     total_commands_count++;
+}
+
+void CommandRouter::handleEcosAccessoryCommand(uint16_t address, bool diverging) {
+    // Phase 7 step 2: the real Ecos-sourced direction (an accessory thrown
+    // directly on Ecos, or a real confirmation of a bridge-issued command,
+    // both indistinguishable and both worth reflecting to every
+    // throttle-facing protocol). Always forwards to both - unlike
+    // handleAccessoryCommand()'s throttle->Ecos direction, there's no
+    // "originating protocol" to skip here, and no echo-loop risk: Ecos has
+    // no way to feed this back to itself.
+    //
+    // Deliberately does NOT touch last_accessory - that field reflects
+    // "what a handheld last commanded" for OLED display (the user's
+    // explicit design call, 2026-09-01: more diagnostically useful than
+    // Ecos's own truth, since a dropped bridge command is a real problem
+    // worth surfacing but a redundant re-send of an already-correct state
+    // is not), and this function's whole purpose is Ecos-sourced state, not
+    // a handheld command.
+    DEBUG_PRINTF("Ecos Accessory: Addr=%u -> %s\n", address, diverging ? "diverging" : "straight");
+
+    if (!isValidDccAddress(address)) {
+        DEBUG_PRINTF("ERROR: Invalid accessory address: %u\n", address);
+        return;
+    }
+
+    setKnownAccessoryState(address, diverging);
+
+    #if ENABLE_XPRESSNET
+    if (xpressnet != nullptr) {
+        xpressnet->sendAccessoryCommand(address, diverging);
+    }
+    #endif
+
+    #if ENABLE_Z21_LAN
+    if (z21 != nullptr) {
+        z21->sendAccessoryCommand(address, diverging);
+    }
+    #endif
+
+    total_commands_count++;
+}
+
+void CommandRouter::setKnownAccessoryState(uint16_t address, bool diverging) {
+    for (uint8_t i = 0; i < known_accessory_count; i++) {
+        if (known_accessories[i].address == address) {
+            known_accessories[i].diverging = diverging;
+            return;
+        }
+    }
+    if (known_accessory_count >= MAX_KNOWN_ACCESSORIES) {
+        return;  // Cache full - silently drop, matches other fixed-size caches in this codebase
+    }
+    known_accessories[known_accessory_count].address = address;
+    known_accessories[known_accessory_count].diverging = diverging;
+    known_accessory_count++;
+}
+
+bool CommandRouter::getKnownAccessoryState(uint16_t address, bool& diverging) const {
+    for (uint8_t i = 0; i < known_accessory_count; i++) {
+        if (known_accessories[i].address == address) {
+            diverging = known_accessories[i].diverging;
+            return true;
+        }
+    }
+    return false;
 }
 
 // ============================================================================

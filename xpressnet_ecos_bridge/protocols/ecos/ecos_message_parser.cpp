@@ -291,6 +291,18 @@ void EcosMessageParser::parsePropertyLine(const char* line, EcosReply& reply) {
                 }
             }
         }
+        else if (strcmp(key, "state") == 0) {
+            // Accessory/turnout resting position (Phase 7 step 2). Confirmed
+            // live 2026-09-01 by correlating our own bridge-issued
+            // set(11, switch[...]) commands against the resulting state[]
+            // event: state=0 -> diverging, state=1 -> straight - the
+            // opposite of the initial guess, checked across 8 consecutive
+            // throw cycles with zero exceptions. Same class of thing as this
+            // project's other confirmed-live polarity fixes (Z21 direction
+            // bit, XpressNet r/g port letters).
+            reply.accessory_diverging = (atoi(value) == 0);
+            reply.has_accessory_state = true;
+        }
         else if (equalsIgnoreCase(key, "status")) {
             // Base ECoS object (id=1) global run state - "equivalent to the
             // STOP/GO button on the Ecos" per the official spec (section

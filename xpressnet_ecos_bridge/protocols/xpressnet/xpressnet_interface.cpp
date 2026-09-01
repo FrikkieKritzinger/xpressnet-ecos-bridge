@@ -68,6 +68,12 @@ void notifyXNetgiveLocoFunc(uint8_t UserOps, uint16_t Address) {
     }
 }
 
+void notifyXNetTrntInfo(uint8_t UserOps, uint16_t Address, uint8_t data) {
+    if (g_xnet_instance) {
+        g_xnet_instance->onTurnoutInfoRequest(UserOps, Address, data);
+    }
+}
+
 void notifyXNetTrnt(uint16_t Address, uint8_t data) {
     if (g_xnet_instance) {
         g_xnet_instance->onTurnoutCommand(Address, data);
@@ -527,6 +533,65 @@ void XpressNetInterface::onTurnoutCommand(uint16_t address, uint8_t data) {
 
     DEBUG_XNET_PRINTF("XpressNet RX: Accessory - Addr=%u (wire=%u) -> %s\n",
                        corrected_address, address, diverging ? "diverging" : "straight");
+}
+
+void XpressNetInterface::onTurnoutInfoRequest(uint8_t userOps, uint16_t groupAddress, uint8_t data) {
+    // See header comment for the full byte-layout story (confirmed against
+    // the official Lenz XpressNet Specification v2, 6/2003, sections
+    // 2.1.11/2.2.17) and why this exists at all: a real MultiMaus polls
+    // this ~2Hz while sitting on a turnout screen, and with this callback
+    // never having been hooked up at all, that poll went unanswered
+    // forever - directly explaining the "falls back to unknown after a few
+    // seconds" symptom found live 2026-09-01.
+    markBusActivity();
+
+    uint8_t n = data & 0x01;  // 0=lower nibble (group's first 2 turnouts), 1=upper (other 2)
+    uint16_t wire_base = groupAddress * 4 + (n ? 2 : 0);
+
+    // Z-field encoding, matching this project's existing straight=lower/
+    // diverging=higher convention (Z21's position_byte: 01=straight,
+    // 10=diverging) for consistency, since the spec itself says the two
+    // relative labels aren't tied to a specific physical meaning.
+    uint8_t z1z0 = 0;  // 00 = not controlled this session
+    uint8_t z3z2 = 0;
+    bool diverging;
+
+    if (router) {
+        if (router->getKnownAccessoryState(wire_base + 1, diverging)) {
+            z1z0 = diverging ? 0x02 : 0x01;
+        }
+        if (router->getKnownAccessoryState(wire_base + 2, diverging)) {
+            z3z2 = diverging ? 0x02 : 0x01;
+        }
+    }
+
+    // I=0 (settled, no bit7), TT=00 (no feedback, bits6-5 stay 0)
+    uint8_t reply_data = (n << 4) | (z3z2 << 2) | z1z0;
+    xnet.SetTrntStatus(userOps, groupAddress, reply_data);
+
+    DEBUG_XNET_PRINTF("XpressNet TX: TrntStatus - group=%u n=%u data=0x%02X (addrs %u,%u)\n",
+                       groupAddress, n, reply_data, wire_base + 1, wire_base + 2);
+}
+
+void XpressNetInterface::sendAccessoryCommand(uint16_t address, bool diverging) {
+    // Reverse of onTurnoutCommand()'s "+1" - the library takes the raw
+    // 0-indexed wire address, same convention confirmed live for the
+    // incoming direction.
+    uint16_t wire_address = address - 1;
+    // PushExternalTurnoutUpdate(), NOT the plain SetTrntPos() broadcast:
+    // confirmed live 2026-09-01 against a real Roco Z21 command station +
+    // two MultiMaus that genuine devices sync a turnout's state across
+    // throttles via a real call-byte-then-reply bus transmission, the same
+    // trust requirement already found for locos (PushExternalLocoUpdate(),
+    // Phase 5 step 9) - a plain unsolicited broadcast wasn't picked up by
+    // either MultiMaus in this bridge's own live test.
+    // active=1, NOT 0: our own onTurnoutCommand() explicitly ignores any
+    // incoming command with the activate bit clear ("the deactivate/release
+    // half of the pulse") - mirrors what a real throttle's own transmission
+    // would look like.
+    xnet.PushExternalTurnoutUpdate(wire_address, diverging ? 1 : 0, 1);
+    DEBUG_XNET_PRINTF("XpressNet TX: Accessory (pushed) - Addr=%u (wire=%u) -> %s\n",
+                       address, wire_address, diverging ? "diverging" : "straight");
 }
 
 // ============================================================================

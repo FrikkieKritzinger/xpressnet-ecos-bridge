@@ -36,6 +36,7 @@ EcosInterface::EcosInterface()
       address_map_last_refresh(0),
       awaiting_query_reply(false),
       last_heartbeat_latency_ms(NO_TIMESTAMP),
+      accessory_address_map_count(0),
       baseline_query_object_id(0),
       baseline_query_step(0),
       pending_function_object_id(0),
@@ -48,6 +49,7 @@ EcosInterface::EcosInterface()
       last_reconnect_attempt(0) {
     memset(address_map, 0, sizeof(address_map));
     memset(pending_queries, 0, sizeof(pending_queries));
+    memset(accessory_address_map, 0, sizeof(accessory_address_map));
 }
 
 EcosInterface::~EcosInterface() {
@@ -171,6 +173,10 @@ void EcosInterface::update() {
     // Phase 6: Advance any in-progress outgoing function bitmap send, one
     // set() per call - see sendNextFunctionStep()'s header comment.
     sendNextFunctionStep();
+
+    // Phase 7: Subscribe to any newly-discovered accessory, one request()
+    // per call - see sendNextAccessorySubscribeStep()'s header comment.
+    sendNextAccessorySubscribeStep();
 }
 
 // ============================================================================
@@ -259,6 +265,18 @@ void EcosInterface::attemptTcpConnect() {
 
         // Kick off address map query
         queryAddressMap();
+
+        // Phase 7 step 2: accessory address map, once per connection (see
+        // this member's header comment for why - unlike locos, not re-queried
+        // on a refresh timer). accessory_address_map_count is deliberately
+        // NOT reset to 0 here - a reconnect keeps the previously-learned
+        // entries (and their "subscribed" flags reset below), so a brief
+        // Ecos blip doesn't lose known accessory IDs; queryAccessoryAddressMap()
+        // upserts by address anyway via addAccessoryAddressMapEntry().
+        for (uint16_t i = 0; i < accessory_address_map_count; i++) {
+            accessory_address_map[i].subscribed = false;
+        }
+        queryAccessoryAddressMap();
 
         // Subscribe to the base ECoS object's own global run state (STOP/GO/
         // SHUTDOWN), so an operator hitting STOP/GO directly on the Ecos
@@ -386,6 +404,78 @@ bool EcosInterface::addAddressMapEntry(uint16_t dcc_address, uint16_t ecos_id) {
     address_map[address_map_count].has_last_sent_functions = false;
     address_map_count++;
     return true;
+}
+
+// ============================================================================
+// ACCESSORY ADDRESS MAPPING - Phase 7 step 2
+// ============================================================================
+
+uint16_t EcosInterface::findAccessoryDccAddress(uint16_t ecos_id) const {
+    for (uint16_t i = 0; i < accessory_address_map_count; i++) {
+        if (accessory_address_map[i].ecos_id == ecos_id) {
+            return accessory_address_map[i].dcc_address;
+        }
+    }
+    return 0;  // Not found
+}
+
+bool EcosInterface::addAccessoryAddressMapEntry(uint16_t dcc_address, uint16_t ecos_id) {
+    // Upsert by address, mirroring addAddressMapEntry() - a new entry starts
+    // unsubscribed so sendNextAccessorySubscribeStep() picks it up.
+    for (uint16_t i = 0; i < accessory_address_map_count; i++) {
+        if (accessory_address_map[i].dcc_address == dcc_address) {
+            accessory_address_map[i].ecos_id = ecos_id;
+            return true;
+        }
+    }
+
+    if (accessory_address_map_count >= MAX_ECOS_ACCESSORIES) {
+        return false;  // Map full
+    }
+
+    accessory_address_map[accessory_address_map_count].dcc_address = dcc_address;
+    accessory_address_map[accessory_address_map_count].ecos_id = ecos_id;
+    accessory_address_map[accessory_address_map_count].subscribed = false;
+    accessory_address_map_count++;
+    return true;
+}
+
+void EcosInterface::queryAccessoryAddressMap() {
+    if (current_status != ComponentStatus::CONNECTED) {
+        return;
+    }
+
+    DEBUG_ECOS_PRINTF("Querying Ecos accessory address map...\n");
+
+    char cmd_buffer[80];
+    uint16_t len = ecosBuildQueryAccessoryObjectsCmd(cmd_buffer, sizeof(cmd_buffer));
+
+    if (len > 0) {
+        wifi_client.write((uint8_t*)cmd_buffer, len);
+    }
+}
+
+void EcosInterface::sendNextAccessorySubscribeStep() {
+    if (current_status != ComponentStatus::CONNECTED) {
+        return;
+    }
+
+    for (uint16_t i = 0; i < accessory_address_map_count; i++) {
+        if (accessory_address_map[i].subscribed) {
+            continue;
+        }
+
+        char cmd_buffer[80];
+        uint16_t len = ecosBuildRequestCmd(cmd_buffer, sizeof(cmd_buffer),
+                                          accessory_address_map[i].ecos_id, ECOS_MODE_VIEW);
+        if (len > 0) {
+            wifi_client.write((uint8_t*)cmd_buffer, len);
+            DEBUG_ECOS_PRINTF("Ecos TX: Subscribed to accessory %u (Ecos ID %u)\n",
+                              accessory_address_map[i].dcc_address, accessory_address_map[i].ecos_id);
+        }
+        accessory_address_map[i].subscribed = true;
+        return;  // One per call - see header comment for why this stays paced
+    }
 }
 
 // ============================================================================
@@ -544,8 +634,16 @@ void EcosInterface::handleReply(const EcosReply& reply) {
         return;
     }
 
-    // Handle queryObjects response (address map population)
+    // Handle queryObjects response (address map population) - locomotives
+    // and accessories both produce this identically-shaped reply (object ID
+    // + addr, no speed/dir/func), disambiguated by ECOS_ACCESSORY_ID_MIN
+    // (see config.h for why that's a safe real-world split).
     if (reply.has_dcc_address && reply.object_id > 0 && !reply.has_speed) {
+        if (reply.object_id >= ECOS_ACCESSORY_ID_MIN) {
+            addAccessoryAddressMapEntry(reply.dcc_address, reply.object_id);
+            DEBUG_ECOS_PRINTF("Accessory address map: DCC %u → Ecos ID %u\n", reply.dcc_address, reply.object_id);
+            return;
+        }
         // This looks like a queryObjects result (object ID + DCC address, no speed/dir/functions)
         if (awaiting_query_reply) {
             // First entry back since we last sent a query - see
@@ -557,6 +655,21 @@ void EcosInterface::handleReply(const EcosReply& reply) {
         }
         addAddressMapEntry(reply.dcc_address, reply.object_id);
         DEBUG_ECOS_PRINTF("Address map: DCC %u → Ecos ID %u\n", reply.dcc_address, reply.object_id);
+        return;
+    }
+
+    // Handle accessory/turnout state event (Phase 7 step 2) - a real state
+    // change, either thrown directly on Ecos or confirming a bridge-issued
+    // command. Deliberately ignores the accompanying "switching" property
+    // (see EcosReply's doc comment) - only react once the position settles.
+    if (reply.object_id > 0 && reply.has_accessory_state) {
+        uint16_t dcc_address = findAccessoryDccAddress(reply.object_id);
+        if (dcc_address > 0 && router) {
+            DEBUG_ECOS_PRINTF("Ecos RX: Accessory obj=%u addr=%u -> %s\n",
+                              reply.object_id, dcc_address,
+                              reply.accessory_diverging ? "diverging" : "straight");
+            router->handleEcosAccessoryCommand(dcc_address, reply.accessory_diverging);
+        }
         return;
     }
 

@@ -262,6 +262,126 @@ void test_router_accessory_command_from_z21_surfaces_in_status(void) {
 }
 
 // ============================================================================
+// TESTS - ECOS-SOURCED ACCESSORY COMMANDS (Phase 7 step 2)
+// ============================================================================
+
+void test_router_ecos_accessory_command_forwards_to_both_throttle_protocols(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    MockProtocolInterface z21_mock;
+    router.setXpressNetInterface(&xnet_mock);
+    router.setZ21Interface(&z21_mock);
+
+    router.handleEcosAccessoryCommand(5, true);
+
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getAccessoryCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(5, xnet_mock.getLastAccessoryCommand().address);
+    TEST_ASSERT_TRUE(xnet_mock.getLastAccessoryCommand().diverging);
+
+    TEST_ASSERT_EQUAL_INT(1, z21_mock.getAccessoryCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(5, z21_mock.getLastAccessoryCommand().address);
+    TEST_ASSERT_TRUE(z21_mock.getLastAccessoryCommand().diverging);
+}
+
+void test_router_ecos_accessory_command_straight_forwards_correctly(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleEcosAccessoryCommand(5, false);
+
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getAccessoryCommandCount());
+    TEST_ASSERT_FALSE(xnet_mock.getLastAccessoryCommand().diverging);
+}
+
+void test_router_ecos_accessory_command_rejects_invalid_address(void) {
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleEcosAccessoryCommand(0, true);
+
+    TEST_ASSERT_EQUAL_INT(0, xnet_mock.getAccessoryCommandCount());
+}
+
+void test_router_ecos_accessory_command_does_not_update_last_accessory(void) {
+    // Explicit design call (2026-09-01): the OLED "last accessory" line
+    // reflects what a handheld last commanded, not Ecos's own truth - a
+    // real Ecos-sourced update must not touch it.
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleAccessoryCommand(9, false, LocoSource::XPRESSNET);
+    router.handleEcosAccessoryCommand(9, true);
+
+    SystemStatus status = router.getSystemStatus();
+    TEST_ASSERT_EQUAL_UINT16(9, status.last_accessory_address);
+    TEST_ASSERT_FALSE(status.last_accessory_diverging);  // still the handheld's value, not Ecos's
+}
+
+// ============================================================================
+// TESTS - KNOWN ACCESSORY STATE CACHE (Phase 7 step 2)
+// ============================================================================
+
+void test_router_known_accessory_state_unknown_before_any_command(void) {
+    CommandRouter router;
+    bool diverging;
+    TEST_ASSERT_FALSE(router.getKnownAccessoryState(5, diverging));
+}
+
+void test_router_known_accessory_state_set_by_handheld_command(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(5, true, LocoSource::XPRESSNET);
+
+    bool diverging = false;
+    TEST_ASSERT_TRUE(router.getKnownAccessoryState(5, diverging));
+    TEST_ASSERT_TRUE(diverging);
+}
+
+void test_router_known_accessory_state_set_by_ecos_confirmation(void) {
+    CommandRouter router;
+    router.handleEcosAccessoryCommand(5, false);
+
+    bool diverging = true;
+    TEST_ASSERT_TRUE(router.getKnownAccessoryState(5, diverging));
+    TEST_ASSERT_FALSE(diverging);
+}
+
+void test_router_known_accessory_state_latest_write_wins(void) {
+    // Whichever source touched an address most recently wins - the cache
+    // doesn't distinguish origin, only last_accessory (OLED display) does.
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(5, true, LocoSource::XPRESSNET);
+    router.handleEcosAccessoryCommand(5, false);
+
+    bool diverging = true;
+    TEST_ASSERT_TRUE(router.getKnownAccessoryState(5, diverging));
+    TEST_ASSERT_FALSE(diverging);
+}
+
+void test_router_known_accessory_state_tracks_multiple_addresses(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(5, true, LocoSource::XPRESSNET);
+    router.handleAccessoryCommand(7, false, LocoSource::XPRESSNET);
+
+    bool diverging;
+    TEST_ASSERT_TRUE(router.getKnownAccessoryState(5, diverging));
+    TEST_ASSERT_TRUE(diverging);
+    TEST_ASSERT_TRUE(router.getKnownAccessoryState(7, diverging));
+    TEST_ASSERT_FALSE(diverging);
+}
+
+// ============================================================================
 // TESTS - ECHO PREVENTION
 // ============================================================================
 
@@ -1011,6 +1131,15 @@ int main(void) {
     RUN_TEST(test_router_accessory_command_surfaces_in_system_status);
     RUN_TEST(test_router_accessory_command_from_z21_forwards_to_ecos);
     RUN_TEST(test_router_accessory_command_from_z21_surfaces_in_status);
+    RUN_TEST(test_router_ecos_accessory_command_forwards_to_both_throttle_protocols);
+    RUN_TEST(test_router_ecos_accessory_command_straight_forwards_correctly);
+    RUN_TEST(test_router_ecos_accessory_command_rejects_invalid_address);
+    RUN_TEST(test_router_ecos_accessory_command_does_not_update_last_accessory);
+    RUN_TEST(test_router_known_accessory_state_unknown_before_any_command);
+    RUN_TEST(test_router_known_accessory_state_set_by_handheld_command);
+    RUN_TEST(test_router_known_accessory_state_set_by_ecos_confirmation);
+    RUN_TEST(test_router_known_accessory_state_latest_write_wins);
+    RUN_TEST(test_router_known_accessory_state_tracks_multiple_addresses);
 
     RUN_TEST(test_router_echo_prevention_opposite_source_suppressed);
     RUN_TEST(test_router_xpressnet_command_not_suppressed_right_after_ecos_command);

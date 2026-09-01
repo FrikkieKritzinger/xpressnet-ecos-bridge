@@ -123,10 +123,23 @@ public:
      * last one commanded."
      * @param address DCC accessory address
      * @param diverging false = straight, true = diverging
-     * @param source LocoSource::XPRESSNET or LocoSource::Z21_LAN (v2+ will add
-     *               more sources for Ecos-originated changes)
+     * @param source Always LocoSource::XPRESSNET or LocoSource::Z21_LAN -
+     *               the Ecos-sourced direction goes through
+     *               handleEcosAccessoryCommand() instead.
      */
     void handleAccessoryCommand(uint16_t address, bool diverging, LocoSource source);
+
+    /**
+     * Handle a real accessory/turnout state reported by Ecos (Phase 7 step
+     * 2) - either an operator threw it directly on Ecos, or it's confirming
+     * a bridge-issued command. Forwards to both XpressNet and Z21
+     * unconditionally via ProtocolInterface::sendAccessoryCommand() - no
+     * originating protocol to skip, unlike handleAccessoryCommand().
+     * Deliberately does NOT update last_accessory (see .cpp comment).
+     * @param address DCC accessory address
+     * @param diverging false = straight, true = diverging
+     */
+    void handleEcosAccessoryCommand(uint16_t address, bool diverging);
 
     /**
      * Bus-wide emergency stop / track power off. Forces every known loco's
@@ -233,6 +246,39 @@ private:
     };
     LastAccessoryInfo last_accessory;
 
+    // Best-known state per accessory address (Phase 7 step 2) - distinct
+    // from last_accessory above: this is "what IS the state" (for answering
+    // on-demand queries from either throttle protocol), not "what did a
+    // handheld last command" (that's last_accessory's whole purpose, for
+    // OLED display - see the user's explicit design call, 2026-09-01).
+    // Updated by BOTH handleAccessoryCommand() (a handheld's command,
+    // applied optimistically) and handleEcosAccessoryCommand() (Ecos's own
+    // confirmation) - whichever happens most recently wins, same as
+    // StateEngine's loco data doesn't distinguish origin either.
+    struct AccessoryState {
+        uint16_t address = 0;
+        bool diverging = false;
+    };
+    AccessoryState known_accessories[MAX_KNOWN_ACCESSORIES];
+    uint8_t known_accessory_count = 0;
+
+    /**
+     * Upsert an accessory's known state by address.
+     */
+    void setKnownAccessoryState(uint16_t address, bool diverging);
+
+public:
+    /**
+     * Look up an accessory's best-known state, for a throttle-facing
+     * protocol answering an on-demand query (Z21 GET_TURNOUT_INFO,
+     * XpressNet Accessory Info Request).
+     * @param address DCC accessory address
+     * @param[out] diverging Set only if this returns true
+     * @return true if this address has ever been commanded or confirmed
+     */
+    bool getKnownAccessoryState(uint16_t address, bool& diverging) const;
+
+private:
     // Periodic task tracking
     unsigned long last_expiry_check = 0;
     unsigned long last_status_update = 0;

@@ -1461,20 +1461,79 @@ real needs come up rather than pre-committing to a fixed scope.
      both correctly reaching Ecos, no cross-addressing, no reverting on
      release. Native suite 272/272 passing. `env:wemos` flashed at
      `1.2.0`. See `docs/CHANGELOG.md` for full diagnosis detail.
-2. ⬜ **Accessory/Turnout v2** - the real Ecos→throttle direction (Ecos-
-   originated turnout changes reaching XpressNet *and* Z21) plus a
-   dedicated OLED accessory page, both deliberately deferred out of v1
-   (Phase 5 step 10) and never picked back up since. Needs a new Ecos-side
-   accessory address-map + subscription mechanism (mirroring what locos
-   already have via `EcosInterface`'s loco address-map/subscribe/baseline-
-   query machinery) - that backend is inherently protocol-agnostic, so
-   build it once and wire its output to both XpressNet and Z21 through
-   `CommandRouter` (the same shape loco state already uses), rather than
-   building it for one protocol and redoing it for the other later. Design
-   discussion (address-map approach, OLED page layout, how much of the
-   loco-parity machinery is actually worth replicating vs. simplifying
-   for the accessory case, since accessories have no speed/function
-   complexity) still needed before implementation.
+2. ✅ **Accessory/Turnout v2** (2026-09-01) - the real Ecos→throttle
+   direction: an accessory thrown directly on Ecos now reaches both
+   XpressNet and Z21. Backend mirrors the loco address-map/subscribe
+   pattern, confirmed real against actual Ecos hardware first (Phase 7
+   step 2 investigation, before writing any code): `queryObjects(11, addr)`
+   for discovery and `request(id, view)` per accessory both work, despite
+   the official spec marking the whole individual-accessory-object section
+   "(in Planung)"/not-yet-implemented - real Ecos firmware had shipped
+   ahead of that spec revision. State-change events (`state[val]`,
+   `switching[val]` ignored as a transient in-motion flag) route through a
+   new `CommandRouter::handleEcosAccessoryCommand()`, forwarding to both
+   throttle protocols unconditionally (no originating protocol to skip,
+   unlike the v1 direction). Deliberately does NOT touch `last_accessory`
+   (the OLED "last accessory" line) - explicit design call: that field
+   shows what a handheld last *commanded*, not Ecos's truth, since a
+   dropped bridge command is worth surfacing but a redundant re-confirm
+   isn't. Dedicated OLED accessory page skipped, per the same v1 scoping
+   logic (Phase 5 step 10) - not revisited.
+   - **Real bugs found via live testing, in order**: (1) `state[val]`'s
+     polarity was backwards from the initial guess - confirmed by
+     correlating the bridge's own outgoing commands against the resulting
+     events across 8 consecutive cycles, zero exceptions - fixed
+     (`state=0` is diverging, not 1). (2) A plain, unsolicited
+     `SetTrntPos()` broadcast to XpressNet did nothing on real hardware -
+     confirmed via a live capture that our own code was executing
+     correctly, so the gap was client trust, not encoding.
+   - **The actual root cause, found via a real Roco Z21 command station +
+     two MultiMaus reference test** (the user's own idea, run after
+     several dead-end fix attempts): a genuine command station propagates
+     turnout changes between throttles with a 1-2s delay, and correctly
+     restores state when reselecting a turnout - both signs of a
+     **poll/reply** mechanism, not a push/broadcast one. Confirmed live:
+     a real MultiMaus polls a completely separate, previously-unimplemented
+     XpressNet message (`notifyXNetTrntInfo`, the "Accessory Decoder
+     Information Request", header 0x42/0x43 - distinct from the `0x52` SET
+     command) at ~2Hz while sitting on a turnout screen, and getting no
+     reply at all is exactly why it fell back to "unknown" after a few
+     seconds. Implemented `XpressNetInterface::onTurnoutInfoRequest()` →
+     `XpressNetMasterClass::SetTrntStatus()`, with the request/reply byte
+     layout (turnout *group* addressing - 4 turnouts per group, 2 per
+     nibble, `TT`/`N`/`Z3Z2Z1Z0` fields) confirmed against the official
+     Lenz XpressNet Specification (v2, 6/2003) cross-referenced with the
+     already-vendored library's own comments. **Confirmed live: MultiMaus
+     no longer goes "unknown", and now correctly reflects updates coming
+     from Z21 too** (via the same new state cache below, served on its
+     next poll).
+   - Added `CommandRouter`'s new best-known-accessory-state cache
+     (`known_accessories[]`, `getKnownAccessoryState()`), updated by both
+     the v1 (handheld-commanded) and v2 (Ecos-confirmed) directions -
+     needed to answer on-demand queries (this XpressNet request, and Z21's
+     `GET_TURNOUT_INFO`, now wired to real state too instead of a
+     hardcoded "always straight" guess).
+   - Added `XpressNetMasterClass::PushExternalTurnoutUpdate()` to the
+     vendored library (mirrors `PushExternalLocoUpdate()`'s call-byte-then-
+     reply bus injection, Phase 5 step 9) for the instant-push leg - kept
+     in place as a reasonable belt-and-suspenders addition even though the
+     poll/reply fix above turned out to be the actual missing piece.
+   - **Deferred, not fully understood**: a real WLANmaus never sends
+     `GET_TURNOUT_INFO` at all while idle on the turnout screen (confirmed
+     live: zero requests in 60s, contradicting an earlier session's
+     assumption that it polls at 2+Hz) - it relies purely on receiving the
+     `LAN_X_TURNOUT_INFO` broadcast, which is confirmed byte-perfect and
+     delivered to the connected client every time. Its display almost
+     never refreshes from this - except once, a few seconds after an
+     Ecos-direct change, not reproduced since. That one success rules out
+     "WLANmaus categorically ignores this broadcast" as the explanation,
+     but a generic UDP-packet-loss theory doesn't fully fit either, since
+     loco broadcasts use the identical fire-and-forget send and have been
+     reliable throughout this whole project - something turnout-specific
+     is still going on, cause unknown. XpressNet works reliably both
+     directions, which the user is satisfied with for now - this is
+     deferred as its own low-priority follow-up (Phase 7, new item 6
+     below), not blocking anything else.
 3. ⬜ **LocoNet support** - parallel to XpressNet, carried over from
    Phase 6 step 5. **Blocked on hardware** - the user doesn't currently
    have a LocoNet throttle or the interface hardware built yet. Don't
@@ -1493,6 +1552,16 @@ real needs come up rather than pre-committing to a fixed scope.
 5. ⬜ **Open/TBD** - deliberately left open, carried over from Phase 6
    step 6. Add real candidates here as they come up rather than
    pre-committing to a fixed scope; nothing currently queued.
+6. ⬜ **Investigate WLANmaus turnout broadcast reliability** - added
+   2026-09-01, deferred/low-priority. A real WLANmaus's display almost
+   never refreshes from a confirmed byte-perfect, confirmed-delivered
+   `LAN_X_TURNOUT_INFO` broadcast - except once, not reproduced since (see
+   Phase 7 step 2's write-up above for the full story and what's already
+   been ruled out). XpressNet already works reliably both directions,
+   which the user is satisfied with for now - this isn't blocking
+   anything, fold in opportunistically if it's ever worth another look
+   (e.g. if a wired packet capture on the WiFi side becomes practical, to
+   rule packet loss in or out directly instead of inferring from symptoms).
 
 ---
 
@@ -1566,6 +1635,25 @@ found via a raw wire capture) - see the dedicated bullet above and
 `docs/CHANGELOG.md` for the full diagnosis. Native suite 272/272 passing,
 `env:wemos` flashed and live-confirmed at `1.2.0`.
 
-**Next**: Phase 7 step 2 (Accessory/Turnout v2 - the real Ecos→throttle
-direction plus a dedicated OLED page) is the agreed next item, not yet
-started.
+**Since then, again (2026-09-01, same day)**: **Phase 7 step 2
+(Accessory/Turnout v2) is now confirmed COMPLETE and working live** - the
+real Ecos→throttle direction, after another real multi-bug saga (state
+polarity, a plain broadcast XpressNet didn't trust, and the actual root
+cause: a real MultiMaus polls a previously-unimplemented XpressNet
+message for turnout state and was never getting a reply). Root-caused
+with the user's own idea - testing MultiMaus/WLANmaus against a real Roco
+Z21 command station as ground truth - which is what pointed at poll/reply
+instead of push/broadcast. See the dedicated bullet above and
+`docs/CHANGELOG.md` for the full diagnosis. XpressNet now works reliably
+both directions, confirmed live. WLANmaus's own display almost never
+refreshes from a confirmed byte-perfect, confirmed-delivered broadcast -
+except once, not reproduced since - not fully understood, deferred as
+Phase 7's new item 6 rather than pursued further right now; not blocking.
+Native suite 287/287 passing, `env:wemos` flashed and live-confirmed at
+`1.3.0`.
+
+**Next**: nothing agreed yet - Phase 7 has five open items: step 3
+(LocoNet, blocked on hardware), step 4 (extend "stolen" icon refresh to
+F0-F11, small/low-priority), step 5 (open/TBD), and step 6 (WLANmaus
+turnout broadcast reliability, deferred, added 2026-09-01) - none
+discussed or started.

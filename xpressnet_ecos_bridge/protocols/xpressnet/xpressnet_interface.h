@@ -87,6 +87,21 @@ public:
     void pushLocoStateToOwningSlot(uint16_t address) override;
 
     /**
+     * Broadcast a real accessory/turnout state onto the XpressNet bus via
+     * the library's SetTrntPos() - the same "Accessory Decoder operation
+     * request" (0x52) opcode a real throttle's own switch command uses, so
+     * throttles that track turnout state from bus traffic pick it up the
+     * same way. Phase 7 step 2: called by CommandRouter when Ecos reports a
+     * real accessory state change. `active` is sent as 0 (not a fresh pulse,
+     * just reporting the settled position) - untested live, verify the
+     * MultiMaus actually reacts to this rather than ignoring an
+     * unsolicited 0x52 it didn't request.
+     * @param address DCC accessory address
+     * @param diverging false = straight, true = diverging
+     */
+    void sendAccessoryCommand(uint16_t address, bool diverging) override;
+
+    /**
      * Milliseconds since the last real bus message was received (any
      * successfully-parsed callback, not just drive commands), for OLED
      * "Last Msg" age display. Reuses last_message_time - the same
@@ -246,6 +261,26 @@ public:
      *             already folded into address)
      */
     void onTurnoutCommand(uint16_t address, uint8_t data);
+
+    /**
+     * Handle a real Accessory Decoder Information Request (Lenz XpressNet
+     * header 0x42/0x43, distinct from the SET command onTurnoutCommand()
+     * handles) - confirmed live 2026-09-01 that a real MultiMaus polls this
+     * ~2Hz while sitting on a turnout's control screen, previously
+     * completely unanswered (this callback was never hooked up at all),
+     * which is why its display fell back to "unknown" after a few seconds
+     * with no reply ever arriving. Replies via the library's SetTrntStatus()
+     * with CommandRouter's best-known state for both addresses in the
+     * requested nibble group. Byte layout confirmed against the official
+     * Lenz XpressNet Specification (v2, 6/2003, section 2.1.11/2.2.17).
+     * @param userOps Echoed back as SetTrntStatus()'s UserOps
+     * @param groupAddress Turnout GROUP address (wire_turnout / 4), not an
+     *                     individual turnout - each group covers 4
+     *                     turnouts, 2 per nibble
+     * @param data 0x80 + N, where N=0 selects the lower nibble (the group's
+     *             first 2 turnouts), N=1 the upper nibble (the other 2)
+     */
+    void onTurnoutInfoRequest(uint8_t userOps, uint16_t groupAddress, uint8_t data);
 
 private:
     // Hardware state
