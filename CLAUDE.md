@@ -1407,15 +1407,60 @@ project's history. Named "TBD" rather than a themed name like Phase 6's
 "Future Improvements" - deliberately open-ended, add to this list as
 real needs come up rather than pre-committing to a fixed scope.
 
-1. ✅ **Z21 turnout/accessory command support** (2026-08-31) - mirrors the existing
-   XpressNet→Ecos v1 accessory path (Phase 5 step 10): a WLANmaus throws
-   a turnout, Ecos receives it. No new Ecos-side machinery needed - Ecos's
-   `set(11, switch[...])` already addresses by protocol+address+port
-   directly, no per-accessory object ID lookup or subscription required
-   for this direction. Implementation: added Z21_X_SET_TURNOUT (0x53) decode
-   in z21_protocol, dispatch handler in z21lan_interface, and forwarding
-   support in command_router. All 265 native tests passing, firmware builds
-   clean for ESP8266. See `docs/CHANGELOG.md` for full details.
+1. ✅ **Z21 turnout/accessory command support** (2026-08-31, confirmed live
+   2026-09-01) - mirrors the existing XpressNet→Ecos v1 accessory path
+   (Phase 5 step 10): a WLANmaus throws a turnout, Ecos receives it. No new
+   Ecos-side machinery needed - Ecos's `set(11, switch[...])` already
+   addresses by protocol+address+port directly, no per-accessory object ID
+   lookup or subscription required for this direction.
+   - **The initial implementation (2026-08-31) had `LAN_X_SET_TURNOUT`'s DB
+     fields in the wrong order** - it assumed the flags byte (`10Q0A00P`)
+     came first, copying `LAN_X_SET_LOCO_DRIVE`'s field order, when the
+     real spec (and address-first commands generally) put the address
+     bytes first and the flags byte third. This meant the decoded "address"
+     was actually built from the flags byte - a function of which button
+     was pressed, not which turnout was selected - live-observed as
+     pressing either button on either selected turnout always affecting
+     only one of two fixed addresses, and release re-triggering a second,
+     differently-addressed command. A follow-up debugging attempt (in a
+     separate session) treated this as "WLANmaus sends weird toggle
+     pulses" and patched around it with a release-pulse debounce heuristic
+     instead of finding the byte-order bug - the underlying decode function
+     was rewritten to match the (mis-assigned) bytes it was actually
+     receiving rather than the call site being corrected.
+   - **Root-caused 2026-09-01** by cross-checking the actual byte order
+     against two independent sources: the official Z21 LAN spec text
+     (section 5.2) and a verbatim download of Philipp Gahtow's own
+     reference Z21 library (`kind3r/esp8266-z21-lib`, a port of Gahtow's
+     original - the same author as this project's own vendored
+     XpressNetMaster library) - `notifyz21Accessory((packet[5]<<8)+
+     packet[6], bitRead(packet[7],0), bitRead(packet[7],3))`: address
+     bytes first, flags byte third. Fixed the call site and removed the
+     debounce hack (unnecessary once the deactivate/release edge is
+     correctly filtered by the decode function itself, exactly like
+     XpressNet's own turnout handling already does).
+   - **A second, independent bug surfaced once addressing was fixed**: the
+     "is this a valid turnout flags byte" nibble check didn't correctly
+     ignore the Q (queue) bit, so any packet with `Q=1` (a real mode from
+     Z21 firmware ≥1.24) was silently rejected outright regardless of
+     address or button.
+   - **A third bug, found via a real raw wire-byte capture** (this
+     project's own proven method for exactly this kind of ambiguity) after
+     the Q-bit fix still didn't restore function: this specific real
+     WLANmaus does not set the documented `bit7` "1" prefix on the flags
+     byte at all - real captured values were `0x00/0x01/0x08/0x09`, not the
+     spec's `0x80/0x81/0x88/0x89`. Confirmed coherent against the actual
+     button-press sequence (activate/deactivate pairs for straight/diverging
+     alternating correctly when reading bits `[3]`/`[0]` directly). Removed
+     the nibble/format gate entirely - `X-Header 0x53` alone already
+     disambiguates this as a turnout command, no format check needed -
+     trusting the real capture over the literal spec text, the same call
+     already made for this project's Z21 direction-bit and XpressNet r/g
+     port-letter precedents.
+   - **Confirmed live 2026-09-01**: T0001 and T0002, straight and diverging,
+     both correctly reaching Ecos, no cross-addressing, no reverting on
+     release. Native suite 272/272 passing. `env:wemos` flashed at
+     `1.2.0`. See `docs/CHANGELOG.md` for full diagnosis detail.
 2. ⬜ **Accessory/Turnout v2** - the real Ecos→throttle direction (Ecos-
    originated turnout changes reaching XpressNet *and* Z21) plus a
    dedicated OLED accessory page, both deliberately deferred out of v1
@@ -1512,5 +1557,15 @@ incidental side effect of Phase 6 step 4's echo-handling fixes - the
 user confirmed both direction-change mechanisms now work correctly on
 both XpressNet and Z21).
 
-**Next**: nothing started yet on Phase 7 - step 1 (Z21 accessory support)
-is the agreed starting point whenever picked up.
+**Since then, again (2026-09-01)**: **Phase 7 step 1 (Z21 turnout/accessory
+support) is now confirmed COMPLETE and working live**, after a genuine
+multi-bug debugging saga across two sessions - three real, independent
+bugs (DB field byte order, a Q-bit validation mask, and this specific real
+WLANmaus not setting the spec's documented flags-byte prefix bit at all,
+found via a raw wire capture) - see the dedicated bullet above and
+`docs/CHANGELOG.md` for the full diagnosis. Native suite 272/272 passing,
+`env:wemos` flashed and live-confirmed at `1.2.0`.
+
+**Next**: Phase 7 step 2 (Accessory/Turnout v2 - the real Ecos→throttle
+direction plus a dedicated OLED page) is the agreed next item, not yet
+started.

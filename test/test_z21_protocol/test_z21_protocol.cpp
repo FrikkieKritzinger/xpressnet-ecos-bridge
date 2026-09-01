@@ -240,57 +240,88 @@ void test_decode_function_invalid_tt_rejected(void) {
 // ============================================================================
 
 void test_decode_turnout_straight(void) {
-    // WLANmaus format: LSB bits[2:0]=turnout offset, bit3=diverging flag
-    // Turnout 1 straight: LSB=0x00 (offset 0, +1 -> turnout 1 user address)
+    // Real raw wire capture against this exact WLANmaus (2026-09-01) - see
+    // z21DecodeTurnoutCommand's doc comment - shows the flags byte does NOT
+    // set the spec-documented bit7 "1" prefix. Real Activate+P=0(straight)
+    // observed as 0x08, not the spec's 0x88.
+    // Turnout 1 (wire addr 0), Activate+P=0(straight): flags=0x08
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x00, 0xFF, address, diverging));
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x00, 0x08, address, diverging));
     TEST_ASSERT_EQUAL_UINT16(1, address);  // 0 + 1 = 1
     TEST_ASSERT_FALSE(diverging);
 }
 
 void test_decode_turnout_diverging(void) {
-    // Turnout 1 diverging: LSB=0x08 (offset 0 + bit3)
+    // Turnout 1 (wire addr 0), Activate+P=1(diverging): flags=0x09
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x08, 0xFF, address, diverging));
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x00, 0x09, address, diverging));
     TEST_ASSERT_EQUAL_UINT16(1, address);
     TEST_ASSERT_TRUE(diverging);
 }
 
 void test_decode_turnout_turnout2_straight(void) {
-    // Turnout 2 straight: LSB=0x01 (offset 1, +1 -> turnout 2)
+    // Turnout 2 (wire addr 1), Activate+P=0(straight): flags=0x08
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x01, 0x00, address, diverging));
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x01, 0x08, address, diverging));
     TEST_ASSERT_EQUAL_UINT16(2, address);  // 1 + 1 = 2
     TEST_ASSERT_FALSE(diverging);
 }
 
 void test_decode_turnout_turnout2_diverging(void) {
-    // Turnout 2 diverging: LSB=0x09 (offset 1 + bit3)
+    // Turnout 2 (wire addr 1), Activate+P=1(diverging): flags=0x09
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x09, 0x00, address, diverging));
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x01, 0x09, address, diverging));
     TEST_ASSERT_EQUAL_UINT16(2, address);  // 1 + 1 = 2
     TEST_ASSERT_TRUE(diverging);
 }
 
 void test_decode_turnout_turnout8_straight(void) {
-    // Turnout 8 straight: LSB=0x07 (offset 7, +1 -> turnout 8)
+    // Turnout 8 (wire addr 7), Activate+P=0(straight): flags=0x08
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x07, 0xFF, address, diverging));
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x07, 0x08, address, diverging));
     TEST_ASSERT_EQUAL_UINT16(8, address);  // 7 + 1 = 8
     TEST_ASSERT_FALSE(diverging);
 }
 
 void test_decode_turnout_turnout8_diverging(void) {
-    // Turnout 8 diverging: LSB=0x0F (offset 7 + bit3)
+    // Turnout 8 (wire addr 7), Activate+P=1(diverging): flags=0x09
     uint16_t address;
     bool diverging;
-    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x01, 0x0F, 0xFF, address, diverging));
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x07, 0x09, address, diverging));
     TEST_ASSERT_EQUAL_UINT16(8, address);  // 7 + 1 = 8
+    TEST_ASSERT_TRUE(diverging);
+}
+
+void test_decode_turnout_ignores_deactivate_edge(void) {
+    // Release pulse (A=0): flags=0x00 (deactivate, P=0), 0x01 (deactivate,
+    // P=1) - must be ignored, matching XpressNet's own activate-edge-only
+    // turnout handling. This is the actual real live bug: an earlier
+    // implementation didn't correctly gate on this bit, so button release
+    // re-triggered a (wrongly-addressed) command.
+    uint16_t address;
+    bool diverging;
+    TEST_ASSERT_FALSE(z21DecodeTurnoutCommand(0x00, 0x01, 0x00, address, diverging));
+    TEST_ASSERT_FALSE(z21DecodeTurnoutCommand(0x00, 0x01, 0x01, address, diverging));
+}
+
+void test_decode_turnout_ignores_upper_bits(void) {
+    // The decode only reads bits[3] (activate) and [0] (port) - it must not
+    // care about bit7/Q/reserved bits either way, since real hardware has
+    // been observed both with them clear (0x08/0x09) and, per the spec text,
+    // could plausibly set them (0xA8/0xA9 with Q=1). Same result either way.
+    uint16_t address;
+    bool diverging;
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x00, 0xA8, address, diverging));
+    TEST_ASSERT_EQUAL_UINT16(1, address);
+    TEST_ASSERT_FALSE(diverging);
+
+    TEST_ASSERT_TRUE(z21DecodeTurnoutCommand(0x00, 0x01, 0xA9, address, diverging));
+    TEST_ASSERT_EQUAL_UINT16(2, address);
     TEST_ASSERT_TRUE(diverging);
 }
 
@@ -490,6 +521,8 @@ int main(void) {
     RUN_TEST(test_decode_turnout_turnout2_diverging);
     RUN_TEST(test_decode_turnout_turnout8_straight);
     RUN_TEST(test_decode_turnout_turnout8_diverging);
+    RUN_TEST(test_decode_turnout_ignores_deactivate_edge);
+    RUN_TEST(test_decode_turnout_ignores_upper_bits);
 
     RUN_TEST(test_build_turnout_info_low_address);
     RUN_TEST(test_build_turnout_info_high_address);

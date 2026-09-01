@@ -325,12 +325,17 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
     }
 
     if (x_header == Z21_X_SET_TURNOUT && data_len >= 5) {
-        // data[0]=X-Header(0x53), data[1]=DB0 (unused), data[2]=Adr_MSB (unused),
-        // data[3]=Adr_LSB (encodes turnout#/state), data[4]=checksum.
-        // Phase 7 step 1 - Z21 accessory support (WLANmaus format).
+        // data[0]=X-Header(0x53), data[1]=DB0=Adr_MSB, data[2]=DB1=Adr_LSB,
+        // data[3]=DB2=10Q0A00P (flags), data[4]=XOR - address comes BEFORE
+        // the flags byte for this command, confirmed against both the
+        // official spec and Gahtow's reference implementation (see the
+        // z21DecodeTurnoutCommand doc comment for the full story). No
+        // debounce needed - z21DecodeTurnoutCommand already ignores the
+        // deactivate/release edge on its own, same as XpressNet's turnout
+        // handling.
         uint16_t address;
         bool diverging;
-        if (z21DecodeTurnoutCommand(data[2], data[3], data[1], address, diverging) && router) {
+        if (z21DecodeTurnoutCommand(data[1], data[2], data[3], address, diverging) && router) {
             DEBUG_PRINTF("Z21 RX: Accessory - Addr=%u -> %s\n", address, diverging ? "diverging" : "straight");
             recordAction(client_index);
             router->handleAccessoryCommand(address, diverging, LocoSource::Z21_LAN);

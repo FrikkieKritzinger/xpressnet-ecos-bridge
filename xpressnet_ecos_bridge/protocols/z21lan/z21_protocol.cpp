@@ -102,18 +102,50 @@ bool z21DecodeFunctionCommand(uint8_t data_byte, uint8_t& out_function_index, ui
 
 bool z21DecodeTurnoutCommand(uint8_t adr_msb, uint8_t adr_lsb, uint8_t db0_byte,
                               uint16_t& out_address, bool& out_diverging) {
-    // Real Z21 LAN turnout command format (as implemented by WLANmaus, not the
-    // spec's DB0 format): The turnout number and state are encoded in the address
-    // bytes alone. DB0 is ignored (always 0x00 from WLANmaus).
-    // LSB encoding: bit3=diverging flag, bits[2:0]=turnout offset (0-7 = turnout 0-7 on wire)
-    // MSB is not used; only the LSB matters for the turnout address itself.
-    // Example: turnout 1 straight=0x00, diverging=0x08; turnout 2 straight=0x01, diverging=0x09
-    // Note: Ecos uses 0-indexed turnout addresses on the wire (user sees 1, wire sends 0)
+    // LAN_X_SET_TURNOUT per spec section 5.2: X-Header(0x53), DB0=FAdr_MSB,
+    // DB1=FAdr_LSB, DB2=10Q0A00P, XOR - address comes BEFORE the flags byte,
+    // unlike LAN_X_SET_LOCO_DRIVE/FUNCTION where the flags byte (0x1S/0xF8)
+    // comes first. Confirmed against two independent sources 2026-09-01
+    // after a real live bug (WLANmaus controlling the wrong turnout, and
+    // reverting state on button release): the official spec text AND a
+    // verbatim byte-for-byte download of Philipp Gahtow's own reference Z21
+    // library (kind3r/esp8266-z21-lib, a port of Gahtow's original) -
+    // notifyz21Accessory((packet[5]<<8)+packet[6], bitRead(packet[7],0),
+    // bitRead(packet[7],3)) - packet[5]/[6]=address, packet[7]=flags byte.
+    // An earlier version of this function assumed the flags byte came first
+    // (copying LAN_X_SET_LOCO_DRIVE's field order) and got "fixed" by
+    // reinterpreting the (mis-assigned) bytes instead of correcting the call
+    // site - which produced an address that depended on which button was
+    // pressed instead of which turnout was selected, matching the live
+    // symptom exactly. See docs/CHANGELOG.md for the full diagnosis.
+    //
+    // DB2 format per spec: bit7=1, bit6=0, bit5=Q(queue), bit4=0,
+    // bit3=A(activate), bit2=0, bit1=0, bit0=P(port). A real raw wire
+    // capture against this exact WLANmaus (2026-09-01) showed it never
+    // sets the documented bit7 "1" prefix at all - real flags bytes were
+    // 0x00/0x01/0x08/0x09, not the spec's 0x80/0x81/0x88/0x89 - confirmed
+    // by the fact that reading bits[3]/[0] directly still produces a fully
+    // coherent activate/deactivate, straight/diverging sequence matching
+    // the actual button presses. Trusting the real capture over the
+    // literal spec text here, the same call this project has made before
+    // for the Z21 direction bit and the XpressNet accessory r/g port
+    // letters. No format/nibble gate needed - X-Header 0x53 alone already
+    // disambiguates this as a turnout command (unlike SET_LOCO_FUNCTION,
+    // which shares its X-Header with SET_LOCO_DRIVE and genuinely needs
+    // one).
+    uint8_t activate = (db0_byte >> 3) & 0x01;
+    if (!activate) {
+        return false;
+    }
 
-    // Extract turnout number and diverging state from LSB only
-    uint16_t turnout_offset = adr_lsb & 0x07;  // bits[2:0] = 0-7 (wire offset)
-    out_address = turnout_offset + 1;           // +1 to match XpressNet: reconstruct user-entered address
-    out_diverging = (adr_lsb & 0x08) != 0;      // bit3 = diverging flag
+    uint8_t port = db0_byte & 0x01;
+    out_diverging = (port == 1);
+
+    // Z21 wire addresses are 0-indexed (user enters 3 on throttle, wire=2),
+    // same convention already confirmed live for XpressNet - reconstruct
+    // the operator-facing address.
+    out_address = z21DecodeAddress(adr_msb, adr_lsb);
+    out_address += 1;
 
     return true;
 }
