@@ -214,10 +214,15 @@ class XpressNetMasterClass
 	//throttle's own transmission has, which is what a MultiMaus actually
 	//trusts for a display refresh, not just matching the reply's byte
 	//format. No-op if no slot currently references Adr.
-	//Only covers F0-F4 (the group this was tested against) - F5-F31 still
-	//only go out via setFuncNtoM()'s plain broadcast and may not refresh a
-	//"stolen" MultiMaus's display for those functions.
-	void PushExternalLocoUpdate(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4);
+	//Originally covered only F0-F4 (the group this was first tested
+	//against) - extended by this project (2026-09-01, Phase 7 item 4) to
+	//also cover F5-F8/F9-F12, the same three groups XpressNetInterface's
+	//own buildFunctionGroupByte() already knows how to build. F13-F31
+	//still only go out via setFuncNtoM()'s plain broadcast and may not
+	//refresh a "stolen" MultiMaus's display for those functions - the
+	//user's own assessment (Phase 7 planning) is F5-F11 worth covering,
+	//F13+ unlikely to matter in practice.
+	void PushExternalLocoUpdate(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4, uint8_t F5to8, uint8_t F9to12);
 
 	//Push an externally-sourced (non-XpressNet) accessory/turnout state
 	//change onto the bus, so every real device listening (not just one

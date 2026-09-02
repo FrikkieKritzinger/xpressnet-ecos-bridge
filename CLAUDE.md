@@ -1,7 +1,7 @@
 # XpressNet-Ecos Bridge - Development Guide
 
 **Project**: Model railway protocol bridge for ESP8266 (Wemos D1 Mini)  
-**Purpose**: Translate commands between XpressNet (hardwired RS485) and ESU Ecos (WiFi TCP)  
+**Purpose**: Translate commands between XpressNet (hardwired RS485), Z21 LAN (UDP), LocoNet and ESU Ecos (WiFi TCP)  
 **Language**: C++ (Arduino IDE 1.8+)  
 **Target**: ESP8266 microcontroller (160MHz, 4MB Flash, 160KB RAM)
 
@@ -1539,16 +1539,38 @@ real needs come up rather than pre-committing to a fixed scope.
    have a LocoNet throttle or the interface hardware built yet. Don't
    start this until the user confirms hardware is available; there's
    nothing useful to prototype against without it.
-4. ⬜ **Expand "stolen" icon refresh from F0-F4 to F0-F11** - the
-   `PushExternalLocoUpdate()` mechanism (Phase 5 step 9) that makes a
-   MultiMaus's display genuinely refresh (not just flash) for an
-   externally-originated change currently only builds and sends the F0-F4
-   function byte. Extending it to also cover F5-F8/F9-F12 (the same
-   groups XpressNet's own `buildFunctionGroupByte()` already knows how to
-   build, see `xpressnet_interface.cpp`) is small, bounded, low-priority
-   work - the user's own assessment is that F5-F11 is worth covering but
-   F13+ is unlikely to matter in practice. Fold into whenever this area
-   is next being touched rather than a dedicated session.
+4. ✅ **Expand "stolen" icon refresh from F0-F4 to F0-F12** (2026-09-02) -
+   `PushExternalLocoUpdate()` (Phase 5 step 9) now also injects F5-F8/F9-F12
+   call-byte-then-reply messages alongside the original F0-F4 one, using
+   the same `buildFunctionGroupByte()` groups already used elsewhere.
+   **Confirmed live**: "stolen" now correctly triggers for functions
+   tested up to F9, same 100%-reliable call-byte injection as before.
+   - **A separate, deeper issue was found investigating this, NOT caused
+     by this change**: while confirming the pushed function *value*
+     (not just the "stolen" flash) actually displays correctly, live
+     testing found function state doesn't reliably sync between XpressNet
+     and Z21 in either direction - confirmed via live capture that the
+     bridge's own routing is 100% correct every time (right bitmap
+     computed, `sendFunctionCommand()`/`pushLocoStateToOwningSlot()` both
+     called with the right value, every single toggle) - the gap is
+     downstream, in how MultiMaus/WLANmaus actually apply what's sent to
+     their own display, not yet root-caused. Delivery to Ecos/DCC itself
+     is unaffected and 100% reliable both ways - only the throttle-side
+     *display* is sometimes stale. The user's call: log as a known,
+     deferred, non-critical issue (an annoyance, not a functional flaw)
+     rather than continue chasing it - see Phase 7's new item 7.
+   - **A red herring investigated and resolved along the way**: an
+     apparent "activity LED stopped pulsing at ~1Hz" regression turned
+     out to be expected behavior, not a bug - the steady pulse was the
+     new `onTurnoutInfoRequest()` handler's real ~2Hz Accessory Info
+     Request traffic (only sent while MultiMaus is on the turnout
+     screen), not a separate always-on heartbeat. Confirmed live:
+     switching back to the turnout screen brings the pulse back.
+   - **A second red herring along the way**: an F1 toggle that appeared
+     to do nothing turned out to be MultiMaus's own WLANmaus button
+     actually sending "toggle F9" on the wire (`DB3=0x89`, confirmed via
+     raw capture) - not a decode bug, likely a WLANmaus-side function
+     remap/label mismatch or a mis-press, not investigated further.
 5. ⬜ **Open/TBD** - deliberately left open, carried over from Phase 6
    step 6. Add real candidates here as they come up rather than
    pre-committing to a fixed scope; nothing currently queued.
@@ -1562,6 +1584,25 @@ real needs come up rather than pre-committing to a fixed scope.
    anything, fold in opportunistically if it's ever worth another look
    (e.g. if a wired packet capture on the WiFi side becomes practical, to
    rule packet loss in or out directly instead of inferring from symptoms).
+7. ⬜ **Investigate loco function display sync between XpressNet and Z21**
+   - added 2026-09-02, deferred/low-priority/known-annoyance (the user's
+     own framing - not a functional flaw, since delivery to Ecos/DCC is
+     100% reliable both ways, only the throttle-side *display* is
+     sometimes stale). Found while confirming Phase 7 item 4's F5-F12
+     "stolen" extension: toggling a function on either XpressNet or Z21
+     doesn't reliably update the *other* protocol's displayed function
+     state, even though live captures confirm the bridge's own routing is
+     correct every single time (right bitmap, `sendFunctionCommand()` and
+     `pushLocoStateToOwningSlot()` both called correctly). Same general
+     shape as item 6 (Ecos/StateEngine and delivery are fine, only a
+     throttle's own display rendering is suspect) but not yet
+     investigated with the same rigor - no wire-level confirmation yet of
+     what MultiMaus/WLANmaus actually do with a correctly-sent update.
+     Speed/direction sync and the "stolen" flash itself both work
+     reliably - only the function *value* display is affected. Revisit
+     with a live capture correlating exact wire bytes against on-screen
+     behavior, same methodology as items 6 and the turnout v2 saga,
+     whenever there's appetite for it.
 
 ---
 
@@ -1652,8 +1693,27 @@ Phase 7's new item 6 rather than pursued further right now; not blocking.
 Native suite 287/287 passing, `env:wemos` flashed and live-confirmed at
 `1.3.0`.
 
-**Next**: nothing agreed yet - Phase 7 has five open items: step 3
-(LocoNet, blocked on hardware), step 4 (extend "stolen" icon refresh to
-F0-F11, small/low-priority), step 5 (open/TBD), and step 6 (WLANmaus
-turnout broadcast reliability, deferred, added 2026-09-01) - none
+**Since then, again (2026-09-02)**: **Phase 7 item 4 ("stolen" icon
+refresh extended to F0-F12) is now confirmed COMPLETE and working live**,
+tagged `v1.4.0`. Investigating it thoroughly (confirming not just the
+"stolen" flash but the actual displayed function *value*) surfaced a
+separate, deeper issue - loco function display sync between XpressNet
+and Z21 is unreliable in both directions, even though live captures
+confirm the bridge's own routing is correct every time. Per the user's
+explicit call, logged as a new deferred, low-priority item (item 7) -
+"an annoyance, not a critical flaw" - rather than continue chasing it,
+since delivery to Ecos/DCC itself is unaffected and fully reliable both
+ways. Two red herrings investigated and closed out along the way: an
+apparent activity-LED regression (not a bug - explained by the new
+turnout-info-poll traffic only firing while MultiMaus is on the turnout
+screen, confirmed by switching screens) and an F1 toggle that appeared to
+do nothing (the wire byte showed WLANmaus was actually sending "toggle
+F9", not F1 - a real command, just not the one intended/expected).
+Native suite 287/287 passing, `env:wemos` flashed and live-confirmed at
+`1.4.0`.
+
+**Next**: nothing agreed yet - Phase 7 has four open items: step 3
+(LocoNet, blocked on hardware), step 5 (open/TBD), step 6 (WLANmaus
+turnout broadcast reliability, deferred), and step 7 (loco function
+display sync between XpressNet/Z21, deferred, added 2026-09-02) - none
 discussed or started.

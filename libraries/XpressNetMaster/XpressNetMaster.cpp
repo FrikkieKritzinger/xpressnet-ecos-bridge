@@ -948,7 +948,7 @@ void XpressNetMasterClass::SetLocoInfoMM(uint8_t UserOps, uint8_t Steps, uint8_t
 //call-byte + unmarked-reply sequence is what a MultiMaus actually trusts
 //for a display refresh (confirmed live 2026-08-03), unlike a plain
 //broadcast or an addressed SetLocoInfoMM reply.
-void XpressNetMasterClass::PushExternalLocoUpdate(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4) {
+void XpressNetMasterClass::PushExternalLocoUpdate(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4, uint8_t F5to8, uint8_t F9to12) {
 	AddBusySlot(XNetExternalControllerSlot, Adr);
 
 	for (byte s = 1; s < 32; s++) {
@@ -965,6 +965,27 @@ void XpressNetMasterClass::PushExternalLocoUpdate(uint16_t Adr, uint8_t Steps, u
 		func_msg[4] = Adr & 0xFF;
 		getXOR(func_msg, 7);
 		XNetsend(func_msg, 7);
+
+		//F5-F8 (Ident 0x21) and F9-F12 (Ident 0x22) - same call-byte-then-
+		//unmarked-reply injection as F0-F4 above, added by this project
+		//(2026-09-01, Phase 7 item 4) since the original F0-F4-only scope
+		//was just "the group this was first tested against", not a real
+		//protocol limit.
+		XNetsend(callbyte, 1);
+		uint8_t func_msg2[] = {0x00, 0xE4, 0x21, 0x00, 0x00, (uint8_t)(F5to8 & 0x0F), 0x00 };
+		if (Adr > 99) func_msg2[3] = (Adr >> 8) | 0xC0;
+		else func_msg2[3] = Adr >> 8;
+		func_msg2[4] = Adr & 0xFF;
+		getXOR(func_msg2, 7);
+		XNetsend(func_msg2, 7);
+
+		XNetsend(callbyte, 1);
+		uint8_t func_msg3[] = {0x00, 0xE4, 0x22, 0x00, 0x00, F9to12, 0x00 };
+		if (Adr > 99) func_msg3[3] = (Adr >> 8) | 0xC0;
+		else func_msg3[3] = Adr >> 8;
+		func_msg3[4] = Adr & 0xFF;
+		getXOR(func_msg3, 7);
+		XNetsend(func_msg3, 7);
 
 		XNetsend(callbyte, 1);
 		byte v = Speed;
