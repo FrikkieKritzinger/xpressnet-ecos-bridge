@@ -715,6 +715,37 @@ All disabled features = zero compiled code overhead.
 
 ---
 
+## MCU Platform
+
+**Current and only supported target: ESP8266 (Wemos D1 Mini).** Discussed
+2026-09-23 whether to branch onto an ESP32-based "D1 Mini" board (dual-core,
+which the user has since ordered a few of) instead of or alongside the
+ESP8266 build. Decided explicitly: **not now, and not as a permanently
+co-maintained fork** - finish the remaining ESP8266 roadmap (LocoNet, the
+deferred items) and get it stable first; treat ESP32 as this project's "v3",
+a deliberate future migration to evaluate once the ESP8266 version is done,
+not a parallel branch to maintain indefinitely alongside it.
+
+Investigated Philipp Gahtow's own ESP32 support before that decision (same
+author as the vendored `XpressNetMaster` library and the Z21 reference
+already used repeatedly this project): the **library itself already has
+real ESP32 support built in** - every platform branch in the vendored
+`.cpp`, including the tricky 9th-bit call-byte parity handling on the
+software-serial write, is unified `#if defined(ESP8266) || defined(ESP32)`,
+no separate ESP32 code path needed there. But his own **published ESP32
+command-station firmware is explicitly marked "IN DER ENTWICKLUNG - STILL
+UNDER DEVELOPMENT!"**, with a documented requirement to patch the ESP32
+Arduino core itself to fix timer-interrupt crashes, plus known gaps (EEPROM
+write issues, S88N untested, no RailCom/DS18B20 support) - genuinely less
+mature than the ESP8266/D1 Mini design this project is built on. Also
+notable: his ESP32 design does **not** use dual-core task pinning for
+XpressNet timing - the "dedicate a core to bus polling, stop fighting the
+WiFi stack for timing" benefit that's the main draw of ESP32 here would be
+this project's own work to add, not something inherited for free.
+Reference: [Z21 Arduino Zentrale (ESP32)](https://pgahtow.de/w/Z21_Arduino_Zentrale_(ESP32)).
+
+---
+
 ## Hardware Configuration (config.h)
 
 ### XpressNet (RS485 half-duplex)
@@ -1535,10 +1566,44 @@ real needs come up rather than pre-committing to a fixed scope.
      deferred as its own low-priority follow-up (Phase 7, new item 6
      below), not blocking anything else.
 3. ⬜ **LocoNet support** - parallel to XpressNet, carried over from
-   Phase 6 step 5. **Blocked on hardware** - the user doesn't currently
-   have a LocoNet throttle or the interface hardware built yet. Don't
-   start this until the user confirms hardware is available; there's
-   nothing useful to prototype against without it.
+   Phase 6 step 5. **Status as of 2026-09-23**: the LocoNet interface
+   hardware is now built onto the project's motherboard PCB (pins per
+   Philipp Gahtow's own ESP32 reference design - not yet cross-checked
+   against what an ESP8266/D1 Mini build actually needs, since this
+   project stays on ESP8266 for now, see "MCU Platform" below) - but
+   **still blocked on a working throttle to test against**: the user's
+   real Digitrax throttle is currently misplaced (last used at a model
+   railway club, location unknown). A basic fallback exists if needed to
+   at least start on - a Digitrax UT4D (manual speed knob, direction
+   toggle, F0-F12 only, no display/feedback of any kind) - but real
+   testing needs the proper throttle found first. Don't start
+   implementation until a throttle is actually in hand.
+   - **Design decision agreed 2026-09-23, before any implementation**:
+     LocoNet's real select/steal/dispatch slot-ownership model (a
+     throttle must actively select or steal a loco's slot before
+     controlling it, and dispatch it for others afterward) will be
+     implemented for real - satisfying what a genuine LocoNet throttle's
+     UI expects (no select, no speed response) - but scoped **entirely
+     internal to the LocoNet interface layer**, never as a gate on
+     anything reaching `CommandRouter`. Every LocoNet-originated command
+     flows straight through to Ecos/XpressNet/Z21 exactly like today,
+     regardless of slot state, and - symmetrically - a change from
+     another protocol pushes a slot-refresh to whichever LocoNet throttle
+     currently has that loco selected, so its display doesn't go stale.
+     Direct precedent already in this codebase: XpressNet's own
+     `SlotLokUse[]`/`AddBusySlot()`/`SetBusy()` (Phase 5 step 9) already
+     works exactly this way - purely internal MultiMaus-to-MultiMaus
+     bookkeeping, CommandRouter has no idea it exists, "stolen" is a
+     display-refresh courtesy, not a real lock. The one place genuine
+     arbitration logic is actually needed is LocoNet-throttle-vs-LocoNet-
+     throttle (a second Digitrax unit selecting an already-selected loco)
+     - `SlotLokUse`'s handling is a working template for that piece too.
+     Explicit rationale (the user's own, strongly held - "one of my pet
+     hates about Digitrax/LocoNet"): on a home layout, seamless
+     cross-protocol/cross-throttle control matters far more than
+     LocoNet's stricter exclusive-ownership model, which only really
+     earns its keep in a large club setting where a stranger placing a
+     same-address loco on the track is a real risk - not a concern here.
 4. ✅ **Expand "stolen" icon refresh from F0-F4 to F0-F12** (2026-09-02) -
    `PushExternalLocoUpdate()` (Phase 5 step 9) now also injects F5-F8/F9-F12
    call-byte-then-reply messages alongside the original F0-F4 one, using
