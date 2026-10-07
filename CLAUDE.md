@@ -12,6 +12,11 @@
 > after a session, add detail to the changelog and only touch this file's status
 > sections if the current state actually changed.
 
+> 🔗 **Shared cross-project notes** (also used by other projects under
+> `E:\Claude\`) - record reusable LocoNet/ESP8266 learnings there, not only here:
+> @E:/Claude/shared/esp8266-platform.md
+> @E:/Claude/shared/loconet.md
+
 > ✅ **Phase 4.6 COMPLETE (2026-08-03): full bridge validated end-to-end on real hardware.**
 > Every checklist item now confirmed live, across sessions from 2026-07-30 to
 > 2026-08-03: XpressNet command/reply correctness (speed, direction, functions,
