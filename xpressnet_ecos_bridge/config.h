@@ -35,7 +35,7 @@
 // Set 1 to enable, 0 to disable. Disabled features = no code, no overhead.
 
 #define ENABLE_XPRESSNET        1    // XpressNet interface (hardwired, timing-critical)
-#define ENABLE_ECOS_LAN         1    // Ecos LAN interface (WiFi, XML-based)
+#define ENABLE_ECOS_LAN         1    // Ecos LAN interface (WiFi, text object protocol)
 #define ENABLE_LOCONET          0    // LocoNet interface (future)
 #define ENABLE_Z21_LAN          1    // Z21 LAN protocol (Phase 6 step 4 - WLANmaus support)
 #define ENABLE_OLED_DISPLAY     1    // OLED status display
@@ -136,9 +136,6 @@
     #define ECOS_MESSAGE_TIMEOUT        (ECOS_HEARTBEAT_INTERVAL + 5000)   // No-data disconnect threshold (ms)
     #define ECOS_RECONNECT_INTERVAL     10000           // Backoff retry interval (ms)
     #define ECOS_ADDRESS_MAP_REFRESH_INTERVAL 600000    // Refresh loco list every 10 minutes
-
-    // Echo prevention (WiFi/TCP is slower than RS485, need longer window)
-    #define ECOS_ECHO_WINDOW_MS         2000            // 2 seconds (accounts for TCP latency)
 
     // Buffers
     #define MAX_ECOS_OBJECTS            100             // Max locomotives in address map
@@ -341,7 +338,6 @@
 // core infrastructure, and the web server only runs while actually in
 // Setup Mode (not during normal operation), so there's no always-on cost
 // to disable.
-#define ENABLE_OTA_UPDATE           0     // Over-the-air firmware updates (Phase 6 step 3)
 
 // ============================================================================
 // VALIDATION - Don't modify below this line

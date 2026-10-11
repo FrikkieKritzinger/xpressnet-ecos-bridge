@@ -111,7 +111,7 @@ void setup() {
         Serial.begin(DEBUG_BAUD);
         delay(100);
         debugPrintf("\n\n=== XpressNet-Ecos Bridge Starting ===\n");
-        debugPrintf("Version: 0.1-dev\n");
+        debugPrintf("Version: %s\n", FIRMWARE_VERSION);
         debugPrintf("Build: %s %s\n", __DATE__, __TIME__);
     #endif
     
@@ -348,7 +348,7 @@ void debugPrintf(const char* format, ...) {
 Expected startup sequence on Serial Monitor (115200 baud):
 
 === XpressNet-Ecos Bridge Starting ===
-Version: 0.1-dev
+Version: 1.4.0
 Build: Jan 21 2024 14:35:10
 Initializing XpressNet interface...
 XpressNet interface initialized

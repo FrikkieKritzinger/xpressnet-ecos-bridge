@@ -8,7 +8,8 @@
  * 
  * Implements echo prevention to avoid loops:
  * - When Ecos sends update back after we sent command
- * - 500ms window to detect echoes
+ * - Ecos confirmations are not echoed back to the protocol that caused them
+ *   (wasRecentSource(), ECOS_ECHO_ATTRIBUTION_WINDOW_MS)
  * 
  * No persistence - relies on StateEngine for state storage
  */
