@@ -1600,6 +1600,14 @@ real needs come up rather than pre-committing to a fixed scope.
    user's own Digitrax throttle is lost; a **UT6** (has a display, so
    other-throttle changes are visible) is on order. Don't start
    implementation until a board and a throttle are both in hand.
+   - **Bring-up plan for the v2.1 board (agreed 2026-10-11)**: flash
+     nothing new first - keep the proven v1.4.0 firmware on the D1 (current
+     `main`, `325b1d8`, is functionally identical) so any fault is
+     hardware. Order: (1) power only, D1 out of its socket - verify clean
+     rails where expected and nowhere else, no warm transistors (especially
+     the one that overheated on v2); (2) D1 seated, LocoNet idle - confirm
+     XpressNet and Ecos behave as on the old board; (3) only then bring up
+     LocoNet.
    - **Design decision agreed 2026-09-23, before any implementation**:
      LocoNet's real select/steal/dispatch slot-ownership model (a
      throttle must actively select or steal a loco's slot before
