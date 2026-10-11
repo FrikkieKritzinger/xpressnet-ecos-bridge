@@ -1,5 +1,8 @@
 # Compilation Error Fix Summary
 
+> **Historical (2026-10-11 note):** a record of include-path fixes made while the skeleton was first compiled in the Arduino IDE. The project now builds with PlatformIO (`python -m platformio run -e wemos`), the file names mentioned here (`src_*.h`) no longer exist, and the problems described are resolved. Kept for reference only.
+
+
 ## Problems Found and Fixed
 
 ### Problem 1: Include Path Error in interface_base.h

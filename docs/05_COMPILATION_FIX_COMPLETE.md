@@ -1,5 +1,8 @@
 # Compilation Fix Summary - All Issues Resolved
 
+> **Historical (2026-10-11 note):** final verification record from the skeleton phase's compile fixes. Superseded by the PlatformIO builds and the native test suite; kept for reference only.
+
+
 ## Problems Found & Fixed
 
 ### Issue 1: Missing Standard Library Includes

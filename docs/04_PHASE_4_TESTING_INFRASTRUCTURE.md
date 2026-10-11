@@ -1,5 +1,13 @@
 # Phase 4: Testing Infrastructure
 
+> **Status (2026-10-11): completed, with differences from this plan.** This is the original plan; what exists now:
+> - Tests live in `test/` (singular - PlatformIO 6 hard-codes it; `test_dir` is not configurable), one directory per suite: `test_state_engine`, `test_command_router`, `test_ecos_parser`, `test_ecos_command_builder`, `test_z21_protocol`, `test_eeprom_config`, `test_setup_web_form`. Run with `python -m platformio test -e native` (287 tests passing).
+> - The planned `test_xpressnet_parser` and `xpressnet_messages.h` fixture were dropped: XpressNet framing/parsing is owned by the vendored XpressNetMaster library, so there is nothing of ours to unit-test there; it is verified on the real bus.
+> - Echo prevention is no longer a 500 ms window (see [02_PHASE_3_2_ECOS_DESIGN.md](02_PHASE_3_2_ECOS_DESIGN.md)); the mock Ecos server (Step 11) was not built - Ecos was tested against real hardware.
+> - Hardware test procedures (Step 12) were carried out live and recorded in [CHANGELOG.md](CHANGELOG.md) rather than in a separate `06_HARDWARE_TEST_PROCEDURES.md`.
+> - The platformio.ini excerpts below are illustrative; the real file is `platformio.ini` in the repository root.
+
+
 **Objective**: Establish comprehensive unit and integration testing framework using PlatformIO + Unity.
 
 **Scope**: Test core logic (parsers, command builders, state engine, router) in native/host environment without hardware.

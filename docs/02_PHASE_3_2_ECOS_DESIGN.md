@@ -1,15 +1,14 @@
 # Phase 3.2: Ecos LAN Protocol Implementation
 
-**Status**: Design Document (Pre-Implementation)  
+**Status**: Implemented and verified on real hardware. Originally written 2026-07-22 as a pre-implementation design; revised 2026-10-11 so the sections below describe what the code actually does. Items that changed from the original plan are called out inline. Dated history: [CHANGELOG.md](CHANGELOG.md); current summary: [../CLAUDE.md](../CLAUDE.md).  
 **Target**: ESP8266 Wemos D1 Mini  
-**Scope**: TCP/XML interface to ESU Ecos command station  
-**Priority**: After Phase 3.1 XpressNet completion  
+**Scope**: TCP interface (ESU text object protocol - not XML) to an ESU Ecos command station  
 
 ---
 
 ## Overview
 
-The Ecos LAN interface connects the bridge to an ESU Ecos command station via WiFi TCP/XML protocol. Ecos serves as the **master persistence layer** and **source of truth** for all DCC device state (locomotives and accessories).
+The Ecos LAN interface connects the bridge to an ESU Ecos command station via WiFi TCP, using ESU's plain-text object protocol (not XML). Ecos serves as the **master persistence layer** and **source of truth** for all DCC device state (locomotives and accessories).
 
 **Key Principle**: State Engine is truth table (second only to Ecos itself). Apply changes immediately, validate/sync with Ecos asynchronously.
 
@@ -20,7 +19,7 @@ The Ecos LAN interface connects the bridge to an ESU Ecos command station via Wi
 ### Data Flow
 
 ```
-XpressNet (RS485)           Ecos (WiFi TCP/XML)
+XpressNet (RS485)           Ecos (WiFi TCP, text protocol)
       ↓                              ↑
   XpressNetInterface         EcosInterface
       ↓                              ↓
@@ -34,18 +33,17 @@ XpressNet (RS485)           Ecos (WiFi TCP/XML)
 
 - **Tracks**: All locos (50 max) and accessories in use
 - **Ownership**: Owned by CommandRouter, read/write by all protocols
-- **Lifecycle**: Entries expire after 5 min of inactivity (no XpressNet updates)
+- **Lifecycle**: Entries expire after 5 min of inactivity (no updates from any protocol; the timeout is EEPROM-configurable)
 - **Persistence**: None (Ecos handles persistence)
 - **Priority**: XpressNet changes applied immediately, Ecos updates backfill/validate
 
 ### Subscription Model
 
 - **Strategy**: Subscribe ONLY to locos in state engine (known locos)
-- **Trigger**: When XpressNet sends command for unknown loco:
+- **Trigger**: When a throttle protocol (XpressNet or Z21) sends a command for an unknown loco:
   1. Apply change immediately to state engine
-  2. Send change to Ecos (optimistic update)
-  3. Start Ecos query in background for this loco
-  4. Add subscription when query completes
+  2. Send change to Ecos (queued by address if the Ecos object ID is not resolved yet or Ecos is down)
+  3. Subscribe with `request(id, view)` and run paced baseline `get()` queries for the loco's current speed/direction/functions
 - **Cleanup**: When loco expires from state engine (5 min timeout), unsubscribe from Ecos
 - **Resubscribe**: Automatic when same address appears again (next XpressNet command)
 
@@ -58,83 +56,29 @@ XpressNet (RS485)           Ecos (WiFi TCP/XML)
 
 ---
 
-## Echo Prevention (Enhanced)
+## Echo Prevention (as implemented)
+
+> **Revised**: the original design here was a circular buffer of the last 10 outgoing commands with a 2-second match window. That was replaced during Phase 6 (2026-08-28) with the scheme below; see the CHANGELOG for why.
 
 ### Problem
-TCP round-trip latency (100-500ms) means Ecos echo arrives well after 500ms window.
+When a throttle command is forwarded to Ecos and Ecos confirms it, that confirmation must not be pushed back to the throttle that sent it (it would flash "stolen" on its own display), but a genuinely independent change made on Ecos itself must reach every throttle.
 
 ### Solution
-**Outgoing Command Queue**: Track recent commands sent to Ecos to suppress echoes.
+`CommandRouter` keeps **one** attribution record: the address, command type, source protocol and timestamp of the most recent throttle-originated command. `wasRecentSource(address, source)` is true when the record matches that address and protocol and is younger than `ECOS_ECHO_ATTRIBUTION_WINDOW_MS` (**4000 ms** - Ecos's real confirmation latency under load exceeded the earlier 500 ms / 2 s windows). When an Ecos event fans out, each destination protocol is checked individually, so only the true originator is skipped; the others still receive the update.
 
-```cpp
-struct OutgoingCommand {
-    uint16_t address;           // DCC address
-    uint8_t command_type;       // SPEED, FUNCTION, ACCESSORY
-    uint8_t speed;              // For SPEED commands
-    uint32_t functions;         // For FUNCTION commands
-    unsigned long timestamp_ms; // When sent
-};
+Other throttle-facing protocols do **not** wait for the Ecos confirmation: a throttle command fans out to Ecos and all other throttle protocols immediately. Ecos-originated handling never writes to the attribution record. Incoming XpressNet/Z21 commands are never dropped as echoes.
 
-// Maintain circular buffer of last 10 outgoing commands
-// When Ecos sends update, check if it matches any recent outgoing cmd
-// If match and timestamp < 2 seconds: suppress (it's our echo)
-// If match and timestamp > 2 seconds: process (different device sent it)
-```
-
-### Logic
-1. XpressNet sends speed change → immediately to Ecos
-2. Record in outgoing queue with timestamp
-3. Ecos processes change, sends update back via subscription
-4. Bridge receives Ecos update → check outgoing queue
-5. If matches recent outgoing (< 2 sec) → suppress, don't re-broadcast to XpressNet
-6. If no match or old (> 2 sec) → process normally (another device changed it)
-
-**Why 2 seconds?** Ecos typically acknowledges within 200-500ms. 2 sec provides safety margin for network jitter.
+Trade-off accepted: an independent Ecos-direct change to the *same address* within the window after a throttle command may be attributed to the throttle.
 
 ---
 
-## Pending Query Buffer
+## Pending Query Buffer (as implemented)
 
 ### Problem
-Multiple XpressNet commands may arrive while Ecos query for same address is in flight.
+Commands can arrive while the Ecos object ID for an address is not known yet (loco not yet in the address map) or while Ecos is disconnected. While disconnected the address map is empty, so both cases look the same to the sender.
 
 ### Solution
-**Pending Query Buffer**: Queue commands for addresses being queried.
-
-```cpp
-struct PendingCommand {
-    uint16_t address;
-    uint8_t speed;
-    uint8_t direction;
-    uint32_t functions;
-};
-
-// Maintain small queue (5-10 addresses)
-// When XpressNet command arrives for unknown address:
-//   1. Apply to state engine immediately
-//   2. Send to Ecos immediately
-//   3. If query already pending: add to queue
-//   4. When query completes: process any pending commands
-```
-
-### Flow
-```
-Time  Event
-────  ──────────────────────────────────────────────
-0ms   XpressNet: Loco 100 speed 64 (unknown)
-      → Apply to state, send to Ecos, start query
-      → Pending queue: empty
-
-50ms  XpressNet: Loco 100 speed 80
-      → Query still pending, add to pending queue
-      → Pending queue: [Loco 100 speed 80]
-
-200ms Ecos query completes for Loco 100
-      → Merge Ecos status with state
-      → Process pending queue: apply speed 80
-      → Subscribe to Loco 100 updates
-      → Pending queue: empty
-```
+`EcosInterface::queuePendingQuery()` / `queuePendingFunctionQuery()` keep a small table (`MAX_PENDING_QUERIES` = 5) **upserted by DCC address**: a later speed/direction or function change for the same address updates the existing entry instead of consuming another slot. Each entry records separately whether it holds speed+direction and/or functions, so a replay only sends what was actually queued. `flushPendingQueries()` runs once the address map contains the loco (after (re)connect) and sends **direction before speed** (DCC decoders receive both in one packet; the reverse order built the packet from a stale speed).
 
 ---
 
@@ -145,77 +89,51 @@ State Engine is truth. XpressNet commands apply immediately. Ecos updates backfi
 
 ### Scenarios
 
-**Scenario 1: Unknown Loco from XpressNet**
+**Scenario 1: Unknown Loco from a throttle**
 ```
 Event: XpressNet sends speed 64 for unknown Loco 100
 Action:
   1. Create new LocoState (speed=64, dir=1, functions=0)
-  2. Send to Ecos (optimistic update)
-  3. Start Ecos query for Loco 100 status
-  4. (State: speed=64, ready for next XpressNet update)
-  
+  2. Send to Ecos (queued by address if the object ID is not resolved yet)
+  3. Subscribe (request view) and run paced baseline get() queries
+
 Ecos responds (after 200ms):
-  5. Merge: functions=0x0F (from Ecos), keep speed=64 (from XpressNet)
-  6. Add subscription for future updates
+  4. Merge: functions from Ecos; speed/direction only if Ecos reported them
 ```
 
 **Scenario 2: Ecos Update for Known Loco**
 ```
 Event: Ecos sends speed 32 for Loco 100 (we have speed 64)
 Action:
-  1. Check: Is this in outgoing queue (< 2 sec)?
-     - YES: Suppress (our echo)
-     - NO: Continue
-  2. Compare state vs update:
-     - If same: Ignore (no change)
-     - If different: Broadcast to XpressNet (another throttle changed it)
-  3. Merge into state engine (preserve local priority)
+  1. Merge into state engine - only the fields Ecos actually reported
+     (has_speed / has_direction / functions_mask)
+  2. Fan out to XpressNet and Z21, skipping only a protocol that was the
+     recent source of a command for this address (wasRecentSource())
 ```
 
 **Scenario 3: Multi-Throttle Control**
 ```
 Throttle A (XpressNet): Controls Loco 50
   → State: speed 50, direction 1
-  
+
 Throttle B (Ecos console): Changes Loco 50 to speed 25
   → Ecos sends update: speed 25
-  → Not in outgoing queue (didn't come from us)
-  → BROADCAST to XpressNet (router.sendToXpressNet())
+  → Not attributed to any throttle protocol
+  → Fanned out to XpressNet and Z21 (CommandRouter::broadcastCommand())
   → Throttle A's display shows speed 25 (consistent with Ecos)
 ```
 
 ---
 
-## Accessory (Turnout) Management
+## Accessory (Turnout) Management (as implemented)
 
-### Tracking
-- **Separate from locos** OR mixed in StateEngine (implementation detail)
-- **State**: Address, current position (0/1 for turnout), last activity time
-- **Lifecycle**: Same as locos (5 min timeout, expire + unsubscribe)
+Accessories are **not** tracked in `StateEngine`; they were scoped in two steps (Phase 5 step 10, Phase 7 steps 1-2).
 
-### Control Flow
-```
-XpressNet: Accessory command (address 1, position 0)
-  → Check state engine
-    - Unknown: Add, send to Ecos, start query
-    - Known: Apply, send to Ecos
-  → Ecos handles pulse/latch logic (we just command)
-  
-Ecos: Responds with status
-  → Update state engine
-  → Broadcast to XpressNet (if different)
-```
-
-### Query Support
-- Bridge can query Ecos for accessory status at any time
-- Used when responding to throttle queries or diagnostics
-- Not time-critical (low priority operation)
-
-### Why Track All?
-Without tracking all accessories, throttle displays and Ecos get out of sync:
-- User can't see actual turnout state on throttle
-- If we purge an accessory from state, next command requires re-query (slow)
-- Memory cost is negligible (1 Kbyte for 100 accessories)
+- **Throttle -> Ecos**: XpressNet (`onTurnoutCommand`, activate edge only) and Z21 (`LAN_X_SET_TURNOUT`) call `CommandRouter`, which sends `set(11, switch[DCC<addr><r|g>])` to the fixed accessory manager (`r` = straight, `g` = diverging). Ecos generates the pulse itself, so no object-ID lookup is needed in this direction.
+- **Ecos -> throttles**: accessory objects are discovered with `queryObjects(11, addr)` and subscribed individually (`MAX_ECOS_ACCESSORIES`); `state[val]` events (`0` = diverging, `1` = straight; `switching[val]` is ignored) fan out to XpressNet and Z21. Accessory object IDs are told apart from loco IDs by `ECOS_ACCESSORY_ID_MIN` (10000).
+- **Known-state cache**: `CommandRouter` keeps the best-known position per address (`MAX_KNOWN_ACCESSORIES`) from either direction, to answer a MultiMaus's accessory-info poll and Z21's `GET_TURNOUT_INFO`.
+- Real Ecos firmware implements the individual accessory-object commands even though the ESU spec marks that section "in planning".
+- There is no accessory expiry; entries persist for the session.
 
 ---
 
@@ -223,17 +141,17 @@ Without tracking all accessories, throttle displays and Ecos get out of sync:
 
 ### Initialization
 ```
-1. WiFi connect (SSID, password from config.h)
+1. WiFi connect (SSID/password and the bridge's static IP from EEPROM)
 2. Establish TCP connection to Ecos (IP:PORT)
 3. On success: Status = CONNECTED
 4. On failure: Status = ERROR (retry with backoff)
 ```
 
 ### Heartbeat & Keep-Alive
-- **Heartbeat interval**: 30 seconds (configurable, from config.h)
-- **Type**: Periodic empty query or "are you alive" message
-- **Purpose**: Detect dead connections early
-- **Failure**: Connection drops, status = DISCONNECTED, attempt reconnect
+- **Heartbeat interval**: 5 seconds (`ECOS_HEARTBEAT_INTERVAL`; originally 30 s, tightened after a hardware test on 2026-08-03)
+- **Type**: the `queryObjects(10, addr, name)` address-map query (a plain `get(10, ...)` is rejected by real Ecos), which also refreshes the map
+- **Watchdog**: no data received for `ECOS_MESSAGE_TIMEOUT` (10 s) closes the socket - the only way to notice an unplugged Ethernet cable, which sends no TCP reset
+- **Failure**: status = DISCONNECTED, address map cleared, reconnect with backoff
 
 ### Reconnect Strategy
 ```
@@ -243,17 +161,16 @@ Backoff 2: 10 sec
 Backoff 3: 20 sec
 Max: 60 sec (retry every 60 sec forever)
 
-Success: Reset to immediate for next reconnect
+Success: attempt counter reset
 ```
 
 ### Command Queueing During Disconnect
 ```
 If Ecos disconnected:
-  - XpressNet still works (command applied to state)
-  - Ecos command: Queue it (small circular buffer, 10 items)
-  - On reconnect: Flush queue to Ecos
-  
-If queue fills: Drop oldest items (prioritize recent)
+  - XpressNet and Z21 still work (command applied to state)
+  - Ecos command: queued per address via the pending-query table
+    (see "Pending Query Buffer" - upserted, MAX_PENDING_QUERIES = 5)
+  - On reconnect: address map rebuilt, then queue flushed to Ecos
 ```
 
 ---
@@ -310,12 +227,12 @@ int tcp_buffer_index = 0;
 while (available()) {
     uint8_t byte = read();
     tcp_buffer[tcp_buffer_index++] = byte;
-    
+
     if (complete_message(tcp_buffer, tcp_buffer_index)) {
         parse_and_route(tcp_buffer, tcp_buffer_index);
         tcp_buffer_index = 0;
     }
-    
+
     if (tcp_buffer_index >= MAX_TCP_BUFFER) {
         // Overflow - reset and log error
         tcp_buffer_index = 0;
@@ -324,9 +241,8 @@ while (available()) {
 ```
 
 ### Parsing
-- **Line-based** (if XML with newlines): Parse until `\n`
-- **Length-prefixed** (if binary): Read length, then payload
-- **Complete messages only**: Parse full XML, not fragments
+- **Line-based**: bytes are accumulated until `\n`; lines are grouped into `<REPLY>`/`<EVENT>` blocks that close with `<END code (text)>`
+- **Complete blocks only**: a block is parsed only once its `<END>` line has arrived (`EcosMessageParser`)
 
 ---
 
@@ -337,31 +253,26 @@ while (available()) {
 CommandRouter::handleXpressNetCommand(address, speed, dir)
   1. Create/get LocoState
   2. Update: speed, direction, last_source=XPRESSNET, last_update_ms=now
-  3. Send to Ecos immediately (via ecos_interface.sendSpeedCommand)
-  4. Record in outgoing queue
-  5. If unknown loco: start Ecos query
-  6. Return (don't broadcast to XpressNet—already applied)
+  3. Fan out immediately: Ecos (sendSpeedCommand) and every other
+     throttle protocol (Z21)
+  4. Record the attribution (address, source, timestamp)
+  5. If unknown loco: subscribe + paced baseline queries
 ```
 
 ### When Ecos Sends Update
 ```
 EcosInterface::handleEcosUpdate(address, speed, dir, functions)
-  1. Check outgoing queue: Is this our recent command?
-     - YES (< 2 sec): Suppress (echo), return
-     - NO: Continue
-  2. Get LocoState from state engine
-  3. Compare:
-     - If matches state: Ignore (no change)
-     - If differs: Broadcast to XpressNet (router.sendToXpressNet)
-  4. Merge into state (preserve speed from XpressNet, backfill missing data)
+  1. Merge into the LocoState (only the fields Ecos reported)
+  2. CommandRouter::broadcastCommand(ECOS): for each of XpressNet and Z21,
+     skip it only if wasRecentSource(address, thatProtocol)
 ```
 
-### Broadcast to XpressNet
+### Broadcast to throttles
 ```
-If Ecos state differs from our state:
-  Send update to all connected throttles (via XpressNetInterface)
+If the update was not attributed to that protocol:
+  Send update to all connected throttles (XpressNetInterface, Z21LanInterface)
   This keeps throttle displays in sync with Ecos
-  
+
 Example: Another throttle changed speed on Ecos console
   → Ecos sends update
   → We send speed change to all throttles via XpressNet
@@ -372,27 +283,7 @@ Example: Another throttle changed speed on Ecos console
 
 ## OLED Display Integration
 
-### Status Page
-Show:
-```
-Ecos: <status>     (CONNECTED / DISCONNECTED / ERROR)
-IP: <ip>:<port>    (e.g., "192.168.1.100:15471")
-Uptime: <minutes>  (time since bridge boot)
-Active locos: <count>
-```
-
-### Error Display
-- "Ecos connection failed" (red background if supported)
-- "WiFi disconnected"
-- "TCP timeout"
-
-### Do NOT Show
-- Individual loco sync status (too verbose, low priority)
-- Per-protocol state details (keep simple)
-
-### Refresh
-- Update on status changes (connection, disconnect)
-- Update every 5 seconds if connected (refresh IP/uptime)
+Ecos has its own OLED page (see [01_DESIGN_DOCUMENT.md](01_DESIGN_DOCUMENT.md) section 4): connection status, the configured Ecos IP, and the round-trip latency of the last heartbeat query/reply. Loco counts and uptime are on the main/device pages. Connection state is shown with hand-drawn icons (no Unicode glyphs). The OLED refreshes every 500 ms.
 
 ---
 
@@ -403,7 +294,7 @@ Active locos: <count>
 void EcosInterface::update() {
     // Phase 1: Check connection status
     updateConnectionStatus();
-    
+
     // Phase 2: Non-blocking TCP read
     while (wifi_client.available()) {
         if (processIncomingByte()) {
@@ -412,16 +303,14 @@ void EcosInterface::update() {
         }
         yield();  // Let WiFi stack run
     }
-    
+
     // Phase 3: Send heartbeat if needed
     if (heartbeat_timer.shouldExecute()) {
         sendHeartbeat();
     }
-    
-    // Phase 4: Process any pending commands
-    if (query_timer.shouldExecute()) {
-        processPendingQueries();
-    }
+
+    // Phase 4: Replay any queued commands once the object ID is resolved
+    flushPendingQueries();
 }
 // Total time: < 50ms (doesn't block XpressNet)
 ```
@@ -430,7 +319,7 @@ void EcosInterface::update() {
 - No `delay()`
 - No synchronous TCP waits
 - No parsing entire buffer at once (parse incrementally)
-- No disk/EEPROM I/O
+- No flash/EEPROM writes in the update path (settings are only saved from Setup Mode)
 
 ---
 
@@ -447,7 +336,7 @@ void EcosInterface::update() {
           → Still in state engine
 
 12:05:00  Loco 100 hasn't been updated in 5 minutes
-          → CommandRouter.expungeInactiveLocos() runs
+          → StateEngine::expungeInactiveLocos() runs (via CommandRouter::update())
           → Remove Loco 100 from state
           → Unsubscribe from Ecos
 
@@ -482,24 +371,24 @@ XpressNet behavior: UNAFFECTED
 
 ### TCP Connection Lost
 ```
-Detect: No heartbeat response for 10 seconds
+Detect: No data received for ECOS_MESSAGE_TIMEOUT (10 seconds)
   → Close connection
   → Status = DISCONNECTED
   → Start WiFi reconnect sequence
-  
+
 On reconnect:
   → Reestablish TCP to Ecos
-  → Flush any queued commands
-  → Resubscribe to all locos in state engine
+  → Rebuild the address map, then flush queued commands
+  → Resubscribe to locos as they next appear
 ```
 
 ### Ecos Unresponsive
 ```
-Query sent, no response for 5 seconds
+No data for ECOS_MESSAGE_TIMEOUT
   → Treat as connection loss
   → Close socket
   → Attempt reconnect
-  
+
 Pending commands:
   → Stay queued
   → Retry when Ecos comes back
@@ -509,31 +398,20 @@ Pending commands:
 
 ## Implementation Files
 
-### New Files
-- `protocols/ecos/ecos_interface.cpp` (~600 lines)
-  - TCP connection management
-  - XML message parsing
-  - Command queueing
-  - Heartbeat/keep-alive
-  
-- `protocols/ecos/ecos_message_parser.h/cpp` (~300 lines)
-  - XML parsing (simple, no external library)
-  - Extract address, speed, direction, functions
-  - Build outgoing commands
-
-### Modified Files
-- `command_router.cpp`: Add `handleEcosUpdate()`, `broadcastToXpressNet()`
-- `state_engine.h/.cpp`: Add accessory tracking (if separate from locos)
-- `xpressnet_ecos_bridge.ino`: Initialize Ecos interface, set router reference
-- `config.h`: Add Ecos timeouts, heartbeat interval, backoff params
-- `display/oled_display.cpp`: Add Ecos status page
+- `protocols/ecos/ecos_interface.h/.cpp` - TCP connection, address maps (loco and accessory), subscriptions, pending queues, heartbeat (hardware-coupled, not in the native build)
+- `protocols/ecos/ecos_message_parser.h/.cpp` - `<REPLY>`/`<EVENT>` framing and `key[value]` property extraction (native-tested)
+- `protocols/ecos/ecos_protocol.h/.cpp` - outgoing command builders: `request`, `set`, `get`, `queryObjects`, `release`, accessory `switch` (native-tested)
+- `command_router.cpp`, `state_engine.*`, `oled_display.cpp`, `config.h` carry the router, state and display sides
 
 ---
 
 ## Testing Strategy
 
-### Mock Ecos Server
-Create simple TCP server that:
+### Testing as built
+The native suite covers the parser, the command builders and the router (via a mock interface). The Ecos TCP behaviour was verified against a real Ecos; the mock Ecos server described below was not built. The cases listed are covered by the unit tests or by live hardware tests.
+
+### Original mock-server plan
+A simple TCP server that:
 - Accepts connection on port 15471
 - Responds to queries with canned data
 - Sends subscription updates for test addresses
@@ -547,7 +425,7 @@ Create simple TCP server that:
 5. **Accessory control**: Send accessory command, receive status confirmation
 6. **Loco expiry**: No XpressNet updates for 5 min, state removed, unsubscribe
 7. **Reconnect**: Lose connection, reconnect, queue flushed
-8. **Buffer overflow**: Large XML response, handle correctly without crash
+8. **Buffer overflow**: Large reply, handle correctly without crash
 
 ---
 
@@ -561,19 +439,18 @@ Create simple TCP server that:
 
 ---
 
-## Future Enhancements (Post-Phase 4)
+## Future Enhancements
 
 - Block occupancy/feedback from Ecos
 - Consist (double-header) support
 - Advanced function mapping
-- Speed step 128 (currently DCC 14-step)
 - Accessory feedback/sensing
-- WiFi credential storage in EEPROM
-- Web-based configuration UI
+
+(128-step speed, WiFi credentials in EEPROM and the web configuration UI, listed here originally, are implemented.)
 
 ---
 
-**Document Version**: 1.0  
-**Date**: 2026-07-22  
-**Author**: Claude + Frikkie  
-**Status**: Ready for implementation review
+**Document Version**: 1.1 (revised to match the implementation)
+**Date**: 2026-07-22 (revised 2026-10-11)
+**Author**: Claude + Frikkie
+**Status**: Implemented

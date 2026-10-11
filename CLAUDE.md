@@ -2,7 +2,7 @@
 
 **Project**: Model railway protocol bridge for ESP8266 (Wemos D1 Mini)  
 **Purpose**: Translate commands between XpressNet (hardwired RS485), Z21 LAN (UDP), LocoNet and ESU Ecos (WiFi TCP)  
-**Language**: C++ (Arduino IDE 1.8+)  
+**Language**: C++ (PlatformIO / Arduino framework)  
 **Target**: ESP8266 microcontroller (160MHz, 4MB Flash, 160KB RAM)
 
 > ℹ️ **How this file is maintained**: `CLAUDE.md` carries only what's pertinent to
@@ -619,15 +619,16 @@ Utilities          → Timing (non-blocking timers), Debug, Memory helpers
 
 **Command Router** (`command_router.h/cpp`)
 - Central hub routing commands between protocols
-- Manages echo prevention (500ms window)
+- Attributes Ecos confirmations to the throttle protocol that caused them (`wasRecentSource()`, 4s window) so a protocol never gets its own command echoed back
 - Handles unknown loco subscription requests to Ecos
-- Auto-broadcasts state changes to all active protocols
+- Fans every throttle command out immediately to Ecos and all other throttle-facing protocols; Ecos-originated changes fan out to all throttle protocols
+- Caches best-known accessory positions to answer throttle state queries
 
 **Protocol Interfaces** (inherit from `ProtocolInterface`)
 - **XpressNet** (`protocols/xpressnet/`): Master device on RS485, accepts throttle commands
 - **Ecos** (`protocols/ecos/`): TCP client over WiFi, text-based object protocol
-- **LocoNet** (`protocols/loconet/`): Future
-- **Z21** (`protocols/z21lan/`): Future
+- **Z21 LAN** (`protocols/z21lan/`): UDP server on port 21105 emulating a Z21 (WLANmaus); packet codec in `z21_protocol.*`, socket/session table in `z21lan_interface.*`
+- **LocoNet** (`protocols/loconet/`): stub header only, `ENABLE_LOCONET` = 0 (Phase 7 item 3)
 
 ### Configuration
 Single source of truth: **`config.h`**
@@ -651,7 +652,8 @@ All disabled features = zero compiled code overhead.
 - **Phase 3.2 (Ecos LAN Protocol)**: ✅ Complete (commit `4c3e0d6`, 2026-07-22). Full
   TCP text-protocol implementation - see Protocol Details below and
   `docs/02_PHASE_3_2_ECOS_DESIGN.md`.
-- **Phase 3.3 (LocoNet)** / **Phase 3.4 (Z21 LAN)**: Future, not started.
+- **Phase 3.3 (LocoNet)**: moved to Phase 7 item 3 - hardware built, firmware not started.
+- **Phase 3.4 (Z21 LAN)**: done as Phase 6 step 4 (confirmed live 2026-08-28).
 - **Phase 4.1-4.5 (Testing Infrastructure)**: ✅ Complete. Native build (MinGW-w64 +
   PlatformIO) established, Unity framework integrated, 111/111 tests passing at
   88.3% line / 96.6% function / 58.1% branch coverage across the 5 core modules
@@ -784,10 +786,22 @@ Note: `Adafruit_SSD1306::begin()` only fails on internal malloc failure, never o
 missing I2C device - so it logs "initialized successfully" even with nothing wired.
 Cosmetic only, not a bug worth fixing.
 
+### Setup Mode button
+```
+Pin: D7 (GPIO13) to GND, INPUT_PULLUP - hold 3s while running to enter Setup Mode
+```
+
+### LocoNet (planned - hardware on motherboard PCB, firmware not started)
+```
+TX: D3 (GPIO0)   RX: GPIO3 (hardware UART0 RX, shared with USB programming)
+```
+Per Gahtow's D1 Mini design (internal pull-ups). USB-serial upload and serial debug
+stop working while LocoNet is active - flash with the D1 pulled from its socket, or OTA.
+
 ### Serial Monitor (Debug)
 ```
 Baud: 115200 (DEBUG_BAUD in config.h)
-Use Arduino IDE Serial Monitor or compatible
+Use `python -m platformio device monitor` (DTR/RTS are disabled in platformio.ini so opening it does not reset the board) or any serial terminal
 ```
 
 ---
@@ -833,8 +847,9 @@ no Ecos dependency.
 - Bus-wide emergency stop (Notaus/track power) is a separate broadcast the library
   surfaces via `notifyXNetPower(state)`. The master acknowledges it back onto the
   bus (`onPowerStateChange()` → `xnet.setPower(state)`) - this is what fixes the
-  MultiMaus STOP-button display freeze. It does **not** yet force any locomotives
-  to actually stop moving (Phase 5 step 2).
+  MultiMaus STOP-button display freeze. Since Phase 5 step 2 it also forces every
+  known loco to speed 0 and tells Ecos (single system-wide `stop`), in both
+  directions; resuming never restores previous speeds.
 
 ### Ecos (Phase 3.2 - Complete)
 
@@ -844,10 +859,14 @@ an earlier assumption in this doc was wrong; corrected 2026-07-22).
 `<EVENT>`/`<REPLY>`/`<END>` block framing in.
 **Addressing**: DCC address ↔ Ecos object ID mapping via `queryObjects(10, addr, name)`.
 **Lifecycle**: subscribe on first XpressNet command for an address, unsubscribe after
-5 minutes of inactivity, auto-resubscribe on next update. Heartbeat query every 30s.
-**Echo prevention**: circular queue, 10 entries, 2-second window (accounts for TCP
-latency, longer than XpressNet's 500ms window).
-**Scope**: locomotives only (accessories deferred until XpressNet supports them).
+5 minutes of inactivity, auto-resubscribe on next update. Heartbeat (address-map
+query) every 5s, dead-link watchdog 10s, reconnect backoff 5/10/20/60s.
+**Echo prevention**: a single last-command attribution record in `CommandRouter`
+(address, type, source, timestamp); `wasRecentSource()` skips only the destination
+protocol that originated the command, within `ECOS_ECHO_ATTRIBUTION_WINDOW_MS`
+(4s - Ecos's real confirmation latency under load). The original circular-queue
+design was replaced in Phase 6 step 4.
+**Scope**: locomotives and accessories (Phase 5 step 10 / Phase 7 steps 1-2).
 Full design: `docs/02_PHASE_3_2_ECOS_DESIGN.md`.
 
 ---
@@ -876,17 +895,7 @@ Full design: `docs/02_PHASE_3_2_ECOS_DESIGN.md`.
 
 ### Testing XpressNet Messages
 
-Mock throttle messages for testing:
-```cpp
-// Simulate throttle sending speed 64 forward to loco 100
-uint8_t msg[4] = {0x00, 100, 0x40, 0x40 ^ 0x00 ^ 100};  // checksum
-Serial1.write(msg, 4);
-```
-
-Verify with debug output:
-```
-DEBUG_XNET_PRINTF("XpressNet RX: Speed - Addr=%u Speed=%u Dir=%u\n", ...)
-```
+XpressNet framing and parsing belong to the vendored XpressNetMaster library, so there is no byte-level mock to write: the bridge's own logic is tested natively through `CommandRouter` and `MockProtocolInterface`, and the wire side is verified on the real bus with a MultiMaus. Never add `Serial.printf` inside the library's bus-dispatch path - it breaks XpressNet timing (confirmed live, err13). Log from the interface callbacks in `xpressnet_interface.cpp` instead, e.g. via `DEBUG_XPRESSNET`-guarded prints.
 
 ---
 
@@ -894,11 +903,9 @@ DEBUG_XNET_PRINTF("XpressNet RX: Speed - Addr=%u Speed=%u Dir=%u\n", ...)
 
 ### Compiling & Uploading
 
-1. Open `xpressnet_ecos_bridge.ino` in Arduino IDE
-2. Board: "LOLIN(WEMOS) D1 R2 & mini" (ESP8266)
-3. Port: COM port of Wemos D1 Mini (USB)
-4. Verify build: Sketch → Verify/Compile
-5. Upload: Sketch → Upload
+1. Build: `python -m platformio run -e wemos`
+2. Upload over USB: `python -m platformio run -e wemos -t upload` (board `d1_mini`, 921600 baud), or over the air via Setup Mode's `/update` page
+3. Real Wi-Fi credentials must exist in `xpressnet_ecos_bridge/wifi_credentials.local.h` (gitignored) or the build stops with an `#error`
 
 ### Debugging
 
@@ -939,8 +946,13 @@ xpressnet_ecos_bridge/
 ├── xpressnet_ecos_bridge.ino          Main sketch entry point
 ├── config.h                            User-facing configuration (ONLY file users edit)
 ├── definitions.h                       Global types, enums, constants
+├── version.h                           FIRMWARE_VERSION (single source of truth)
 ├── state_engine.h/.cpp                 Loco state management (50 locos max)
-├── command_router.h/.cpp               Protocol bridging & echo prevention
+├── command_router.h/.cpp               Protocol bridging & echo attribution
+├── eeprom_config.h/.cpp                Persisted settings (pure logic, native-tested)
+├── eeprom_store.h/.cpp                 EEPROM.h load/save (Arduino only)
+├── setup_web_form.h/.cpp               Setup/update page HTML + validation (native-tested)
+├── setup_mode.h/.cpp                   Setup Mode AP, web server, OTA, button, Wi-Fi fallback
 │
 ├── interfaces/
 │   └── interface_base.h                Abstract base classes for protocols
@@ -951,23 +963,30 @@ xpressnet_ecos_bridge/
 │   │                                    parsing/framing lives in the library)
 │   │
 │   ├── ecos/
-│   │   └── ecos_interface.h            TCP text-protocol implementation
+│   │   ├── ecos_interface.h/.cpp       WiFi TCP client, address maps, queues
+│   │   ├── ecos_message_parser.h/.cpp  <REPLY>/<EVENT> framing + property parsing
+│   │   └── ecos_protocol.h/.cpp        Outgoing command builders
 │   │
 │   ├── loconet/
-│   │   └── loconet_interface.h         Future
+│   │   └── loconet_interface.h         Stub (Phase 7 item 3)
 │   │
 │   └── z21lan/
-│       └── z21lan_interface.h          Future
+│       ├── z21lan_interface.h/.cpp     WiFiUDP socket + client session table
+│       └── z21_protocol.h/.cpp         Packet encode/decode (native-tested)
 │
 ├── display/
-│   └── oled_display.h                  I2C OLED driver
+│   ├── oled_display.h                  I2C OLED driver
+│   └── boot_logo.h                     Boot splash bitmap
 │
 ├── oled_display.cpp                    OLED implementation
 │
 ├── utils/
 │   ├── timing.h                        Non-blocking TimedTask class
+│   ├── now_ms.h                        Time source (mockable in tests)
 │   ├── debug.h                         DEBUG_PRINTF macro
 │   └── memory.h                        ESP8266 memory utilities
+│
+├── test_support/                       Native-build stubs only (excluded from firmware)
 │
 ├── docs/
 │   ├── 01_DESIGN_DOCUMENT.md          Full architecture specification
@@ -979,7 +998,7 @@ xpressnet_ecos_bridge/
 │   ├── 05_COMPILATION_FIX_COMPLETE.md Final verification (reference)
 │   └── CHANGELOG.md                   Dated session history (see note at top of this file)
 │
-├── tests/                              [Placeholder for Phase 4 unit tests]
+├── test/                               Native unit tests (Unity), mocks, fixtures - see test/README.md
 ├── libraries/                          External libs (PlatformIO lib_extra_dirs)
 │   └── XpressNetMaster/                 Gahtow's real XpressNet master library
 └── README.md                           User-facing overview
@@ -996,7 +1015,7 @@ Embedded systems with limited RAM need predictable memory usage. Static allocati
 Features not enabled = zero compiled code overhead. A disabled protocol costs nothing. Supports multiple hardware configurations with same codebase.
 
 ### Why Echo Prevention at Router Level?
-All protocols route through router, so a single check prevents loops. Simpler than implementing per-protocol. 500ms window works for all tested scenarios.
+All protocols route through the router, so one attribution record (not per-protocol logic) decides who must not be sent a confirmation of their own command. The window was 500ms originally and had to grow to 4s (`ECOS_ECHO_ATTRIBUTION_WINDOW_MS`) once real Ecos confirmation latency under load was measured.
 
 ### Why Fixed 62500 Baud XpressNet?
 This is the real Lenz XpressNet wire rate (8 data bits + a parity bit used as the 9th
@@ -1020,7 +1039,7 @@ rather than completed, since it served no design purpose.
 ## When Working with Claude Code
 
 - **Always read the current code first**: Don't assume design docs match current reality
-- **Respect the 500ms echo window**: Tests timing-sensitive to this value
+- **Respect the echo attribution window** (`ECOS_ECHO_ATTRIBUTION_WINDOW_MS`, 4s): router tests are timing-sensitive to it
 - **Non-blocking is non-negotiable**: Main loop MUST yield to ESP8266 WiFi stack
 - **Test on hardware**: Simulator can't verify serial timing or WiFi connectivity
 - **One protocol per PR**: Don't mix XpressNet + Ecos in single change
@@ -1057,8 +1076,8 @@ rather than completed, since it served no design purpose.
 - **DCC Standard**: NMRA S-9.1 (loco addressing, speed steps)
 - **Ecos Protocol**: ESU documentation (text-based object protocol, subscription model)
 - **ESP8266 Constraints**: 160MHz single-core, WiFi pre-empts timing
-- **Echo Prevention**: Queue-based (10-item buffer, 2-sec window for TCP latency)
-- **State Engine**: Truth table (XpressNet priority, Ecos backfill)
+- **Echo Prevention**: single last-command attribution record, 4s window (`wasRecentSource()`)
+- **State Engine**: Truth table; partial Ecos updates merge only the fields reported
 
 ---
 
@@ -1571,18 +1590,16 @@ real needs come up rather than pre-committing to a fixed scope.
      deferred as its own low-priority follow-up (Phase 7, new item 6
      below), not blocking anything else.
 3. ⬜ **LocoNet support** - parallel to XpressNet, carried over from
-   Phase 6 step 5. **Status as of 2026-09-23**: the LocoNet interface
-   hardware is now built onto the project's motherboard PCB (pins per
-   Philipp Gahtow's own ESP32 reference design - not yet cross-checked
-   against what an ESP8266/D1 Mini build actually needs, since this
-   project stays on ESP8266 for now, see "MCU Platform" below) - but
-   **still blocked on a working throttle to test against**: the user's
-   real Digitrax throttle is currently misplaced (last used at a model
-   railway club, location unknown). A basic fallback exists if needed to
-   at least start on - a Digitrax UT4D (manual speed knob, direction
-   toggle, F0-F12 only, no display/feedback of any kind) - but real
-   testing needs the proper throttle found first. Don't start
-   implementation until a throttle is actually in hand.
+   Phase 6 step 5. **Status as of 2026-10-11**: pins confirmed against
+   Philipp Gahtow's D1 Mini LocoNet design (TX D3/GPIO0, RX GPIO3 - see
+   Hardware Configuration). The first assembled LocoNet section had a PCB
+   error (a KiCad auto-connection after track rearrangement tied R6 to the
+   permanent 5V rail; a transistor overheated within seconds of power-up) -
+   board design corrected and re-verified, **new boards ordered from PCBWay**
+   (2026-10-11), so no LocoNet hardware is usable until they arrive. The
+   user's own Digitrax throttle is lost; a **UT6** (has a display, so
+   other-throttle changes are visible) is on order. Don't start
+   implementation until a board and a throttle are both in hand.
    - **Design decision agreed 2026-09-23, before any implementation**:
      LocoNet's real select/steal/dispatch slot-ownership model (a
      throttle must actively select or steal a loco's slot before
@@ -1676,7 +1693,7 @@ real needs come up rather than pre-committing to a fixed scope.
 
 ---
 
-**Last Updated**: 2026-08-31. **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-10-11 (docs/code alignment audit; status unchanged since v1.4.0 - see Phase 7 item 3 for LocoNet hardware status). **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,

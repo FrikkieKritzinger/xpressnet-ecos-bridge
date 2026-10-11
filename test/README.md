@@ -7,19 +7,26 @@ Comprehensive unit test suite for the XpressNet-Ecos Bridge project. Tests are d
 ## Directory Structure
 
 ```
-tests/
+test/
 ├── README.md                              This file
-├── test_ecos_parser.cpp                   Ecos text protocol parsing tests
-├── test_ecos_command_builder.cpp          Ecos command generation tests
-├── test_state_engine.cpp                  Loco state management tests
-├── test_command_router.cpp                Protocol bridging and echo prevention tests
+├── test_state_engine/                     Loco state management tests
+├── test_command_router/                   Protocol bridging, echo attribution, accessories, E-stop
+├── test_ecos_parser/                      Ecos text protocol parsing tests
+├── test_ecos_command_builder/             Ecos command generation tests
+├── test_z21_protocol/                     Z21 packet encode/decode (incl. spec worked examples)
+├── test_eeprom_config/                    Persisted-settings struct, defaults, checksum, validation
+├── test_setup_web_form/                   Setup/update page HTML and field validation
 ├── mocks/
-│   ├── mock_protocol_interface.h          Mock protocol interface for testing router
-│   ├── mock_now_ms.h                      Mock time control header
-│   └── mock_now_ms.cpp                    Mock time implementation
+│   ├── mock_protocol_interface.h          Mock protocol interface for testing the router
+│   └── mock_now_ms.h                      Mock time control (implementation: xpressnet_ecos_bridge/test_support/mock_now_ms.cpp)
+├── native_stubs/
+│   ├── Arduino.h                          Stand-in <Arduino.h> (Serial/ESP/millis stubs)
+│   └── arduino_stub.cpp
 └── fixtures/
     └── ecos_responses.h                   Valid/invalid Ecos text protocol responses
 ```
+
+PlatformIO 6 hard-codes the test directory to `test/` and expects one directory per suite (`test_*`); there is no `test_dir` option.
 
 XpressNet parsing is no longer unit-tested here - it's owned by the real
 XpressNetMaster library (`libraries/XpressNetMaster`), which `xpressnet_interface.cpp`
@@ -92,7 +99,7 @@ int main(void) {
 
 ## Test Categories
 
-### 1. Ecos Parser Tests (`test_ecos_parser.cpp`)
+### 1. Ecos Parser Tests (`test_ecos_parser`)
 - Text protocol parsing (key[value] extraction)
 - Line accumulation (byte-by-byte input)
 - Reply/Event framing
@@ -101,14 +108,14 @@ int main(void) {
 
 **Key Fixtures**: `ecos_responses.h`
 
-### 2. Ecos Command Builder Tests (`test_ecos_command_builder.cpp`)
+### 2. Ecos Command Builder Tests (`test_ecos_command_builder`)
 - Speed command generation
 - Function command generation
 - Query command generation
 - Subscribe/unsubscribe commands
 - Input validation and bounds checking
 
-### 3. State Engine Tests (`test_state_engine.cpp`)
+### 3. State Engine Tests (`test_state_engine`)
 - Loco addition and updates
 - Loco expiry (5-minute timeout)
 - Address lookup
@@ -117,14 +124,26 @@ int main(void) {
 
 **Key Mock**: `mock_now_ms.h/cpp`
 
-### 4. Command Router Tests (`test_command_router.cpp`)
-- Protocol bridging (XpressNet ↔ Ecos)
-- Echo prevention (500ms window, circular queue)
+### 4. Command Router Tests (`test_command_router`)
+- Protocol bridging (XpressNet ↔ Ecos ↔ Z21)
+- Echo attribution (`wasRecentSource()`, 4 s window), per-destination fan-out
+- Accessory/turnout routing and known-state cache, emergency stop/resume
 - Subscription lifecycle
 - Multi-throttle consistency
 - Multi-interface routing
 
 **Key Mock**: `mock_protocol_interface.h`, `mock_now_ms.h`
+
+### 5. Z21 Protocol Tests (`test_z21_protocol`)
+- Checksum, address/speed/function encode-decode, packet builders
+- Byte-for-byte checks against the worked examples in the official Z21 LAN spec v1.13
+- Turnout command decode (field order, Q bit)
+
+### 6. EEPROM Config Tests (`test_eeprom_config`)
+- Defaults seeding, checksum validation, version mismatch, completeness check (`eepromConfigIsComplete()`)
+
+### 7. Setup Page Tests (`test_setup_web_form`)
+- Config and update page HTML generation, field parsing and validation (IPs, timeouts in seconds -> ms)
 
 ## Mocks & Fixtures
 
@@ -207,7 +226,7 @@ void test_echo_suppression(void) {
     router.handleXpressNetSpeedCommand(100, 64, 1);
     TEST_ASSERT_EQUAL_INT(ecos.getSpeedCommandCount(), 1);
     
-    // Simulate echo within 500ms window
+    // Simulate Ecos's confirmation inside the attribution window (ECOS_ECHO_ATTRIBUTION_WINDOW_MS)
     router.handleEcosSpeedCommand(100, 64, 1);
     TEST_ASSERT_EQUAL_INT(ecos.getSpeedCommandCount(), 1);  // Not incremented
 }
@@ -235,29 +254,10 @@ platformio test -e native --verbose
 
 ## Status
 
-### Completed (Phase 4.2: Test Scaffold)
-- ✅ Directory structure created
-- ✅ MockProtocolInterface implemented
-- ✅ Mock time (mock_now_ms) implemented
-- ✅ Test fixture data created (XpressNet & Ecos)
-- ✅ Test file templates created (5 core tests)
-
-### Pending (Phase 4.3-4.5: Unit Test Implementation)
-- ⏳ Implement actual test cases in each test file
-- ⏳ Configure Unity framework in platformio.ini
-- ⏳ Run tests and fix failures
-- ⏳ Achieve 90%+ code coverage
-
-## Next Steps
-
-1. **Phase 4.3**: Implement XpressNet parser tests
-2. **Phase 4.4**: Implement Ecos and command builder tests
-3. **Phase 4.5**: Implement state engine and router tests
-4. **Phase 4.6**: Add integration tests (multiple protocols together)
-5. **Phase 4.7**: Hardware procedures (manual test on real ESP8266 + XpressNet bus)
+All suites are implemented and passing: **287 tests** in 7 suites (`python -m platformio test -e native`). Hardware-coupled files (`ecos_interface.cpp`, `xpressnet_interface.cpp`, `z21lan_interface.cpp`, `eeprom_store.cpp`, `setup_mode.cpp`, the OLED code) are excluded from the native build - see `platformio.ini` - and are verified on the real board instead. Release history and what each live test found: [../docs/CHANGELOG.md](../docs/CHANGELOG.md).
 
 ## References
 
 - [Unity Test Framework Docs](http://www.throwtheswitch.org/unity)
 - [PlatformIO Testing](https://docs.platformio.org/en/latest/frameworks/arduino.html#testing)
-- Test Design: `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`
+- Original test plan (with a status note): `docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md`

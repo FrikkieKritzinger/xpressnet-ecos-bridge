@@ -1,902 +1,208 @@
 # XpressNet-Ecos Bridge - Architecture & Design Document
 
-**Project Status:** Pre-Implementation Design Phase  
-**Target Platform:** Wemos D1 Mini (ESP8266)  
-**Scope:** Learn from Gahtow's Z21 architecture, build fresh modular codebase  
-**Version:** 0.1 (Design Phase)
+**Target Platform:** Wemos D1 Mini (ESP8266)
+**Status:** Implemented and running on real hardware (firmware version in `xpressnet_ecos_bridge/version.h`)
+**Document revision:** 2026-10-11 - rewritten from the original Phase 1 design to match the code as built and tested. Where the original design and reality diverged (pins, baud rate, Ecos wire format, persistence, Z21), this document follows the code. Dated history of how it got here is in [CHANGELOG.md](CHANGELOG.md); the day-to-day working summary is [../CLAUDE.md](../CLAUDE.md).
 
 ---
 
-## 1. Executive Summary
+## 1. Purpose
 
-### Problem Statement
-- Current POC can receive XpressNet commands but cannot bridge to Ecos LAN protocol
-- Existing Z21 codebase is complex and difficult to extend for Ecos integration
-- Need modular, timing-aware architecture that respects XpressNet's strict protocol requirements
+Several model-railway control protocols have to control the same locomotives and accessories at once, with every device seeing every change:
 
-### Solution Approach
-- Design modular component architecture inspired by Gahtow's patterns
-- Implement fresh codebase (not forked from Z21)
-- Use proven XpressNet Master Library (Gahtow's)
-- Create protocol-agnostic state engine
-- Compile-time configuration for modularity
-- Local-only, learning-focused implementation
+- **XpressNet** (hardwired RS485) - Roco MultiMaus and other Lenz-style throttles
+- **Z21 LAN** (UDP over WiFi) - Roco WLANmaus and Z21 apps
+- **ESU Ecos** (TCP over WiFi) - the command station that actually drives the track
+- **LocoNet** - planned (Phase 7); hardware is built, firmware not started
 
-### Key Design Goals
-1. **Modularity:** Add/remove protocols via config.h toggles
-2. **Timing Integrity:** Respect XpressNet's strict timing requirements
-3. **Clarity:** Fresh, readable codebase easier to understand and extend
-4. **Flexibility:** Extensible to LocoNet, Z21 LAN in future
-5. **Learning:** Educational value - understand protocol implementation
+The bridge is the XpressNet *master*, a Z21 *server*, and an Ecos *client*. Ecos is the only required device and the source of truth; the bridge keeps no persistent loco state of its own.
+
+### Design goals
+
+1. **Modularity** - protocols are compile-time toggles in `config.h`; a disabled protocol compiles to nothing.
+2. **Timing integrity** - XpressNet polling is time-critical and always runs first; nothing in the main loop blocks.
+3. **One path for every command** - any throttle command goes to Ecos *and* every other throttle-facing protocol. No protocol owns a locomotive exclusively.
+4. **Testable core** - routing, state and wire-protocol encoding are hardware-independent and unit-tested natively; only thin `*_interface.cpp` glue touches hardware.
+5. **Readable** - fixed-size static allocation, small files, explicit comments for non-obvious protocol facts.
 
 ---
 
-## 2. Architectural Overview
+## 2. Architecture
 
-### 2.1 Layered Architecture
+### 2.1 Layers
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                        │
-│  (State Engine, Bridge Logic, Command Routing)              │
-└───────────────┬──────────────────┬──────────────────────────┘
-                │                  │
-      ┌─────────┴────────┐    ┌────┴──────────────┐
-      │  Protocol Layer  │    │  Hardware Layer   │
-      └─────────┬────────┘    └────┴──────────────┘
-                │                  │
-    ┌───────────┼───────────┐      │
-    │           │           │      │
-┌───┴──┐  ┌────┴────┐  ┌───┴──┐   │
-│XNet  │  │ Ecos    │  │Z21   │   │
-│Master│  │ LAN     │  │ LAN   │   │
-└──────┘  └─────────┘  └───────┘   │
-    │           │           │      │
-    └───────────┼───────────┴──────┘
-                │
-      ┌─────────┴──────────┐
-      │  Interface Layer   │
-      │  (Serial, TCP/IP)  │
-      └────────────────────┘
-                │
-      ┌─────────┴──────────┐
-      │  Hardware Layer    │
-      │  (MAX485, Ethernet)│
-      └────────────────────┘
+ Application   StateEngine (loco state)     CommandRouter (routing, fan-out, echo attribution,
+                                            accessory-state cache)
+                       │                              │
+ Protocol      XpressNetInterface   EcosInterface   Z21LanInterface   (LocoNetInterface: stub)
+                       │                 │                │
+ Transport     Gahtow XpressNetMaster   WiFiClient (TCP)   WiFiUDP
+               SoftwareSerial 62500 baud   :15471             :21105
+                       │
+ Hardware      MAX485 (RS485)          ESP8266 WiFi
+
+ Display       OledDisplay (SSD1306 128x64, I2C)      Persistence   EEPROM (eeprom_config/store)
+ Setup Mode    AP + web form + OTA (setup_mode, setup_web_form)
 ```
 
-### 2.2 Module Organization
+### 2.2 Source layout
+
+See [03_FILE_MANIFEST.md](03_FILE_MANIFEST.md) for the file-by-file list. In outline:
 
 ```
 xpressnet_ecos_bridge/
-├── config.h                          # Compile-time configuration
-├── main.ino                          # Arduino entry point
-├── definitions.h                     # Global types & constants
-├── state_engine.h / .cpp             # Locomotive state management
-├── command_router.h / .cpp           # Command translation & routing
-│
-├── interfaces/                       # Hardware abstraction layer
-│   ├── interface_base.h              # Abstract interface class
-│   └── (protocol implementations)
-│
-├── protocols/                        # Protocol implementations
-│   ├── xpressnet/
-│   │   ├── xpressnet_interface.h
-│   │   └── xpressnet_interface.cpp
-│   ├── ecos/
-│   │   ├── ecos_interface.h
-│   │   └── ecos_interface.cpp
-│   ├── loconet/                      # (Future)
-│   │   ├── loconet_interface.h
-│   │   └── loconet_interface.cpp
-│   └── z21lan/                       # (Future)
-│       ├── z21lan_interface.h
-│       └── z21lan_interface.cpp
-│
-├── display/                          # Display drivers
-│   ├── display_base.h
-│   └── oled_display.h / .cpp
-│
-├── utils/                            # Utility functions
-│   ├── timing.h                      # Non-blocking timing utilities
-│   ├── debug.h                       # Debug logging
-│   └── memory.h                      # Memory utilities
-│
-├── libraries/                        # External libraries (git submodules)
-│   └── XpressNetMaster/              # Gahtow's XpressNet library
-│
-└── tests/                            # Unit tests (future)
-    └── test_state_engine.cpp
+├── xpressnet_ecos_bridge.ino      setup()/loop()
+├── config.h  version.h  definitions.h
+├── state_engine.*  command_router.*
+├── eeprom_config.*  eeprom_store.*  setup_mode.*  setup_web_form.*
+├── oled_display.cpp  display/
+├── interfaces/interface_base.h
+├── protocols/{xpressnet,ecos,z21lan,loconet}/
+└── utils/
 ```
+
+### 2.3 The `ProtocolInterface` contract
+
+Every protocol implements `ProtocolInterface` (`interfaces/interface_base.h`):
+
+| Method | Meaning |
+|--------|---------|
+| `begin()` / `update()` | Initialise; non-blocking per-loop work |
+| `sendSpeedCommand(addr, speed, dir)` | Push a speed/direction change out to this protocol's devices |
+| `sendFunctionCommand(addr, functions)` | Push a full F0-F31 bitmap |
+| `sendAccessoryCommand(addr, diverging)` | Accessory/turnout command (default no-op) |
+| `getStatus()` / `getName()` | `ComponentStatus` and display name |
+| `subscribeToLoco()` / `unsubscribeFromLoco()` | Ecos-only; no-op elsewhere |
+| `sendEmergencyStop()` / `sendResumeOperation()` | System-wide stop/go where the protocol has one |
+| `pushLocoStateToOwningSlot()` | XpressNet-only: refresh a throttle's "stolen" display |
+| `getLastMessageAgeMs()` / `getLastHeartbeatLatencyMs()` | Optional OLED values; `NO_TIMESTAMP` when unknown |
+
+Interfaces call *into* the router (`router->handleXpressNetCommand()`, `handleEcosCommand()`, `handleZ21Command()` and their function/accessory siblings); the router calls *out* through the `send*` methods above. Interfaces are static objects created in the `.ino`; there is no dynamic allocation anywhere.
+
+### 2.4 Main loop and timing
+
+`loop()` order, highest priority first:
+
+1. `xnet_interface.update()` - call-byte polling has a ~20-50 ms window
+2. `ecos_interface.update()`, `z21_interface.update()` (and LocoNet when it exists)
+3. Setup-button and Wi-Fi-fallback checks; periodic loco expiry (`LOCO_EXPIRY_CHECK_INTERVAL`)
+4. OLED refresh (`OLED_UPDATE_INTERVAL`, 500 ms)
+5. `yield()` for the ESP8266 Wi-Fi stack
+
+If the device booted into **Setup Mode** (see 2.7) `loop()` only services the setup server; normal bridging and Setup Mode are mutually exclusive within one boot.
+
+Rules that follow from this: no `delay()` in `update()` paths; no slow debug output (`Serial.printf`) in bus hot paths (it demonstrably breaks XpressNet timing); blocking network calls are bounded (the Ecos TCP connect timeout is 300 ms because the default 5 s froze XpressNet polling).
+
+### 2.5 State engine
+
+`StateEngine` holds up to `MAX_LOCOS` (50) `LocoState` entries: DCC address, speed 0-126, direction, F0-F31 bitmap, last source, last-update time, and whether the loco is subscribed on Ecos. Entries expire after `loco_inactivity_timeout` (default 5 minutes, EEPROM-configurable) with no activity from any source; expiry also unsubscribes from Ecos. Nothing is persisted - after a reboot the table rebuilds from live traffic and Ecos retains the real state.
+
+### 2.6 Command routing and echo attribution
+
+`CommandRouter` is the single hub.
+
+- **Throttle-facing protocol → everyone else.** A command from XpressNet or Z21 updates `StateEngine` and fans out immediately to Ecos *and* to every other throttle-facing protocol in the same call. The other-throttle leg does not wait for Ecos to confirm (an earlier design that did was fragile and was replaced).
+- **Ecos → throttles.** Ecos confirmations/events for subscribed locos fan out to XpressNet and Z21, except back to the protocol that most recently sent that same address (`wasRecentSource()`, window `ECOS_ECHO_ATTRIBUTION_WINDOW_MS` = 4 s). The router keeps a single "last command" attribution record (address, command type, source, timestamp) - not a command queue.
+- **Partial updates are merged**, not overwritten: an Ecos event reporting only speed does not reset direction, and one reporting one function changes only that bit (`has_speed`/`has_direction`, `functions_mask`).
+- **No incoming-side echo gate.** XpressNet's polled bus and Z21's UDP client/server have no physical echo path, so incoming commands are never dropped as "echoes".
+- **Emergency stop / track power** is bidirectional: from a throttle, all known locos are zeroed and Ecos receives its single system-wide `stop`; from Ecos, throttles are told to stop. Resuming never restores previous speeds.
+- **Accessories**: a throttle's turnout command goes to Ecos (`set(11, switch[...])`); Ecos accessory events go to XpressNet and Z21. The router caches the best-known position per address (`MAX_KNOWN_ACCESSORIES`) to answer on-demand state queries from throttles.
+- **Stolen-icon refresh (XpressNet).** A plain broadcast makes a MultiMaus flash "stolen" without refreshing its display. For Ecos-sourced changes the router also calls `pushLocoStateToOwningSlot()`, which reproduces the call-byte-then-reply sequence a real throttle's own transmission has (F0-F12 and speed/direction; turnouts have the analogous `PushExternalTurnoutUpdate()`).
+
+### 2.7 Persistence, Setup Mode and OTA
+
+Settings that vary per installation live in EEPROM (`eeprom_config`/`eeprom_store`, magic + version + checksum): Wi-Fi SSID/password, Ecos IP, the bridge's own **static** IP/gateway/subnet (mandatory, no DHCP - Z21 clients cannot discover the bridge, so it must be at a known address), the XpressNet bus timeout and the loco inactivity timeout. `config.h` supplies only the seed defaults.
+
+**Setup Mode** is a separate operating mode (open AP `XNetBridge-Setup`, web form on port 80). It is entered when the EEPROM is blank/invalid/incomplete, when the pushbutton on D7/GPIO13 is held 3 s, or after 5 minutes of continuous Wi-Fi loss. Reboot-to-apply is signalled through ESP8266 RTC user memory (one-shot, no flash write). The same server exposes `/update`, an OTA firmware upload using the standard `ESP8266HTTPUpdateServer`; a failed upload only affects the staging region and cannot damage the running image.
 
 ---
 
-## 3. Design Patterns & Architecture Decisions
+## 3. Protocol specifics
 
-### 3.1 Modular Component System
+### 3.1 XpressNet (master)
 
-**Pattern: Compile-Time Feature Toggles via config.h**
+Framing, checksums, call-byte arbitration and the 9th-bit handling are owned by Philipp Gahtow's **XpressNetMaster** library (vendored in `libraries/XpressNetMaster/`, with local additions for pushing external loco/turnout updates). `xpressnet_interface.cpp` only translates its callbacks to and from `CommandRouter`.
 
-```cpp
-// config.h - User Configuration
-#define ENABLE_XPRESSNET    1
-#define ENABLE_ECOS_LAN     1
-#define ENABLE_LOCONET      0
-#define ENABLE_Z21_LAN      0
-#define ENABLE_OLED_DISPLAY 1
+- **Wire**: 62500 baud, 8 data bits + parity bit used as the 9th "call byte" marker, 1 stop bit (`SWSERIAL_8S1`), half-duplex RS485 through a MAX485. This is the real Lenz XpressNet rate - not changeable.
+- **Pins**: data on **D6/GPIO12** (SoftwareSerial RX and TX share the one pin; the MAX485's DI and RO are tied together), direction control on **D0/GPIO16** (DE and RE tied together, HIGH = transmit). This is the wiring of Gahtow's Z21 command station, and the library's ESP8266 example calls `setup(Loco128, D6, D0)`.
+- **128 speed steps** are declared to throttles; 14/27/28-step inputs are rescaled to the internal 0-126 range.
+- **Functions** arrive fragmented (F0-F4, F5-F8, F9-F12, F13-F20, F21-F28); each fragment is merged into the loco's full bitmap before routing.
+- **Addresses**: short 1-99, long 100-9999. Accessory addresses on the wire are `turnout_number - 1`; the interface corrects this by +1.
+- **Bus timeout**: with no received message for `xnet_bus_timeout` (default 120 s) status drops to DISCONNECTED. Lenz polling has no "nothing to report" reply, so an idle throttle is legitimately silent for long periods.
+- A MultiMaus uses its own combined loco-info request (`0xF0`) rather than the standard `0x00`+`0x09` pair; both are answered.
 
-#define XPRESSNET_RX_PIN    13  // D7
-#define XPRESSNET_TX_PIN    15  // D8
-#define XPRESSNET_DE_PIN    14  // D5
-#define XPRESSNET_RE_PIN    12  // D6
+### 3.2 Ecos LAN
 
-#define ECOS_IP             "192.168.1.100"
-#define ECOS_PORT           15471
+Plain-text, line-based object protocol over TCP port **15471** (not XML - an early design assumption that was wrong). Replies/events are framed `<REPLY …>` / `<EVENT id>` … `<END code (text)>`. Authoritative reference: `docs/ecos_pc_interface3.pdf` (gitignored). Detailed design: [02_PHASE_3_2_ECOS_DESIGN.md](02_PHASE_3_2_ECOS_DESIGN.md).
 
-#define OLED_SDA_PIN        4   // D2
-#define OLED_SCL_PIN        5   // D1
-```
+- Locomotives: `queryObjects(10, addr, name)` maps DCC address ↔ Ecos object ID; `request(id, view)` subscribes; `set(id, speed[n])`, `set(id, dir[n])`, `set(id, func[n,v])` command. The direction property is `dir`. Direction is sent before speed (DCC decoders receive both in one packet).
+- Accessories: `set(11, switch[DCC<addr><r|g>])` addressed directly at the accessory manager (r = straight, g = diverging); Ecos accessory objects are discovered with `queryObjects(11, addr)` and subscribed per object.
+- System: object 1 is subscribed for stop/go; `set(1, stop)` / `set(1, go)`.
+- Heartbeat: the address-map query (`queryObjects(10, addr, name)`) doubles as the keep-alive, sent every `ECOS_HEARTBEAT_INTERVAL` (5 s) on top of the full refresh every 10 minutes; no data for `ECOS_MESSAGE_TIMEOUT` (10 s) is treated as a dead connection (an unplugged cable generates no TCP reset).
+- Reconnect backoff: 5 s, 10 s, 20 s, then 60 s.
+- Commands issued while Ecos is down or a loco is not yet resolved are queued by address (upserted, `MAX_PENDING_QUERIES`) and replayed on reconnect.
+- Function changes are diffed against what was last sent so only changed bits go out; baseline `get()` queries after a fresh subscription are paced to avoid starving the XpressNet loop.
 
-**Pattern: Interface-Based Component Architecture**
+### 3.3 Z21 LAN
 
-Each protocol/display implements a common interface:
+UDP server on port **21105** emulating a Z21, implemented against the official *Z21 LAN Protocol Specification v1.13*. Pure encode/decode lives in `z21_protocol.*` (native-tested, including the spec's worked examples); `z21lan_interface.*` owns the socket and a fixed client table (`MAX_Z21_CLIENTS`, `MAX_Z21_SUBSCRIBED_PER_CLIENT`, 60 s client timeout). New clients default to broadcasts-on (a real WLANmaus never sends `SET_BROADCASTFLAGS`). Supported: drive, functions, track power, emergency stop, turnouts. CV programming is out of scope for the whole project (this is an operational interface). Real-hardware deviations from the spec text (direction bit, the turnout flags byte) are recorded in the CHANGELOG and resolved in favour of verified captures.
 
-```cpp
-// interfaces/interface_base.h
-class ProtocolInterface {
-public:
-    virtual ~ProtocolInterface() {}
-    virtual bool begin() = 0;           // Initialize
-    virtual void update() = 0;          // Non-blocking update
-    virtual bool handleMessage() = 0;   // Process incoming
-    virtual void sendCommand(...) = 0;  // Send outgoing
-};
+### 3.4 LocoNet (planned)
 
-class DisplayInterface {
-public:
-    virtual ~DisplayInterface() {}
-    virtual bool begin() = 0;
-    virtual void update(const SystemStatus&) = 0;
-};
-```
-
-**Pattern: Static Registration vs. Dynamic Allocation**
-
-For ESP8266 with limited RAM, use compile-time static objects:
-
-```cpp
-// main.ino
-#if ENABLE_XPRESSNET
-XpressNetInterface xpressnet_interface;
-#endif
-
-#if ENABLE_ECOS_LAN
-EcosLanInterface ecos_interface;
-#endif
-
-#if ENABLE_OLED_DISPLAY
-OledDisplay display;
-#endif
-
-// In setup():
-#if ENABLE_XPRESSNET
-    xpressnet_interface.begin();
-#endif
-#if ENABLE_ECOS_LAN
-    ecos_interface.begin();
-#endif
-#if ENABLE_OLED_DISPLAY
-    display.begin();
-#endif
-```
-
-### 3.2 Timing Architecture
-
-**Principle: XpressNet Timing is Critical**
-
-XpressNet protocol requirements:
-- 9600 baud (9 data bits + 1 parity bit = 10 bits total)
-- ~1ms per byte transmission
-- Message roundtrip: typically 20-50ms
-- Must not miss messages due to blocking operations
-
-**Non-Blocking Pattern: Cooperative Multitasking with millis()**
-
-```cpp
-// timing.h
-class TimedTask {
-private:
-    unsigned long last_execute;
-    unsigned long interval;
-public:
-    TimedTask(unsigned long interval_ms) 
-        : last_execute(0), interval(interval_ms) {}
-    
-    bool shouldExecute() {
-        unsigned long now = millis();
-        if (now - last_execute >= interval) {
-            last_execute = now;
-            return true;
-        }
-        return false;
-    }
-};
-
-// Usage in loop():
-TimedTask heartbeat_task(1000);  // Every 1000ms
-if (heartbeat_task.shouldExecute()) {
-    sendHeartbeat();
-}
-```
-
-**Main Loop Structure:**
-
-```cpp
-void loop() {
-    // Order matters: timing-critical first
-    
-    // 1. XpressNet (highest priority - timing critical)
-    #if ENABLE_XPRESSNET
-    xpressnet_interface.update();  // Must run frequently
-    #endif
-    
-    // 2. Check for incoming commands (all protocols)
-    #if ENABLE_ECOS_LAN
-    ecos_interface.update();  // Non-blocking read
-    #endif
-    
-    // 3. Periodic housekeeping (lower priority)
-    static TimedTask heartbeat(5000);
-    if (heartbeat.shouldExecute()) {
-        performHeartbeatCheck();
-    }
-    
-    // 4. Display update (lowest priority)
-    #if ENABLE_OLED_DISPLAY
-    static TimedTask display_update(500);
-    if (display_update.shouldExecute()) {
-        display.update(system_status);
-    }
-    #endif
-    
-    yield();  // ESP8266 watchdog reset
-}
-```
-
-### 3.3 State Engine Architecture
-
-**No Persistence Model**
-
-```cpp
-// definitions.h
-enum class LocoSource {
-    UNKNOWN = 0,
-    XPRESSNET = 1,
-    ECOS = 2,
-    LOCONET = 3,
-    Z21_LAN = 4
-};
-
-struct LocoState {
-    uint16_t dcc_address;           // DCC address (0-9999)
-    uint8_t speed;                  // 0-126
-    uint8_t direction;              // 0=reverse, 1=forward
-    uint32_t functions;             // F0-F31
-    LocoSource last_source;         // Where command came from
-    unsigned long last_update_ms;   // Timestamp
-    bool subscribed_to_ecos;        // Currently subscribed?
-};
-
-// state_engine.h
-class StateEngine {
-private:
-    static const int MAX_LOCOS = 50;
-    LocoState locos[MAX_LOCOS];
-    int loco_count;
-    
-public:
-    bool addOrUpdateLoco(uint16_t address, const LocoState& state);
-    bool getLoco(uint16_t address, LocoState& state);
-    void removeInactiveLoco(uint16_t address);
-    void expungeOldestInactive();
-    int getLocoCount() { return loco_count; }
-};
-```
-
-**In-Memory Only, Ecos Provides Persistence**
-
-When device restarts:
-1. State engine empty
-2. XpressNet/Ecos sends commands for controlled locos
-3. State engine rebuilds from live commands
-4. No data loss (Ecos retains all state)
-
-### 3.4 Command Routing & Echo Prevention
-
-**Smart Routing Pattern:**
-
-```cpp
-// command_router.h
-class CommandRouter {
-private:
-    struct LastCommand {
-        uint16_t loco_address;
-        uint8_t command_type;       // SPEED, DIRECTION, FUNCTION
-        unsigned long timestamp_ms;
-    };
-    
-    LastCommand last_ecos_command;
-    
-public:
-    void handleXNetCommand(const XNetMessage& msg);
-    void handleEcosCommand(const EcosMessage& msg);
-    
-private:
-    bool isEchoCommand(uint16_t address, uint8_t type);
-    void broadcastToOtherProtocols(
-        uint16_t address, 
-        const LocoState& state,
-        LocoSource source);
-};
-```
-
-**Echo Prevention:**
-- When receiving update from Ecos, mark source
-- When routing to XpressNet, check if this came from XpressNet recently
-- If so, suppress (it's an echo)
-- Timeout: 500ms window
+Hardware is on the motherboard PCB: TX on **D3/GPIO0**, RX on **GPIO3**, per Gahtow's D1 Mini design (internal pull-ups; USB serial and flashing are unavailable while LocoNet is active, so flash with the D1 removed or by OTA). Agreed design: real LocoNet slot select/steal/dispatch semantics are implemented entirely *inside* the LocoNet interface so Digitrax throttles behave normally, but never gate `CommandRouter` - every LocoNet command flows through like any other protocol, and changes from other protocols push a slot refresh to the LocoNet throttle holding that loco (the same pattern as XpressNet's slot bookkeeping). Not started; blocked on a test throttle.
 
 ---
 
-## 4. Protocol-Specific Design
+## 4. Display
 
-### 4.1 XpressNet Interface
-
-**Uses: Gahtow's XpressNetMaster Library**
-
-Already solves:
-- 9+1 bit protocol handling
-- Hardware UART with software fallback
-- Master/Slave mode auto-detection
-- Device enumeration
-- Message checksum/validation
-
-**Our XpressNet Wrapper:**
-
-```cpp
-// protocols/xpressnet/xpressnet_interface.h
-class XpressNetInterface : public ProtocolInterface {
-private:
-    XpressNetMaster xnet;
-    TimedTask poll_task;
-    
-    struct XNetDevice {
-        uint8_t device_id;
-        uint8_t status;
-        unsigned long last_seen;
-    };
-    
-    XNetDevice devices[31];  // Max 31 XNet slaves
-    int device_count;
-    
-public:
-    bool begin() override;
-    void update() override;
-    bool handleMessage() override;
-    
-    void handleLocoCommand(uint16_t address, uint8_t speed, uint8_t direction);
-    void handleFunctionCommand(uint16_t address, uint32_t functions);
-    
-private:
-    void processIncomingMessage();
-    void updateDeviceStatus();
-};
-```
-
-**Timing Guarantees:**
-- `update()` called every loop iteration
-- Non-blocking serial read from XNet bus
-- Message processing immediate (not queued)
-- No delays in loop
-
-### 4.2 Ecos LAN Interface
-
-**Protocol: XML-based TCP/IP**
-
-Examples from Ecos documentation:
-```xml
-<!-- Subscribe to locomotive -->
-<SUBSCRIBE id="1" TYPE="LOCO" OBJECT="" ADDRESS="100" BASE_VALUE="1" VERSION="1" />
-
-<!-- Receive locomotive update -->
-<LOCO id="4" ADDRESS="100" SPEED="50" DIRECTION="1" F0="1" F1="0" />
-
-<!-- Send speed/direction command -->
-<SET id="2" OBJECT="4" ADDRESS="100" SPEED="75" DIRECTION="1" />
-
-<!-- Heartbeat -->
-<REQUEST id="3" TYPE="STATUS" />
-```
-
-**Our Ecos Wrapper:**
-
-```cpp
-// protocols/ecos/ecos_interface.h
-class EcosLanInterface : public ProtocolInterface {
-private:
-    WiFiClient tcp_client;
-    TimedTask connect_task;
-    TimedTask heartbeat_task;
-    
-    IPAddress ecos_ip;
-    uint16_t ecos_port;
-    
-    String rx_buffer;
-    
-public:
-    bool begin() override;
-    void update() override;
-    bool handleMessage() override;
-    
-    void sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction);
-    void sendFunctionCommand(uint16_t address, uint32_t functions);
-    void subscribeToLoco(uint16_t address);
-    
-private:
-    bool parseXmlMessage(const String& xml);
-    void handleEcosLocoUpdate(const String& xml);
-    void ensureConnected();
-};
-```
-
-**Non-Blocking TCP:**
-- Connect in `update()`, don't block on connection timeout
-- Read available bytes only
-- Accumulate in buffer until complete XML element
-- Parse on demand
-
-### 4.3 Display Interface (OLED)
-
-```cpp
-// display/oled_display.h
-class OledDisplay : public DisplayInterface {
-private:
-    Adafruit_SSD1306 oled;
-    TimedTask update_task;
-    uint8_t display_mode;  // Cycle through different info
-    
-public:
-    bool begin() override;
-    void update(const SystemStatus& status) override;
-    
-private:
-    void drawStatusScreen(const SystemStatus& status);
-    void drawLocoListScreen();
-    void drawDebugScreen();
-};
-
-// definitions.h - Status structure
-struct SystemStatus {
-    bool xnet_active;
-    bool ecos_connected;
-    int active_locos;
-    uint8_t xnet_device_count;
-    int wifi_rssi;
-};
-```
+SSD1306 128x64 on I2C (**SDA D2/GPIO4, SCL D1/GPIO5**, address 0x3C). A 10 s boot splash shows while protocols connect in the background, then five pages: Main (status icons, last command incl. active functions, last accessory), Device (heap, uptime, IP), XpressNet (bus status, last-message age), Ecos (connection, heartbeat latency) and Z21 (client count, last action age and source IP). Setup Mode has its own screen showing the AP name and address. Status icons are hand-drawn bitmaps; Unicode glyphs render as garbage on this font.
 
 ---
 
-## 5. Configuration System (config.h)
+## 5. Configuration (`config.h`)
 
-```cpp
-// config.h - Master configuration file
+`config.h` is the single compile-time file. Highlights (see the file itself for the authoritative values):
 
-// ===== HARDWARE SELECTION =====
-#define ENABLE_XPRESSNET    1
-#define ENABLE_ECOS_LAN     1
-#define ENABLE_LOCONET      0      // Future
-#define ENABLE_Z21_LAN      0      // Future
-#define ENABLE_OLED_DISPLAY 1
-
-// ===== XPRESSNET CONFIGURATION =====
-#if ENABLE_XPRESSNET
-    #define XPRESSNET_RX_PIN    13   // D7
-    #define XPRESSNET_TX_PIN    15   // D8
-    #define XPRESSNET_DE_PIN    14   // D5 (Driver Enable)
-    #define XPRESSNET_RE_PIN    12   // D6 (Receiver Enable)
-    #define XPRESSNET_BAUD      9600
-    #define XPRESSNET_TIMEOUT   300000  // 5 min inactivity timeout
-#endif
-
-// ===== ECOS LAN CONFIGURATION =====
-#if ENABLE_ECOS_LAN
-    #define ECOS_IP             "192.168.1.100"
-    #define ECOS_PORT           15471
-    #define ECOS_TIMEOUT        5000   // TCP timeout
-    #define ECOS_HEARTBEAT_INTERVAL  30000  // 30 sec heartbeat
-#endif
-
-// ===== OLED DISPLAY CONFIGURATION =====
-#if ENABLE_OLED_DISPLAY
-    #define OLED_SDA_PIN        4     // D2
-    #define OLED_SCL_PIN        5     // D1
-    #define OLED_ADDRESS        0x3C
-    #define OLED_UPDATE_INTERVAL 500  // ms
-#endif
-
-// ===== STATE ENGINE =====
-#define MAX_LOCOS           50
-#define LOCO_INACTIVITY_TIMEOUT  300000  // 5 minutes
-
-// ===== ECHO PREVENTION =====
-#define ECHO_PREVENTION_WINDOW   500  // ms
-
-// ===== DEBUG OPTIONS =====
-#define ENABLE_DEBUG        1
-#define DEBUG_BAUD          115200
-#define DEBUG_XNET          1
-#define DEBUG_ECOS          1
-```
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `ENABLE_XPRESSNET` / `ECOS_LAN` / `Z21_LAN` / `OLED_DISPLAY` | 1 | Feature toggles |
+| `ENABLE_LOCONET` | 0 | Stub only |
+| `XPRESSNET_DATA_PIN` / `XPRESSNET_CONTROL_PIN` | 12 / 16 | D6 / D0 |
+| `XPRESSNET_BAUD` | 62500 | Lenz wire rate |
+| `OLED_SDA_PIN` / `OLED_SCL_PIN` | 4 / 5 | D2 / D1 |
+| `SETUP_BUTTON_PIN` | 13 | D7, to GND |
+| `ECOS_PORT` / `Z21_PORT` | 15471 / 21105 | |
+| `ECOS_TIMEOUT` | 300 ms | TCP connect bound |
+| `ECOS_HEARTBEAT_INTERVAL` / `ECOS_MESSAGE_TIMEOUT` | 5 s / 10 s | Keep-alive and dead-link watchdog |
+| `ECOS_ECHO_ATTRIBUTION_WINDOW_MS` | 4000 | Echo attribution |
+| `MAX_LOCOS` | 50 | |
+| EEPROM defaults | `ECOS_IP`, `XPRESSNET_BUS_TIMEOUT` (120 s), `LOCO_INACTIVITY_TIMEOUT` (5 min) | Seeded once; live values come from EEPROM |
 
 ---
 
-## 6. State Management Flow
+## 6. Memory and dependencies
 
-### 6.1 Locomotive Lifecycle
-
-```
-User sends XpressNet command for unknown loco
-    ↓
-State Engine: Loco not found
-    ↓
-Create new LocoState with address
-    ↓
-Mark source: XPRESSNET
-    ↓
-Subscribe to Ecos (send SUBSCRIBE message)
-    ↓
-Store in state engine
-    ↓
-Router: Broadcast to Ecos interface
-    ↓
-Ecos receives update
-    ↓
-[During session: receive updates from both sources]
-    ↓
-5 minutes no update from any source
-    ↓
-State Engine: Expunge old loco
-    ↓
-Device power off: All state cleared (expected)
-```
-
-### 6.2 Update Flow (XpressNet → Ecos)
-
-```
-XpressNet device sends: Speed command for loco 100
-
-XpressNetInterface.update()
-    ├─ Receive message from bus
-    ├─ Parse: Loco 100, Speed 75, Direction forward
-    └─ Call router.handleXNetCommand()
-        ├─ State Engine: Find or create loco 100
-        ├─ Update speed, direction, timestamp
-        ├─ Mark source: XPRESSNET
-        ├─ Check: Should echo? (not our command)
-        ├─ Call ecos_interface.sendSpeedCommand(100, 75, 1)
-        └─ EcosInterface: Queue TCP message
-
-EcosLanInterface.update()
-    ├─ Check TCP connection
-    └─ Send: <SET id="X" ADDRESS="100" SPEED="75" DIRECTION="1" />
-
-Ecos replies: <LOCO ADDRESS="100" SPEED="75" DIRECTION="1" />
-
-EcosInterface receives reply
-    ├─ Parse XML
-    ├─ Call router.handleEcosCommand()
-    └─ Router checks: Is echo? (YES - same loco, within 500ms)
-        └─ Suppress send to XpressNet (prevent loop)
-```
-
-### 6.3 Update Flow (Ecos → XpressNet)
-
-```
-Ecos sends: Loco 205 speed changed on another app
-
-EcosLanInterface.update()
-    ├─ Read from TCP: <LOCO ADDRESS="205" SPEED="40" ... />
-    ├─ Parse message
-    └─ Call router.handleEcosCommand()
-        ├─ State Engine: Find or create loco 205
-        ├─ Update speed, direction, timestamp
-        ├─ Mark source: ECOS
-        ├─ Check: Should echo? (not from XpressNet)
-        ├─ Call xpressnet_interface.handleLocoCommand(205, 40, dir)
-        └─ Record as last Ecos command for echo prevention
-
-XpressNetInterface.update()
-    ├─ Send to XNet bus: Speed command for loco 205
-    └─ XpressNet devices receive update
-```
+- No dynamic allocation; all tables are fixed-size statics. Current firmware: RAM ~59%, flash ~37% of the ESP8266 (v1.4.0 build, 2026-10-11).
+- Dependencies: `Adafruit SSD1306` (+ `Adafruit GFX`), the ESP8266 core (`ESP8266WiFi`, `ESP8266WebServer`, `ESP8266HTTPUpdateServer`, `EEPROM`, built-in `SoftwareSerial`), and the vendored `XpressNetMaster`. Pinned in `platformio.ini` (`espressif8266@4.2.1`).
+- Secrets (Wi-Fi credentials) live only in the gitignored `wifi_credentials.local.h`.
 
 ---
 
-## 7. External Dependencies
+## 7. Testing
 
-### 7.1 Required Libraries
-
-From Gahtow's Project (via Git Submodule):
-- **XpressNetMaster** - XpressNet protocol handling
-  - Location: `libraries/XpressNetMaster/`
-  - Solves: 9+1 bit serial, checksums, message framing
-  - Already proven working
-
-Arduino Built-in/Standard:
-- **WiFi** (ESP8266 built-in)
-- **Wire** (I2C, ESP8266 built-in)
-- **Adafruit_SSD1306** (OLED display)
-- **Adafruit_GFX** (Graphics library, dependency of SSD1306)
-
-### 7.2 Library Acquisition Strategy
-
-```bash
-# Clone Gahtow's XpressNet library as submodule
-git submodule add \
-  https://sourceforge.net/projects/f944.pgahtow.p/files/Arduino\ \(v1.0\)\ libaries/ \
-  libraries/
-
-# Arduino IDE will auto-find libraries in:
-# - Arduino libraries folder
-# - Sketch/libraries folder
-```
+Native unit tests (Unity, `env:native`, 287 tests) cover `StateEngine`, `CommandRouter` (via a mock `ProtocolInterface`), the Ecos parser and command builders, Z21 packet encode/decode, EEPROM config logic and the setup-page generators. Time is injected via `now_ms()`/`mock_now_ms` so expiry and echo windows are deterministic. Hardware-coupled files (`*_interface.cpp` for XpressNet/Ecos/Z21, `eeprom_store.cpp`, `setup_mode.cpp`, the display) are excluded from the native build and verified on the real board - with raw serial/wire captures when behaviour is in doubt, and the spec or reference library as ground truth. See [04_PHASE_4_TESTING_INFRASTRUCTURE.md](04_PHASE_4_TESTING_INFRASTRUCTURE.md) and [../test/README.md](../test/README.md).
 
 ---
 
-## 8. Compilation & Build Strategy
+## 8. Extending
 
-### 8.1 ESP8266 Arduino IDE Configuration
+**Adding a protocol (e.g. LocoNet):**
+1. Add `protocols/<name>/<name>_interface.h/.cpp` implementing `ProtocolInterface`.
+2. Add its `ENABLE_*` toggle and constants to `config.h`.
+3. Add a member/setter and `handle<Name>Command()` / `handle<Name>FunctionCommand()` to `CommandRouter`, plus its branches in `broadcastCommand()`.
+4. Instantiate and register it in the `.ino` (`router.set<Name>Interface()`, `<name>.setCommandRouter(&router)`), call `update()` in `loop()`.
+5. Keep pure encode/decode in a separate hardware-independent file so it can be unit-tested natively.
+6. Add an OLED page and update the native build's `build_src_filter` for any hardware-only file.
 
-```
-Tools → Board → LOLIN(WEMOS) D1 mini (ESP8266)
-Tools → Upload Speed → 115200
-Tools → CPU Frequency → 80 MHz
-Tools → Flash Size → 4M (3M SPIFFS)
-```
-
-### 8.2 Memory Optimization
-
-ESP8266 memory profile:
-- **Flash:** 4MB (plenty for sketch)
-- **RAM:** 160KB total
-  - OS reserved: ~60KB
-  - Heap available: ~100KB
-  - Stack: ~5KB
-
-Optimal state engine size:
-- 50 locomotives × ~30 bytes each = 1.5KB
-- Room for: TCP buffers, message queues, stack
-
-### 8.3 Build Process
-
-```cpp
-// main.ino
-#include "config.h"           // Must be first
-#include "definitions.h"
-#include "state_engine.h"
-#include "command_router.h"
-
-#if ENABLE_XPRESSNET
-    #include "protocols/xpressnet/xpressnet_interface.h"
-#endif
-
-#if ENABLE_ECOS_LAN
-    #include "protocols/ecos/ecos_interface.h"
-#endif
-
-// Conditional compilation via config.h preprocessor directives
-// Only enabled modules are compiled and linked
-```
-
----
-
-## 9. Testing Strategy
-
-### 9.1 Unit Testing (Offline)
-
-Test state engine logic without hardware:
-
-```cpp
-// tests/test_state_engine.cpp
-#include <gtest/gtest.h>
-#include "state_engine.h"
-
-TEST(StateEngine, AddLoco) {
-    StateEngine engine;
-    LocoState state;
-    state.dcc_address = 100;
-    
-    ASSERT_TRUE(engine.addOrUpdateLoco(100, state));
-    ASSERT_EQ(engine.getLocoCount(), 1);
-}
-
-TEST(StateEngine, ExpungeInactive) {
-    // Mock time, verify expiry logic
-}
-```
-
-### 9.2 Integration Testing (Hardware)
-
-```cpp
-// tests/integration_test.ino
-// Upload to device, verify:
-// 1. XpressNet bus communication
-// 2. State engine updates
-// 3. Ecos TCP connection
-// 4. Message routing
-// 5. Echo prevention
-```
-
-### 9.3 Protocol Testing
-
-Each protocol interface has test mode:
-
-```cpp
-// In config.h
-#define ENABLE_XNET_TEST_MODE  1   // Synthetic test messages
-#define ENABLE_ECOS_TEST_MODE  1   // Simulated Ecos
-```
-
----
-
-## 10. Extensibility Points
-
-### 10.1 Adding LocoNet Support (Future)
-
-1. Create: `protocols/loconet/loconet_interface.h`
-2. Implement: `ProtocolInterface` interface
-3. Add: `#define ENABLE_LOCONET 1` to config.h
-4. Register in main.ino: `LocoNetInterface loconet_interface;`
-5. Add to main loop
-6. Router automatically bridges commands
-
-### 10.2 Adding Z21 LAN Support (Future)
-
-Same pattern - Z21 has different protocol than Ecos but same bridge architecture.
-
-### 10.3 Adding New Display Type
-
-1. Create: `display/new_display.h`
-2. Extend: `DisplayInterface`
-3. Register in main.ino
-4. Toggle via config.h
-
----
-
-## 11. Success Criteria
-
-### Phase 1: Foundation (This Phase)
-- [ ] Architecture document approved
-- [ ] Config system designed
-- [ ] State engine pattern defined
-- [ ] XpressNet interface skeleton created
-- [ ] Ecos interface skeleton created
-- [ ] Basic main loop structure
-
-### Phase 2: XpressNet Implementation
-- [ ] XpressNetMaster library integrated
-- [ ] Receive and parse XNet messages
-- [ ] State engine updates from XNet
-- [ ] OLED displays status
-- [ ] Test with actual XpressNet device
-
-### Phase 3: Ecos Integration
-- [ ] TCP connection to Ecos
-- [ ] XML parsing
-- [ ] Subscribe to locos
-- [ ] Send speed/direction commands
-- [ ] Receive updates from Ecos
-
-### Phase 4: Bridging & Testing
-- [ ] Command routing between protocols
-- [ ] Echo prevention working
-- [ ] State engine lifecycle management
-- [ ] Full integration testing
-- [ ] Documentation complete
-
----
-
-## 12. Known Constraints & Assumptions
-
-### Constraints
-- **Single-core only:** No FreeRTOS (ESP8266 limitation)
-- **Limited RAM:** ~100KB usable, must keep structures lean
-- **No persistence:** EEPROM not used (Ecos handles it)
-- **Local network only:** No internet, no MQTT
-- **XpressNet timing critical:** Must not miss messages
-
-### Assumptions
-- Ecos available on same LAN
-- XpressNet bus properly terminated (120Ω)
-- WiFi reasonably stable (reconnection handled)
-- Devices used during railway session only (state engine resets on power)
-
----
-
-## 13. File Structure Summary
-
-```
-xpressnet_ecos_bridge/
-├── config.h                          ← USER CONFIGURATION
-├── main.ino                          ← ENTRY POINT
-├── definitions.h                     ← GLOBAL TYPES
-├── state_engine.h/cpp                ← LOCOMOTIVE STATE
-├── command_router.h/cpp              ← COMMAND BRIDGING
-│
-├── interfaces/
-│   └── interface_base.h              ← ABSTRACT INTERFACES
-│
-├── protocols/
-│   ├── xpressnet/
-│   │   └── xpressnet_interface.h/cpp
-│   ├── ecos/
-│   │   └── ecos_interface.h/cpp
-│   ├── loconet/                      ← (FUTURE)
-│   └── z21lan/                       ← (FUTURE)
-│
-├── display/
-│   └── oled_display.h/cpp
-│
-├── utils/
-│   ├── timing.h
-│   └── debug.h
-│
-└── README.md                         ← THIS DOCUMENT
-
-```
-
----
-
-## 14. Next Steps
-
-### Immediate (Today)
-1. ✅ Approve this architecture document
-2. ⏳ Identify any changes needed
-3. ⏳ Confirm file/module structure
-
-### Short Term (This Week)
-1. Create project folder structure
-2. Implement `config.h` template
-3. Implement `definitions.h`
-4. Implement `state_engine.h/cpp`
-5. Implement `command_router.h/cpp`
-6. Create protocol interface base
-
-### Implementation (Following Weeks)
-1. Integrate XpressNetMaster library
-2. Implement XpressNet wrapper interface
-3. Implement Ecos TCP + XML parsing
-4. Implement OLED display
-5. Implement main.ino loop structure
-6. Testing & refinement
-
----
-
-## 15. Questions & Decisions for Review
-
-Before proceeding, please confirm:
-
-1. **Modular Architecture:** Is the compile-time toggle approach via config.h ideal?
-2. **State Engine Size:** 50 locomotives sufficient, or should it be configurable?
-3. **Echo Prevention Window:** 500ms window appropriate?
-4. **External Libraries:** OK to use Gahtow's XpressNetMaster as-is, or should we understand it first?
-5. **Ecos Protocol:** Should we document Ecos XML protocol in separate file?
-6. **LocoNet/Z21 Future:** Should we design interfaces now, or add later?
-7. **Error Handling:** Strategy for device disconnections, timeouts, bus errors?
-8. **Testing:** Priority - unit tests or hardware integration first?
-
----
-
-**Document Status:** Ready for Review & Discussion
-
+**Known constraints:** single-core ESP8266 (Wi-Fi can pre-empt timing - the reason an ESP32 "v3" is a future option, see CLAUDE.md "MCU Platform"); ~100 KB usable heap; local network only; the XpressNet bus must be properly terminated.

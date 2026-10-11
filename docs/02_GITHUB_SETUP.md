@@ -1,5 +1,8 @@
 # GitHub Repository Setup Guide
 
+> **Historical (2026-10-11 note):** this guide dates from the original skeleton phase. The repository layout it describes (`src/`, `main.ino`, `src_*.h` renames) no longer exists - firmware sources are in `xpressnet_ecos_bridge/` and the repository is already set up. See [../README.md](../README.md) and [03_FILE_MANIFEST.md](03_FILE_MANIFEST.md) for the real layout. Kept for reference only.
+
+
 This guide explains how to take the generated files and set up a complete GitHub repository.
 
 ## Step 1: Create Repository Structure Locally

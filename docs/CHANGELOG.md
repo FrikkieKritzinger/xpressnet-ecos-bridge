@@ -7,6 +7,24 @@ here. Newest entries first.
 
 ---
 
+**2026-10-11 — Documentation/code alignment audit; LocoNet PCB error found and boards re-ordered**
+
+*Hardware.* The first assembled LocoNet section of the motherboard PCB had a layout error: one transistor ran very hot within seconds of power-up because a trace to its pin 1 was wrong. Root cause on the user's review: after rearranging tracks in the PCB editor, some traces ended up too close to a component and KiCad treated them as intended connections, tying R6 to the permanent 5V rail. The board design was corrected and re-checked from both the schematic and PCB-editor perspectives (several full trace-throughs), and new boards were ordered from PCBWay. Not fixable by board hack; the interim workaround of feeding 12V from the LocoNet master-power jumper to pin 1 is bench-only. LocoNet firmware remains unstarted (needs the new boards and the UT6 throttle on order).
+
+*Docs audit.* The user noticed that `docs/01_DESIGN_DOCUMENT.md` listed XpressNet pins that did not match the code. A full pass over every document against the code found the original design-phase documents still describing a pre-implementation project. Differences found and corrected:
+
+- **XpressNet pins/baud**: documents said RX D7/GPIO13, TX D8/GPIO15, DE D5/GPIO14, RE D6/GPIO12 at 9600 baud. Real, tested wiring (and `config.h`): a single half-duplex data pin D6/GPIO12 and a single DE+RE control pin D0/GPIO16 at 62500 baud (Gahtow's Z21 wiring; D7/GPIO13 is actually the Setup Mode button). Affected `01_DESIGN_DOCUMENT.md`, `03_FILE_MANIFEST.md`, `README.md`.
+- **Ecos protocol**: documents said XML; it is ESU's plain-text object protocol (already corrected in CLAUDE.md in July but not elsewhere).
+- **Ecos timing/echo**: heartbeat 30 s / circular 10-entry queue / 2 s window in the docs vs. the real 5 s heartbeat, 10 s watchdog and single attribution record with a 4 s window (`ECOS_ECHO_ATTRIBUTION_WINDOW_MS`).
+- **Scope**: Z21, EEPROM persistence, Setup Mode, OTA and accessories were described as future/not used ("EEPROM not used") but are all implemented; the README still said "Pre-Implementation, v0.1-dev".
+- **Layout**: `src/`, `main.ino`, `display_base.h`, `tests/` references vs. the real `xpressnet_ecos_bridge/` tree and `test/`.
+
+Rewritten: `README.md`, `docs/01_DESIGN_DOCUMENT.md`, `docs/03_FILE_MANIFEST.md`. Corrected in place: `docs/02_PHASE_3_2_ECOS_DESIGN.md`, `test/README.md`, stale passages in `CLAUDE.md` (Phase 3.3/3.4 status, echo prevention, Ecos scope/heartbeat, protocol list, file tree, Arduino-IDE build steps, a bogus `Serial1.write` test example, "E-stop does not yet stop locos"). Banners added to the historical `02_GITHUB_SETUP.md`, `04_COMPILATION_FIX.md`, `05_COMPILATION_FIX_COMPLETE.md` and the original plan `04_PHASE_4_TESTING_INFRASTRUCTURE.md`. Verified while there: native suite 287/287 passing, `env:wemos` builds (RAM 59.2%, flash 37.2%).
+
+*Code-side leftovers noticed, not changed (no code edits were requested):* `config.h` still says "XML-based" on the `ENABLE_ECOS_LAN` line and defines never-referenced `ECOS_ECHO_WINDOW_MS` (2000) and `ENABLE_OTA_UPDATE` (0, though OTA exists); the `.ino` startup banner prints "Version: 0.1-dev" instead of `FIRMWARE_VERSION`; `command_router.h` header comment still says "500ms window"; `loconet_interface.h` is a stub.
+
+---
+
 **2026-09-02 — Phase 7 item 4 (stolen icon F0-F12) implemented and confirmed live; a deeper function-sync issue found, documented, and deliberately deferred; tagged v1.4.0**
 
 Picked up Phase 7 item 4 (extend `PushExternalLocoUpdate()`'s "stolen icon" refresh from F0-F4 to also cover F5-F8/F9-F12) - agreed as small, low-risk, since the mechanism was already proven for F0-F4 and this just extends it using `buildFunctionGroupByte()` groups already used elsewhere. Extended the vendored `XpressNetMasterClass::PushExternalLocoUpdate()` (added `F5to8`/`F9to12` parameters, two more call-byte-then-reply message injections mirroring the F0-F4 one, same slot loop) and updated the one real call site, `XpressNetInterface::pushLocoStateToOwningSlot()`. Native suite unaffected (this file and the vendored library are both excluded from `env:native`, hardware-coupled), `env:wemos` builds clean.

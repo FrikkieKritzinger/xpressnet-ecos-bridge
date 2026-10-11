@@ -1,257 +1,117 @@
 # XpressNet-Ecos Bridge
 
-A modular protocol bridge connecting XpressNet model railway control systems to ESU Ecos via a Wemos D1 Mini (ESP8266), with extensibility for LocoNet and Z21 LAN protocols.
+A protocol bridge on a Wemos D1 Mini (ESP8266) that lets XpressNet throttles (Roco MultiMaus), Z21 LAN throttles (Roco WLANmaus / Z21 apps) and an ESU Ecos command station control the same locomotives and accessories, with every change propagated to all of them. LocoNet is the next planned protocol.
 
-**Status:** Pre-Implementation (Architecture Phase Complete)  
-**Target Platform:** ESP8266 (Wemos D1 Mini)  
-**Version:** 0.1-dev
+**Status:** Working on real hardware (Phases 1-6 complete, Phase 7 in progress).
+**Target Platform:** ESP8266 (Wemos D1 Mini)
+**Firmware version:** see `xpressnet_ecos_bridge/version.h` (currently 1.4.0)
 
-## Quick Overview
+See [CLAUDE.md](CLAUDE.md) for current architecture and status, and [docs/CHANGELOG.md](docs/CHANGELOG.md) for the dated development history.
 
-This project bridges model railway protocols:
-- **XpressNet** (hardwired, timing-critical) → Receives throttle commands from XpressNet devices
-- **Ecos LAN** (WiFi, XML-based) → Sends/receives commands from ESU Ecos control system
-- **State Engine** (in-memory) → Tracks controlled locomotives and their state
-- **Display** (OLED 128x64) → Shows real-time status
+## What it does
 
-**Future:** LocoNet and Z21 LAN protocol support (modular add-ons)
+- **XpressNet** (hardwired RS485, timing-critical) - acts as the bus *master* for MultiMaus-style throttles, built on Philipp Gahtow's XpressNetMaster library. Speed, direction, F0-F28, track power / emergency stop and turnouts.
+- **Ecos LAN** (WiFi, TCP port 15471) - ESU's plain-text object protocol (not XML). Speed, direction, functions, emergency stop and accessories, in both directions.
+- **Z21 LAN** (WiFi, UDP port 21105) - emulates a Z21 so a WLANmaus or Z21 app can connect straight to the bridge.
+- **LocoNet** - hardware is on the motherboard PCB; firmware is not started (see CLAUDE.md, Phase 7).
+- **State engine** - in-memory tracking of up to 50 active locomotives; a loco is dropped (and unsubscribed from Ecos) after 5 minutes of inactivity.
+- **OLED display** (128x64 SSD1306) - five status pages (main, device, XpressNet, Ecos, Z21) plus a boot splash.
+- **Setup Mode** - a Wi-Fi access point and web page to edit the persisted settings and to upload new firmware over the air.
 
-## Philosophy
+Design premise: any command from any throttle protocol is forwarded to Ecos *and* to every other throttle-facing protocol; Ecos is the only required, known device. There is no exclusive ownership of a locomotive between protocols.
 
-Inspired by Philipp Gahtow's Z21 command station architecture but with a focused, learning-oriented approach:
-- ✅ Modular (compile-time toggles via config.h)
-- ✅ Clear separation of concerns
-- ✅ Readable code (learning > optimization)
-- ✅ Ecos-specific (not trying to be everything)
-- ✅ Timing-aware (XpressNet is priority)
+## Hardware
 
-## Repository Structure
+- **MCU:** Wemos D1 Mini (ESP8266, 80/160 MHz single core, 4 MB flash, 160 KB RAM). ESP32 is a possible future "v3", not a supported target (see CLAUDE.md, "MCU Platform").
+- **XpressNet:** MAX485 RS485 module, wired the way Gahtow's Z21 command station does it - a *single* half-duplex data pin (DI and RO tied together) and a *single* direction pin (DE and RE tied together).
+- **Display:** SSD1306 128x64 I2C OLED.
+- **Setup button:** momentary pushbutton to GND.
 
-```
-xpressnet-ecos-bridge/
-├── README.md                          # This file
-├── docs/
-│   ├── 01_DESIGN_DOCUMENT.md         # Complete architecture design
-│   ├── 02_PROTOCOL_XPRESSNET.md      # XpressNet protocol reference
-│   ├── 02_PROTOCOL_ECOS.md           # Ecos LAN protocol reference
-│   ├── 03_HARDWARE_WIRING.md         # Hardware connections
-│   └── GLOSSARY.md                   # Terminology
-│
-├── src/
-│   ├── config.h                      # ← User configuration (God config)
-│   ├── main.ino                      # Arduino entry point
-│   ├── definitions.h                 # Global types & constants
-│   ├── state_engine.h
-│   ├── state_engine.cpp
-│   ├── command_router.h
-│   ├── command_router.cpp
-│   │
-│   ├── interfaces/
-│   │   └── interface_base.h          # Abstract base classes
-│   │
-│   ├── protocols/
-│   │   ├── xpressnet/
-│   │   │   ├── xpressnet_interface.h
-│   │   │   └── xpressnet_interface.cpp
-│   │   ├── ecos/
-│   │   │   ├── ecos_interface.h
-│   │   │   └── ecos_interface.cpp
-│   │   ├── loconet/                  # (Future - skeleton only)
-│   │   │   ├── loconet_interface.h
-│   │   │   └── loconet_interface.cpp
-│   │   └── z21lan/                   # (Future - skeleton only)
-│   │       ├── z21lan_interface.h
-│   │       └── z21lan_interface.cpp
-│   │
-│   ├── display/
-│   │   ├── display_base.h
-│   │   ├── oled_display.h
-│   │   └── oled_display.cpp
-│   │
-│   └── utils/
-│       ├── timing.h                  # Non-blocking timing utilities
-│       ├── debug.h                   # Debug logging
-│       └── memory.h                  # Memory utilities (ESP8266 specific)
-│
-├── libraries/
-│   └── README.md                     # External library instructions
-│
-├── tests/
-│   ├── test_state_engine.cpp         # Unit tests (future)
-│   └── test_echo_prevention.cpp      # Functional tests (future)
-│
-└── .gitignore                        # Git ignore rules
-```
+### Pin map (as implemented in `config.h`)
 
-## Hardware Requirements
+| Function | D1 Mini pin | GPIO | Notes |
+|----------|-------------|------|-------|
+| XpressNet data (SoftwareSerial RX+TX) | D6 | 12 | 62500 baud, 8 data bits + parity used as the 9th (call-byte) bit |
+| XpressNet MAX485 DE+RE | D0 | 16 | HIGH = transmit, LOW = receive |
+| OLED SDA | D2 | 4 | I2C, address 0x3C |
+| OLED SCL | D1 | 5 | I2C |
+| Setup Mode button | D7 | 13 | to GND, internal pull-up; hold 3 s |
+| LocoNet TX / RX | D3 / RX | 0 / 3 | planned, per Gahtow's D1 Mini design - not yet in firmware |
 
-### Microcontroller
-- **Wemos D1 Mini** (ESP8266)
-  - 160 MHz single-core
-  - 4MB Flash / 160KB RAM
-  - WiFi 802.11 b/g/n
+The LocoNet pins share boot-strap and USB-serial lines: with LocoNet active, USB flashing is unavailable while the D1 is seated, so use OTA or flash with the D1 removed from the motherboard socket.
 
-### Interfaces
-- **XpressNet Interface:** MAX485 RS485 module (TTL conversion)
-- **Ecos Connection:** WiFi (built-in to ESP8266)
-- **Display:** SSD1306 I2C OLED (0.96", 128x64)
-
-### Pin Configuration
-See `docs/03_HARDWARE_WIRING.md` for detailed connections.
-
-Quick reference:
-```
-XpressNet (RS485):
-  RX → GPIO13 (D7)
-  TX → GPIO15 (D8)
-  DE → GPIO14 (D5)
-  RE → GPIO12 (D6)
-
-I2C OLED Display:
-  SDA → GPIO4 (D2)
-  SCL → GPIO5 (D1)
-```
-
-## Getting Started
+## Getting started
 
 ### Prerequisites
-- Arduino IDE 1.8.0 or later
-- ESP8266 board support for Arduino
-- Required libraries:
-  - Adafruit_SSD1306
-  - Adafruit_GFX
-  - XpressNetMaster (Gahtow's library)
 
-### Installation Steps
+- [PlatformIO](https://platformio.org/) (`pip install platformio`)
+- Libraries are resolved by PlatformIO (`Adafruit SSD1306`); Gahtow's XpressNetMaster is vendored in `libraries/XpressNetMaster/` (with local modifications - see CLAUDE.md).
 
-1. **Clone or download this repository**
+### Build and flash
+
+1. Copy `xpressnet_ecos_bridge/wifi_credentials.local.h.example` to `xpressnet_ecos_bridge/wifi_credentials.local.h` and fill in your Wi-Fi SSID and password. This file is gitignored; never commit it.
+2. Review `xpressnet_ecos_bridge/config.h` (the Ecos IP default and feature toggles live there).
+3. Build and flash:
    ```bash
-   git clone https://github.com/yourname/xpressnet-ecos-bridge.git
-   cd xpressnet-ecos-bridge
+   python -m platformio run -e wemos
+   python -m platformio run -e wemos -t upload
    ```
+4. Serial monitor at 115200 baud (`monitor_rts`/`monitor_dtr` are disabled so opening the monitor does not reset the board).
 
-2. **Set up Arduino IDE for ESP8266**
-   - Add board URL: `http://arduino.esp8266.com/stable/package_esp8266com_index.json`
-   - Install ESP8266 boards
-   - Select: Tools → Board → LOLIN(WEMOS) D1 mini (ESP8266)
+### First boot and configuration
 
-3. **Install required libraries**
-   - Sketch → Include Library → Manage Libraries
-   - Search and install:
-     - Adafruit_SSD1306
-     - Adafruit_GFX
-   - Download XpressNetMaster from Gahtow's sourceforge (see docs/)
+The settings that vary per installation live in EEPROM, not in the firmware: Wi-Fi SSID/password, Ecos IP, the bridge's own **static** IP / gateway / subnet (mandatory - there is no DHCP), the XpressNet bus timeout and the loco inactivity timeout. `config.h` only supplies defaults used to seed the EEPROM.
 
-4. **Configure your hardware**
-   - Edit `src/config.h`
-   - Set your Ecos IP address
-   - Adjust pin assignments if different
+On first boot (or whenever the config is incomplete) the bridge starts **Setup Mode**: join the open `XNetBridge-Setup` Wi-Fi network and browse to the page it shows on the OLED. You can also enter Setup Mode by holding the pushbutton for 3 seconds, or automatically after 5 minutes of continuous Wi-Fi loss. The same Setup Mode serves `/update`, a firmware upload page (OTA).
 
-5. **Upload to Wemos D1 Mini**
-   - Plug in via USB
-   - Select Tools → Port → (your device)
-   - Click Upload
+### Tests
 
-6. **Test and verify**
-   - Open Serial Monitor (115200 baud)
-   - Watch startup messages
-   - Connect XpressNet device
-   - Verify Ecos connection
+Unit tests run natively on the host (no hardware). From the repository root, with a MinGW/GCC toolchain on PATH:
 
-## Configuration
-
-All configuration is in **`src/config.h`** (the "God" config file):
-
-```cpp
-// Enable/disable protocols
-#define ENABLE_XPRESSNET    1
-#define ENABLE_ECOS_LAN     1
-#define ENABLE_LOCONET      0
-#define ENABLE_Z21_LAN      0
-#define ENABLE_OLED_DISPLAY 1
-
-// Hardware pins
-#define XPRESSNET_RX_PIN    13
-#define XPRESSNET_TX_PIN    15
-#define XPRESSNET_DE_PIN    14
-#define XPRESSNET_RE_PIN    12
-
-// Ecos configuration
-#define ECOS_IP             "192.168.1.100"
-#define ECOS_PORT           15471
-
-// Display configuration
-#define OLED_SDA_PIN        4
-#define OLED_SCL_PIN        5
-#define OLED_WIDTH          128
-#define OLED_HEIGHT         64
+```bash
+python -m platformio test -e native
 ```
 
-## Development Status
+287 tests currently pass. See [test/README.md](test/README.md).
 
-### Phase 1: Architecture ✅ COMPLETE
-- Design document created
-- Architecture approved
-- Hardware specifications finalized
+## Repository structure
 
-### Phase 2: Skeleton Code (IN PROGRESS)
-- File structure creation
-- Base class definitions
-- Skeleton implementations
+```
+.
+├── README.md, CLAUDE.md, platformio.ini
+├── docs/                       Design docs, protocol specs, CHANGELOG.md
+├── libraries/XpressNetMaster/  Vendored Gahtow XpressNet master library
+├── test/                       Native unit tests (Unity) + mocks/fixtures
+└── xpressnet_ecos_bridge/      Firmware sources (PlatformIO src_dir)
+    ├── xpressnet_ecos_bridge.ino   setup()/loop()
+    ├── config.h, version.h, definitions.h
+    ├── state_engine.*, command_router.*
+    ├── eeprom_config.*, eeprom_store.*     Persisted settings
+    ├── setup_mode.*, setup_web_form.*      Setup Mode AP/web UI/OTA
+    ├── oled_display.cpp, display/
+    ├── interfaces/interface_base.h         ProtocolInterface contract
+    ├── protocols/{xpressnet,ecos,z21lan,loconet}/
+    └── utils/
+```
 
-### Phase 3: Core Implementation (PLANNED)
-- XpressNet interface integration
-- Ecos TCP/XML implementation
-- State engine full implementation
-- Command routing logic
-
-### Phase 4: Testing (PLANNED)
-- Hardware integration testing
-- Functional testing
-- Unit testing
-- Edge case handling
+A file-by-file list is in [docs/03_FILE_MANIFEST.md](docs/03_FILE_MANIFEST.md).
 
 ## Documentation
 
-- **`docs/01_DESIGN_DOCUMENT.md`** - Complete architecture and design decisions
-- **`docs/02_PROTOCOL_XPRESSNET.md`** - XpressNet protocol details
-- **`docs/02_PROTOCOL_ECOS.md`** - Ecos LAN protocol reference
-- **`docs/03_HARDWARE_WIRING.md`** - Pin diagrams and connections
-
-## Contributing
-
-This is a learning project. Contributions welcome:
-- Bug reports and fixes
-- Protocol implementations (LocoNet, Z21)
-- Documentation improvements
-- Test cases
-
-## License
-
-Open source for personal/educational use. See LICENSE file for details.
+- [CLAUDE.md](CLAUDE.md) - current architecture, conventions, configuration and status
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) - dated history and diagnoses
+- [docs/01_DESIGN_DOCUMENT.md](docs/01_DESIGN_DOCUMENT.md) - architecture and design
+- [docs/02_PHASE_3_2_ECOS_DESIGN.md](docs/02_PHASE_3_2_ECOS_DESIGN.md) - Ecos interface design
+- [docs/03_FILE_MANIFEST.md](docs/03_FILE_MANIFEST.md) - source file inventory
+- [docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md](docs/04_PHASE_4_TESTING_INFRASTRUCTURE.md) - test infrastructure plan and outcome
 
 ## Attribution
 
-This project is inspired by and learns from:
-- **Philipp Gahtow's Z21 Command Station** - Architecture patterns, protocol libraries, and modular design philosophy
-- **Gahtow's XpressNet Master Library** - Production-proven XpressNet protocol implementation
-- **Arduino and ESP8266 communities** - Educational resources and examples
+Inspired by and built on the work of Philipp Gahtow:
+- [Z21 Command Station](https://pgahtow.de/w/Zentrale_Z21PG/en) - architecture patterns and wiring
+- [XpressNet](https://pgahtow.de/w/XpressNet) and the XpressNetMaster library
+- [LocoNet](https://pgahtow.de/w/Loconet) write-up and hardware designs
 
-## References
+## License
 
-- [Gahtow's Z21 Project](https://pgahtow.de/w/Zentrale_Z21PG/en)
-- [XpressNet Protocol](https://pgahtow.de/w/XpressNet)
-- [Arduino IDE](https://www.arduino.cc/)
-- [ESP8266 Arduino Support](https://arduino.esp8266.com/)
-- [Adafruit Libraries](https://adafruit.com/)
-
-## Contact & Support
-
-- Issues: Use GitHub Issues
-- Questions: See documentation first, then GitHub Discussions
-- Contact: (your contact info)
-
----
-
-**Last Updated:** 2024
-**Version:** 0.1-dev (Pre-Implementation)
+See [LICENSE](LICENSE).
