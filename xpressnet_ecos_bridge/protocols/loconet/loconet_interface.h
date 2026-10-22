@@ -1,20 +1,28 @@
 /*
  * LocoNet Interface
  *
- * Phase 7 item 3, step P1: PASSIVE LISTEN ONLY. Receives on the hardware
- * UART, frames and checksums every message, counts good and bad frames and
- * logs what it sees to the network log. Nothing is transmitted and nothing
- * is routed to CommandRouter yet - the command-station (slot server) role
- * and routing come in later steps. See config.h (LOCONET CONFIGURATION) for
- * the pin/UART choices and their consequences.
+ * Phase 7 item 3, step P2: receive + slot server. Receives on the hardware
+ * UART, frames and checksums every message, and acts as the LocoNet master
+ * for slot handling (LnSlotServer): it answers a Digitrax throttle's
+ * requests so the throttle can select a loco. Nothing is routed to
+ * CommandRouter yet - that is step P3. See config.h (LOCONET CONFIGURATION)
+ * for the pin/UART choices and their consequences.
+ *
+ * Transmit path: replies are sent on the bus once it has been idle for the
+ * spec's carrier-detect backoff. Each byte is sent with SoftwareSerial
+ * (inverted, through the BC547 on D3) and read back from the hardware UART
+ * RX, which sees the bus; a mismatch is a collision, answered with a break
+ * and a retry.
  */
 
 #ifndef LOCONET_INTERFACE_H
 #define LOCONET_INTERFACE_H
 
 #include <cstdint>
+#include <SoftwareSerial.h>
 #include "../../interfaces/interface_base.h"
 #include "loconet_protocol.h"
+#include "loconet_slots.h"
 
 class LocoNetInterface : public ProtocolInterface {
 public:
@@ -30,7 +38,7 @@ public:
     bool begin() override;
     void update() override;
 
-    // Passive for now: nothing is transmitted.
+    // Nothing is sent to LocoNet from other protocols yet (step P3).
     void sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) override;
     void sendFunctionCommand(uint16_t address, uint32_t functions) override;
 
@@ -43,10 +51,23 @@ public:
 
 private:
     LnFrameParser parser;
+    LnSlotServer slot_server;
+    SoftwareSerial ln_tx;
+
     bool seen_frame;
     unsigned long last_frame_ms;
+    uint32_t last_rx_us;            // when a byte was last read from the UART
+    unsigned long tx_not_before_ms;  // start-up wait, then retry backoff
+    uint8_t tx_attempts;             // attempts so far for the frame at the head of the queue
+    uint32_t tx_frames;
+    uint32_t tx_collisions;
+    uint32_t tx_dropped;
 
     void logFrame(const LnFrame& frame);
+    void serviceTransmit(unsigned long now_ms);
+    bool transmitFrame(const LnFrame& frame);
+    void sendBreak();
+    void drainRx();
 };
 
 #endif  // LOCONET_INTERFACE_H

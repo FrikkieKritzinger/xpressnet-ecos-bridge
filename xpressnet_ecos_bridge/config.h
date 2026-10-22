@@ -200,7 +200,20 @@
     // update() pass that received anything). Shows garbage if RX polarity or
     // baud is wrong, which framed-message logging alone would hide. Turn off
     // once LocoNet is proven - it is noisy.
-    #define LOCONET_RAW_TRACE       1
+    #define LOCONET_RAW_TRACE       0
+
+    // Transmit timing, from the Digitrax spec ("NETWORK Timing"/"Access"):
+    // 1 bit = 60us. A device waits for carrier-detect backoff (20 bit times =
+    // 1.2 ms of idle) before seizing the bus; the master needs no extra delay
+    // (other devices add 6 bit times). After a collision the transmitter holds
+    // the line low for a 15 bit-time break. 25 attempts before giving up, and
+    // a device waits 250 ms after start-up before its first transmission.
+    #define LOCONET_CD_BACKOFF_US      1200
+    #define LOCONET_BREAK_US           900
+    #define LOCONET_TX_RETRIES_MAX     25
+    #define LOCONET_TX_STARTUP_DELAY_MS 250
+    // How long to wait for our own transmitted byte to echo back on RX.
+    #define LOCONET_ECHO_TIMEOUT_US    1500
 #endif
 
 // ============================================================================
