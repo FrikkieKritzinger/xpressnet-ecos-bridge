@@ -93,7 +93,27 @@ public:
      * Handle incoming function command from Z21 LAN.
      */
     void handleZ21FunctionCommand(uint16_t address, uint32_t functions);
-    
+
+    #if ENABLE_LOCONET
+    /**
+     * Handle incoming drive/function commands from a LocoNet throttle
+     * (Phase 7 item 3, step P3). Same shape as the Z21 handlers: update the
+     * state engine, subscribe to Ecos for a new loco, and fan out directly
+     * to Ecos and every other throttle-facing protocol. LocoNet's slot
+     * ownership model never gates these - it lives entirely inside the
+     * LocoNet interface.
+     */
+    void handleLocoNetCommand(uint16_t address, uint8_t speed, uint8_t direction);
+    void handleLocoNetFunctionCommand(uint16_t address, uint32_t functions);
+
+    /**
+     * A LocoNet throttle has selected this loco: make sure the bridge knows
+     * it and is subscribed to Ecos for it, so the loco's real state flows
+     * back and reaches the throttle's display. No command is sent.
+     */
+    void trackLocoForThrottle(uint16_t address);
+    #endif
+
     /**
      * Handle incoming command from Ecos
      * 1. Update state engine

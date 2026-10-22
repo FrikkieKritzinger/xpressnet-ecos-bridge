@@ -1,6 +1,7 @@
 #include "loconet_interface.h"
 
 #include <Arduino.h>
+#include "../../command_router.h"
 #include "../../utils/debug.h"
 
 #if ENABLE_LOCONET
@@ -9,9 +10,28 @@
 // never starve XpressNet polling in the same loop.
 static const int MAX_BYTES_PER_UPDATE = 128;
 
+// Reads a loco's current state from the router's state engine, so a slot a
+// throttle selects starts out showing what the loco is really doing.
+static bool lookupLocoState(uint16_t address, LnLocoSnapshot* out, void* context) {
+    CommandRouter* router = static_cast<CommandRouter*>(context);
+    LocoState loco;
+    if (router == nullptr || !router->getStateEngine().getLoco(address, loco)) {
+        return false;
+    }
+    out->speed = loco.speed;
+    out->direction = loco.direction;
+    out->functions = loco.functions;
+    return true;
+}
+
 LocoNetInterface::LocoNetInterface()
-    : seen_frame(false), last_frame_ms(0), last_rx_us(0), tx_not_before_ms(0),
+    : router(nullptr), seen_frame(false), last_frame_ms(0), last_rx_us(0), tx_not_before_ms(0),
       tx_attempts(0), tx_frames(0), tx_collisions(0), tx_dropped(0) {}
+
+void LocoNetInterface::setCommandRouter(CommandRouter* r) {
+    router = r;
+    slot_server.setLocoLookup(lookupLocoState, r);
+}
 
 void LocoNetInterface::initHardware() {
     // Inverted TX: GPIO low = transistor off = bus released.
@@ -65,7 +85,7 @@ void LocoNetInterface::update() {
                 seen_frame = true;
                 last_frame_ms = now;
                 logFrame(parser.frame());
-                slot_server.handleFrame(parser.frame(), now);
+                routeEvent(slot_server.handleFrame(parser.frame(), now));
                 break;
             case LnFrameParser::BAD_CHECKSUM: {
                 char text[LN_MAX_FRAME_BYTES * 3 + 8];
@@ -209,12 +229,56 @@ void LocoNetInterface::logFrame(const LnFrame& frame) {
     DEBUG_LOCONET_PRINTF_TS("LN RX: %s\n", text);
 }
 
+void LocoNetInterface::routeEvent(const LnSlotEvent& event) {
+    if (router == nullptr || event.flags == LN_EV_NONE) {
+        return;
+    }
+
+    // A selection never sends a command - it only makes sure the bridge is
+    // tracking the loco (and subscribed to Ecos), so its real state flows back
+    // to the throttle.
+    if (event.flags & LN_EV_SELECT) {
+        router->trackLocoForThrottle(event.address);
+    }
+
+    if (event.flags & LN_EV_DRIVE) {
+        router->handleLocoNetCommand(event.address, event.speed, event.direction);
+    }
+
+    if (event.flags & LN_EV_FUNCTIONS) {
+        // A frame only defines some function bits (a slot gives F0-F8, a DCC
+        // packet one group); keep every other bit as the bridge has it.
+        uint32_t current = 0;
+        LocoState loco;
+        if (router->getStateEngine().getLoco(event.address, loco)) {
+            current = loco.functions;
+        }
+        uint32_t merged = (current & ~event.func_mask) | (event.func_bits & event.func_mask);
+        router->handleLocoNetFunctionCommand(event.address, merged);
+    }
+
+    if (event.flags & LN_EV_POWER_ON) {
+        router->resumeOperation(LocoSource::LOCONET);
+    }
+    if (event.flags & (LN_EV_POWER_OFF | LN_EV_ESTOP)) {
+        router->emergencyStopAll(LocoSource::LOCONET);
+    }
+}
+
 void LocoNetInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) {
-    (void)address; (void)speed; (void)direction;
+    slot_server.applyExternalDrive(address, speed, direction, millis());
 }
 
 void LocoNetInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
-    (void)address; (void)functions;
+    slot_server.applyExternalFunctions(address, functions, millis());
+}
+
+void LocoNetInterface::sendEmergencyStop() {
+    slot_server.applyExternalEmergencyStop();
+}
+
+void LocoNetInterface::sendResumeOperation() {
+    slot_server.applyExternalResume();
 }
 
 ComponentStatus LocoNetInterface::getStatus() const {

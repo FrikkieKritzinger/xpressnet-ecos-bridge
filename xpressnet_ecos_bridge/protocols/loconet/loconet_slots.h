@@ -56,6 +56,43 @@
 #define LN_LACK_OPC_WR_SL_DATA  0x6F   // WR_SL_DATA & 0x7F
 #define LN_LACK_PROGRAMMER      0x7F   // programming track: <7F><7F> = not implemented
 
+// What the rest of the bridge currently believes about a loco, in the bridge's
+// internal units (speed 0-126, direction 1 = forward, F0-F31 bitmap). Used to
+// load a slot with the loco's REAL state when a throttle selects it, so
+// selecting a moving loco does not stop it.
+struct LnLocoSnapshot {
+    uint8_t speed;
+    uint8_t direction;
+    uint32_t functions;
+};
+
+// Looks up (and, if the loco is new to the bridge, starts tracking) a loco.
+// Returns false if nothing is known. Supplied by LocoNetInterface.
+typedef bool (*LnLocoLookup)(uint16_t address, LnLocoSnapshot* out, void* context);
+
+// What a received frame changed, for the interface to route onward.
+#define LN_EV_NONE        0x00
+#define LN_EV_DRIVE       0x01   // speed and/or direction changed: speed, direction valid
+#define LN_EV_FUNCTIONS   0x02   // functions changed: func_mask/func_bits valid
+#define LN_EV_POWER_ON    0x04
+#define LN_EV_POWER_OFF   0x08
+#define LN_EV_ESTOP       0x10
+#define LN_EV_SELECT      0x20   // a throttle took this slot (IN_USE): address valid
+
+struct LnSlotEvent {
+    uint8_t flags;
+    uint16_t address;      // DCC address the change applies to (0 = none)
+    uint8_t speed;         // bridge units 0-126
+    uint8_t direction;     // 1 = forward
+    uint32_t func_mask;    // which function bits this frame defines
+    uint32_t func_bits;    // their new values (only bits inside func_mask)
+};
+
+// Slot speed byte <-> bridge speed. LocoNet: 0 = stop, 1 = emergency stop,
+// 2..127 = speed steps. Bridge: 0 = stop, 1..126 = speed steps.
+uint8_t lnSpeedToBridge(uint8_t ln_speed);
+uint8_t lnSpeedFromBridge(uint8_t bridge_speed);
+
 struct LnSlot {
     uint16_t address;     // 0 = analog/unused marker, valid together with stat1
     uint8_t stat1;
@@ -72,8 +109,24 @@ class LnSlotServer {
 public:
     LnSlotServer();
 
-    // Processes one received frame, queueing any replies.
-    void handleFrame(const LnFrame& frame, uint32_t now_ms);
+    // Processes one received frame, queueing any replies, and reports what it
+    // changed so the interface can route it to the other protocols.
+    LnSlotEvent handleFrame(const LnFrame& frame, uint32_t now_ms);
+
+    // Optional: where to get a loco's real current state.
+    void setLocoLookup(LnLocoLookup fn, void* context) { lookup = fn; lookup_context = context; }
+
+    // A change that came from another protocol: update every slot holding
+    // this address and queue the LocoNet frames that make a throttle's display
+    // follow (OPC_LOCO_SPD / _DIRF / _SND). Only values that actually differ
+    // are queued. Returns how many slots were affected.
+    uint8_t applyExternalDrive(uint16_t address, uint8_t bridge_speed, uint8_t direction, uint32_t now_ms);
+    uint8_t applyExternalFunctions(uint16_t address, uint32_t functions, uint32_t now_ms);
+
+    // Track state pushed from another protocol: queues OPC_IDLE (emergency
+    // stop) / OPC_GPON and updates the TRK byte.
+    void applyExternalEmergencyStop();
+    void applyExternalResume();
 
     // Reply queue (oldest first).
     bool hasReply() const { return reply_count != 0; }
@@ -91,11 +144,14 @@ public:
     void buildSlotRead(uint8_t slot_number, LnFrame& out) const;
 
 private:
-    static const uint8_t MAX_REPLIES = 6;
+    static const uint8_t MAX_REPLIES = 8;
 
     LnSlot slots[LN_SLOT_COUNT + 1];   // index 0 unused
     uint8_t dispatch_slot;
     uint8_t trk;
+    LnLocoLookup lookup;
+    void* lookup_context;
+    uint16_t pending_select_address;   // set while handling a frame that takes a slot
     LnFrame replies[MAX_REPLIES];
     uint8_t reply_head;
     uint8_t reply_count;
@@ -111,6 +167,11 @@ private:
     void handleLocoAdr(const LnFrame& f, uint32_t now_ms);
     void handleMoveSlots(const LnFrame& f, uint32_t now_ms);
     void handleWriteSlotData(const LnFrame& f, uint32_t now_ms);
+    LnSlotEvent handleImmediatePacket(const LnFrame& f);
+    void refreshFromLookup(uint8_t slot_number);
+    void queueSlotByte(uint8_t opcode, uint8_t slot_number, uint8_t value);
+    void reportChange(uint8_t slot_number, uint8_t old_speed, uint8_t old_dirf,
+                      uint8_t old_snd, LnSlotEvent& ev) const;
 };
 
 #endif  // LOCONET_SLOTS_H

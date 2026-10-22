@@ -23,7 +23,7 @@ void setUp(void) {
 void tearDown(void) {}
 
 // Builds a frame from the given bytes (checksum appended) and feeds it in.
-static void send(std::initializer_list<uint8_t> bytes) {
+static LnSlotEvent send(std::initializer_list<uint8_t> bytes) {
     LnFrame f;
     memset(&f, 0, sizeof(f));
     uint8_t n = 0;
@@ -33,7 +33,7 @@ static void send(std::initializer_list<uint8_t> bytes) {
     f.data[n] = lnChecksum(f.data, n);
     f.len = n + 1;
     TEST_ASSERT_TRUE(lnChecksumValid(f.data, f.len));
-    server.handleFrame(f, now_ms);
+    return server.handleFrame(f, now_ms);
 }
 
 static LnFrame popReply() {
@@ -321,7 +321,7 @@ void test_replies_come_out_in_order(void) {
 }
 
 void test_full_reply_queue_drops_the_oldest(void) {
-    for (uint8_t a = 1; a <= 8; a++) {       // queue holds 6
+    for (uint8_t a = 1; a <= 10; a++) {      // queue holds 8
         send({LN_OPC_LOCO_ADR, 0x00, a});
     }
     TEST_ASSERT_EQUAL_UINT32(2, server.repliesDropped());
@@ -338,8 +338,322 @@ void test_short_or_unknown_frames_are_ignored(void) {
     TEST_ASSERT_FALSE(server.hasReply());
 }
 
+// ============================================================================
+// ROUTING EVENTS (what a throttle's frame changed, for the other protocols)
+// ============================================================================
+
+// Loads address 3 into slot 1 and selects it (IN_USE), draining the replies.
+static void selectLoco3() {
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    send({LN_OPC_MOVE_SLOTS, 0x01, 0x01});
+    while (server.hasReply()) {
+        popReply();
+    }
+}
+
+void test_speed_conversion_between_loconet_and_bridge(void) {
+    TEST_ASSERT_EQUAL_UINT8(0, lnSpeedToBridge(0));
+    TEST_ASSERT_EQUAL_UINT8(0, lnSpeedToBridge(1));     // 1 = emergency stop
+    TEST_ASSERT_EQUAL_UINT8(1, lnSpeedToBridge(2));
+    TEST_ASSERT_EQUAL_UINT8(126, lnSpeedToBridge(127));
+    TEST_ASSERT_EQUAL_UINT8(0, lnSpeedFromBridge(0));
+    TEST_ASSERT_EQUAL_UINT8(2, lnSpeedFromBridge(1));
+    TEST_ASSERT_EQUAL_UINT8(127, lnSpeedFromBridge(126));
+}
+
+void test_speed_frame_reports_a_drive_event(void) {
+    selectLoco3();
+    LnSlotEvent ev = send({LN_OPC_LOCO_SPD, 0x01, 0x10});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_DRIVE, ev.flags);
+    TEST_ASSERT_EQUAL_UINT16(3, ev.address);
+    TEST_ASSERT_EQUAL_UINT8(15, ev.speed);
+    TEST_ASSERT_EQUAL_UINT8(1, ev.direction);
+}
+
+void test_repeating_the_same_speed_reports_nothing(void) {
+    selectLoco3();
+    send({LN_OPC_LOCO_SPD, 0x01, 0x10});
+    LnSlotEvent ev = send({LN_OPC_LOCO_SPD, 0x01, 0x10});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, ev.flags);
+}
+
+void test_emergency_stop_speed_maps_to_bridge_speed_zero(void) {
+    selectLoco3();
+    send({LN_OPC_LOCO_SPD, 0x01, 0x10});
+    LnSlotEvent ev = send({LN_OPC_LOCO_SPD, 0x01, 0x01});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_DRIVE, ev.flags);
+    TEST_ASSERT_EQUAL_UINT8(0, ev.speed);
+}
+
+void test_direction_bit_is_a_drive_event_not_a_function_event(void) {
+    selectLoco3();
+    LnSlotEvent ev = send({LN_OPC_LOCO_DIRF, 0x01, 0x00});   // real capture: reverse
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_DRIVE, ev.flags);
+    TEST_ASSERT_EQUAL_UINT8(0, ev.direction);
+    ev = send({LN_OPC_LOCO_DIRF, 0x01, 0x20});               // forward again
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_DRIVE, ev.flags);
+    TEST_ASSERT_EQUAL_UINT8(1, ev.direction);
+}
+
+void test_dirf_function_bits_map_to_f0_to_f4(void) {
+    selectLoco3();
+    LnSlotEvent ev = send({LN_OPC_LOCO_DIRF, 0x01, 0x30});   // forward + F0 (real capture)
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_FUNCTIONS, ev.flags);
+    TEST_ASSERT_EQUAL_HEX32(0x1FF, ev.func_mask);
+    TEST_ASSERT_EQUAL_HEX32(0x001, ev.func_bits);
+
+    ev = send({LN_OPC_LOCO_DIRF, 0x01, 0x29});               // forward + F1 + F4 (real: 09)
+    TEST_ASSERT_EQUAL_HEX32(0x012, ev.func_bits);
+}
+
+void test_snd_function_bits_map_to_f5_to_f8(void) {
+    selectLoco3();
+    LnSlotEvent ev = send({LN_OPC_LOCO_SND, 0x01, 0x08});    // real capture: F8
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_FUNCTIONS, ev.flags);
+    TEST_ASSERT_EQUAL_HEX32(0x100, ev.func_bits);
+    ev = send({LN_OPC_LOCO_SND, 0x01, 0x04});               // F7
+    TEST_ASSERT_EQUAL_HEX32(0x080, ev.func_bits);
+}
+
+void test_functions_f9_to_f12_arrive_as_a_dcc_packet(void) {
+    // Real capture: ED 0B 7F 24 02 03 21 00 00 00 62 = loco 3, 0xA1 = F9 on.
+    LnSlotEvent ev = send({LN_OPC_IMM_PACKET, 0x0B, 0x7F, 0x24, 0x02, 0x03, 0x21, 0x00, 0x00, 0x00});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_FUNCTIONS, ev.flags);
+    TEST_ASSERT_EQUAL_UINT16(3, ev.address);
+    TEST_ASSERT_EQUAL_HEX32(0x1E00, ev.func_mask);
+    TEST_ASSERT_EQUAL_HEX32(0x0200, ev.func_bits);
+    LnFrame ack = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_LONG_ACK, ack.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x7D, ack.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x7F, ack.data[2]);
+}
+
+void test_functions_f13_to_f20_use_the_0xde_packet(void) {
+    // Real capture: ...34 02 03 5E 11 = loco 3, 0xDE group, data 0x11 = F13+F17.
+    LnSlotEvent ev = send({LN_OPC_IMM_PACKET, 0x0B, 0x7F, 0x34, 0x02, 0x03, 0x5E, 0x11, 0x00, 0x00});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_FUNCTIONS, ev.flags);
+    TEST_ASSERT_EQUAL_HEX32(0x1FE000, ev.func_mask);
+    TEST_ASSERT_EQUAL_HEX32(0x22000, ev.func_bits);
+}
+
+void test_functions_f21_to_f28_use_the_0xdf_packet(void) {
+    // Real capture: ...34 02 03 5F 08 = 0xDF group, data 0x08 = F24.
+    LnSlotEvent ev = send({LN_OPC_IMM_PACKET, 0x0B, 0x7F, 0x34, 0x02, 0x03, 0x5F, 0x08, 0x00, 0x00});
+    TEST_ASSERT_EQUAL_HEX32(0x1FE00000, ev.func_mask);
+    TEST_ASSERT_EQUAL_HEX32(0x01000000, ev.func_bits);
+}
+
+void test_immediate_packet_with_a_long_address(void) {
+    // Long address 1211 = 0xC4 0xBB, then 0xA1 (F9): the three bit-7s sit in DHI.
+    LnSlotEvent ev = send({LN_OPC_IMM_PACKET, 0x0B, 0x7F, 0x34, 0x07, 0x44, 0x3B, 0x21, 0x00, 0x00});
+    TEST_ASSERT_EQUAL_UINT16(1211, ev.address);
+    TEST_ASSERT_EQUAL_HEX32(0x0200, ev.func_bits);
+}
+
+void test_unrecognised_immediate_packet_is_acknowledged_but_not_reported(void) {
+    LnSlotEvent ev = send({LN_OPC_IMM_PACKET, 0x0B, 0x7F, 0x24, 0x00, 0x03, 0x40, 0x00, 0x00, 0x00});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, ev.flags);
+    TEST_ASSERT_TRUE(server.hasReply());
+}
+
+void test_slot_write_right_after_selecting_is_not_a_command(void) {
+    // The UT6 writes the slot back (EF) as it selects; that repeats what we
+    // told it and must never reach the layout.
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    LnSlotEvent ev = send({LN_OPC_WR_SL_DATA, 14, 0x01, 0x33, 0x03, 0x30, 0x20, 0x07,
+                           0x00, 0x00, 0x00, 0x4F, 0x64});
+    // It takes the slot, so it is a selection - but never a drive command.
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_SELECT, ev.flags);
+    TEST_ASSERT_EQUAL_UINT16(3, ev.address);
+}
+
+void test_null_move_reports_a_selection(void) {
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    LnSlotEvent ev = send({LN_OPC_MOVE_SLOTS, 0x01, 0x01});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_SELECT, ev.flags);
+    TEST_ASSERT_EQUAL_UINT16(3, ev.address);
+}
+
+void test_loco_adr_probe_is_not_a_selection(void) {
+    // The UT6 probes an address on every key press; only taking the slot counts.
+    LnSlotEvent ev = send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, ev.flags);
+}
+
+void test_slot_status_write_to_in_use_reports_a_selection(void) {
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    LnSlotEvent ev = send({LN_OPC_SLOT_STAT1, 0x01, 0x33});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_SELECT, ev.flags);
+    TEST_ASSERT_EQUAL_UINT16(3, ev.address);
+    // Releasing it (what the UT6 does when you leave a loco) is not one.
+    ev = send({LN_OPC_SLOT_STAT1, 0x01, 0x13});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, ev.flags);
+}
+
+void test_dispatch_get_reports_a_selection(void) {
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    send({LN_OPC_MOVE_SLOTS, 0x01, 0x00});
+    LnSlotEvent ev = send({LN_OPC_MOVE_SLOTS, 0x00, 0x00});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_SELECT, ev.flags);
+    TEST_ASSERT_EQUAL_UINT16(3, ev.address);
+}
+
+void test_slot_write_on_a_held_slot_reports_what_changed(void) {
+    selectLoco3();
+    LnSlotEvent ev = send({LN_OPC_WR_SL_DATA, 14, 0x01, 0x33, 0x03, 0x30, 0x20, 0x07,
+                           0x00, 0x00, 0x00, 0x4F, 0x64});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_DRIVE, ev.flags);
+    TEST_ASSERT_EQUAL_UINT8(47, ev.speed);
+}
+
+void test_power_frames_report_events(void) {
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_POWER_ON, send({LN_OPC_GPON}).flags);
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_POWER_OFF, send({LN_OPC_GPOFF}).flags);
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_ESTOP, send({LN_OPC_IDLE}).flags);
+}
+
+// ============================================================================
+// SLOTS LOADED WITH THE LOCO'S REAL STATE
+// ============================================================================
+
+static LnLocoSnapshot g_snapshot;
+static int g_lookup_calls;
+static bool lookupStub(uint16_t address, LnLocoSnapshot* out, void* context) {
+    (void)context;
+    g_lookup_calls++;
+    if (address != 3) {
+        return false;
+    }
+    *out = g_snapshot;
+    return true;
+}
+
+void test_selecting_a_moving_loco_shows_its_real_state(void) {
+    g_snapshot.speed = 40;
+    g_snapshot.direction = 0;
+    g_snapshot.functions = 0x01 | 0x04;     // F0 and F2
+    g_lookup_calls = 0;
+    server.setLocoLookup(lookupStub, nullptr);
+
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_UINT8(41, r.data[5]);          // speed 40 -> LocoNet 41
+    TEST_ASSERT_EQUAL_HEX8(0x12, r.data[6]);         // reverse, F0 (0x10) + F2 (0x02)
+    TEST_ASSERT_EQUAL_UINT8(1, g_lookup_calls);
+}
+
+void test_unknown_loco_falls_back_to_a_stopped_forward_slot(void) {
+    server.setLocoLookup(lookupStub, nullptr);
+    send({LN_OPC_LOCO_ADR, 0x00, 0x09});
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_UINT8(0, r.data[5]);
+    TEST_ASSERT_EQUAL_HEX8(0x20, r.data[6]);
+}
+
+void test_selection_refreshes_from_current_state_again(void) {
+    g_snapshot.speed = 10;
+    g_snapshot.direction = 1;
+    g_snapshot.functions = 0;
+    server.setLocoLookup(lookupStub, nullptr);
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    popReply();
+    g_snapshot.speed = 60;                           // someone else changed it
+    send({LN_OPC_MOVE_SLOTS, 0x01, 0x01});
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_UINT8(61, r.data[5]);
+}
+
+// ============================================================================
+// CHANGES FROM OTHER PROTOCOLS PUSHED TO THE THROTTLE
+// ============================================================================
+
+void test_external_speed_is_pushed_as_a_speed_frame(void) {
+    selectLoco3();
+    TEST_ASSERT_EQUAL_UINT8(1, server.applyExternalDrive(3, 50, 1, now_ms));
+    LnFrame f = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_LOCO_SPD, f.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(1, f.data[1]);           // slot
+    TEST_ASSERT_EQUAL_UINT8(51, f.data[2]);          // bridge 50 -> LocoNet 51
+    TEST_ASSERT_FALSE(server.hasReply());            // direction unchanged
+    TEST_ASSERT_EQUAL_UINT8(51, server.slot(1).speed);
+}
+
+void test_external_change_that_matches_the_slot_sends_nothing(void) {
+    selectLoco3();
+    server.applyExternalDrive(3, 50, 1, now_ms);
+    popReply();
+    server.applyExternalDrive(3, 50, 1, now_ms);
+    TEST_ASSERT_FALSE(server.hasReply());
+}
+
+void test_external_direction_change_is_pushed_as_dirf(void) {
+    selectLoco3();
+    server.applyExternalDrive(3, 0, 0, now_ms);
+    LnFrame f = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_LOCO_DIRF, f.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, f.data[2]);         // reverse, no functions
+}
+
+void test_external_functions_are_pushed_as_dirf_and_snd(void) {
+    selectLoco3();
+    TEST_ASSERT_EQUAL_UINT8(1, server.applyExternalFunctions(3, 0x01 | 0x20, now_ms));   // F0 + F5
+    LnFrame dirf = popReply();
+    LnFrame snd = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_LOCO_DIRF, dirf.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x30, dirf.data[2]);      // forward + F0
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_LOCO_SND, snd.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, snd.data[2]);       // F5
+}
+
+void test_external_change_for_a_loco_no_throttle_holds_does_nothing(void) {
+    selectLoco3();
+    TEST_ASSERT_EQUAL_UINT8(0, server.applyExternalDrive(99, 50, 1, now_ms));
+    TEST_ASSERT_FALSE(server.hasReply());
+}
+
+void test_external_emergency_stop_and_resume_queue_the_bus_frames(void) {
+    server.applyExternalEmergencyStop();
+    LnFrame idle = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_IDLE, idle.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, server.trackStatus() & LN_TRK_RUNNING);
+
+    server.applyExternalResume();
+    LnFrame on = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_GPON, on.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(LN_TRK_POWER | LN_TRK_RUNNING, server.trackStatus() & 0x03);
+}
+
 int main(void) {
     UNITY_BEGIN();
+
+    RUN_TEST(test_speed_conversion_between_loconet_and_bridge);
+    RUN_TEST(test_speed_frame_reports_a_drive_event);
+    RUN_TEST(test_repeating_the_same_speed_reports_nothing);
+    RUN_TEST(test_emergency_stop_speed_maps_to_bridge_speed_zero);
+    RUN_TEST(test_direction_bit_is_a_drive_event_not_a_function_event);
+    RUN_TEST(test_dirf_function_bits_map_to_f0_to_f4);
+    RUN_TEST(test_snd_function_bits_map_to_f5_to_f8);
+    RUN_TEST(test_functions_f9_to_f12_arrive_as_a_dcc_packet);
+    RUN_TEST(test_functions_f13_to_f20_use_the_0xde_packet);
+    RUN_TEST(test_functions_f21_to_f28_use_the_0xdf_packet);
+    RUN_TEST(test_immediate_packet_with_a_long_address);
+    RUN_TEST(test_unrecognised_immediate_packet_is_acknowledged_but_not_reported);
+    RUN_TEST(test_slot_write_right_after_selecting_is_not_a_command);
+    RUN_TEST(test_null_move_reports_a_selection);
+    RUN_TEST(test_loco_adr_probe_is_not_a_selection);
+    RUN_TEST(test_slot_status_write_to_in_use_reports_a_selection);
+    RUN_TEST(test_dispatch_get_reports_a_selection);
+    RUN_TEST(test_slot_write_on_a_held_slot_reports_what_changed);
+    RUN_TEST(test_power_frames_report_events);
+    RUN_TEST(test_selecting_a_moving_loco_shows_its_real_state);
+    RUN_TEST(test_unknown_loco_falls_back_to_a_stopped_forward_slot);
+    RUN_TEST(test_selection_refreshes_from_current_state_again);
+    RUN_TEST(test_external_speed_is_pushed_as_a_speed_frame);
+    RUN_TEST(test_external_change_that_matches_the_slot_sends_nothing);
+    RUN_TEST(test_external_direction_change_is_pushed_as_dirf);
+    RUN_TEST(test_external_functions_are_pushed_as_dirf_and_snd);
+    RUN_TEST(test_external_change_for_a_loco_no_throttle_holds_does_nothing);
+    RUN_TEST(test_external_emergency_stop_and_resume_queue_the_bus_frames);
 
     RUN_TEST(test_slot_read_layout);
 

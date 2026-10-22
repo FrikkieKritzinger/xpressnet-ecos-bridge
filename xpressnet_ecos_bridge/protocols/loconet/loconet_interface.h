@@ -24,9 +24,15 @@
 #include "loconet_protocol.h"
 #include "loconet_slots.h"
 
+class CommandRouter;
+
 class LocoNetInterface : public ProtocolInterface {
 public:
     LocoNetInterface();
+
+    // Registers the router that receives a LocoNet throttle's commands and
+    // supplies the real state a newly selected slot is loaded with.
+    void setCommandRouter(CommandRouter* r);
 
     // Must be the very first thing setup() does (before anything slow):
     // releases the bus (GPIO0 is held high by the boot strap, which turns
@@ -38,9 +44,12 @@ public:
     bool begin() override;
     void update() override;
 
-    // Nothing is sent to LocoNet from other protocols yet (step P3).
+    // Changes from the other protocols: update the slots holding that loco
+    // and queue the frames that make a throttle's display follow.
     void sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) override;
     void sendFunctionCommand(uint16_t address, uint32_t functions) override;
+    void sendEmergencyStop() override;
+    void sendResumeOperation() override;
 
     ComponentStatus getStatus() const override;
     const char* getName() const override { return "LocoNet"; }
@@ -53,6 +62,7 @@ private:
     LnFrameParser parser;
     LnSlotServer slot_server;
     SoftwareSerial ln_tx;
+    CommandRouter* router;
 
     bool seen_frame;
     unsigned long last_frame_ms;
@@ -64,6 +74,7 @@ private:
     uint32_t tx_dropped;
 
     void logFrame(const LnFrame& frame);
+    void routeEvent(const LnSlotEvent& event);
     void serviceTransmit(unsigned long now_ms);
     bool transmitFrame(const LnFrame& frame);
     void sendBreak();

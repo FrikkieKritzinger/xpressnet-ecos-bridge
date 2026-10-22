@@ -1590,18 +1590,36 @@ real needs come up rather than pre-committing to a fixed scope.
      deferred as its own low-priority follow-up (Phase 7, new item 6
      below), not blocking anything else.
 3. ⬜ **LocoNet support** - parallel to XpressNet, carried over from
-   Phase 6 step 5. **Status as of 2026-10-22**: the corrected v2.1 main
-   board arrived and **hardware bring-up steps 1-2 passed** (see the
-   bring-up bullet below); LocoNet bus power is confirmed - a Digitrax
-   **UT6** (has a display, so other-throttle changes are visible) plugged
-   into the LocoNet socket powers up, beeps and shows its loco-select
-   screen. **No LocoNet firmware exists yet** (`ENABLE_LOCONET` = 0, stub
-   header only), so the UT6 has no command station to talk to. Pins per
-   Gahtow's D1 Mini design (TX D3/GPIO0, RX GPIO3 - see Hardware
-   Configuration). History: the first board had a PCB error (a KiCad
-   auto-connection tied R6 to the permanent 5V rail), fixed in v2.1.
-   **Next: start firmware** - first a passive RX-only capture of what the
-   UT6 sends, then the command-station behaviour it needs.
+   Phase 6 step 5. **Status as of 2026-10-22 (end of day) - work is on the
+   local-and-pushed `loconet` branch, NOT merged to `main`** (main stays the
+   proven v1.4.0; version still 1.4.0, bump decided with the user once
+   LocoNet is confirmed). v2.1 board bring-up passed. Built and tested so
+   far:
+   - **P1 passive RX - confirmed on hardware**: hardware UART0 at 16660
+     baud (non-inverted) decodes real frames from a Digitrax UT6.
+   - **P2 slot server + transmit - confirmed on hardware**: the UT6
+     selects locos (LOCO_ADR/MOVE_SLOTS/WR_SL_DATA), shows LN and Trk icons,
+     and its speed/direction/function frames are received; replies go out
+     9 ms after a request with no collisions. Flashed and running.
+   - **P3 routing - written, 372 native tests pass, firmware builds, NOT yet
+     flashed or hardware-tested**: LocoNet drive/function/e-stop/select
+     events -> `CommandRouter` (`handleLocoNetCommand` etc.), fan-out to Ecos
+     and the other protocols and back (slot updates sent as OPC_LOCO_SPD/
+     DIRF/SND), slots loaded with the loco's real state on selection.
+     **Next session: flash P3 (pull the D1 and flash on USB - flashing with
+     the D1 seated in the motherboard fails), then test against Ecos with a
+     real loco: speed, direction polarity (LocoNet DIRF bit5=1 forward is
+     mapped straight to the bridge's 1=forward - unverified against Ecos),
+     functions F0-F28, e-stop, and a second throttle (MultiMaus/WLANmaus)
+     seeing UT6 changes and vice versa.**
+   - Tooling: debug text is a TCP log on port 23 (`tools/netlog.py`) because
+     UART0 belongs to LocoNet; any global-constructor logging must not touch
+     non-constant-initialized state (caused a boot loop, fixed). Spec:
+     `docs/loconet-personal-use-edition-1.0.pdf` (gitignored). Wire-verified
+     findings: `E:\Claude\shared\loconet.md`. Open ideas: a dev-only network
+     updater to avoid pulling the D1 for every flash (needs the user's
+     agreement - loosens the OTA-only-in-Setup-Mode rule); LACK/accessory
+     (SW_REQ) handling and an OLED slot page are not done yet.
    - **Bring-up plan for the v2.1 board (agreed 2026-10-11)**: flash
      nothing new first - keep the proven v1.4.0 firmware on the D1 (current
      `main`, `325b1d8`, is functionally identical) so any fault is
@@ -1708,7 +1726,7 @@ real needs come up rather than pre-committing to a fixed scope.
 
 ---
 
-**Last Updated**: 2026-10-11 (docs/code alignment audit; status unchanged since v1.4.0 - see Phase 7 item 3 for LocoNet hardware status). **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-10-22 (LocoNet P1-P2 working on hardware, P3 written; see Phase 7 item 3 - `main` is still v1.4.0). **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,

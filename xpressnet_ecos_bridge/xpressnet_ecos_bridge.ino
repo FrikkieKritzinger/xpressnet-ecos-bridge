@@ -208,6 +208,7 @@ void setup() {
         } else {
             debugPrintf("LocoNet interface initialized\n");
             router.setLocoNetInterface(&loconet_interface);
+            loconet_interface.setCommandRouter(&router);
         }
     #endif
 

@@ -352,6 +352,142 @@ void CommandRouter::handleZ21FunctionCommand(uint16_t address, uint32_t function
 }
 
 // ============================================================================
+// HANDLE LOCONET COMMANDS (Phase 7 item 3, step P3)
+// ============================================================================
+
+#if ENABLE_LOCONET
+void CommandRouter::handleLocoNetCommand(uint16_t address, uint8_t speed, uint8_t direction) {
+    DEBUG_PRINTF("LocoNet: Loco %u Speed %u Dir %u\n", address, speed, direction);
+
+    if (!isValidDccAddress(address)) {
+        DEBUG_PRINTF("ERROR: Invalid LocoNet address: %u\n", address);
+        return;
+    }
+    if (!isValidSpeed(speed) || !isValidDirection(direction)) {
+        DEBUG_PRINTF("ERROR: Invalid speed (%u) or direction (%u)\n", speed, direction);
+        return;
+    }
+
+    // No echo check on the way in, same reasoning as the Z21 handler: the
+    // bridge's own frames on the bus are consumed as transmit echo inside
+    // LocoNetInterface and never reach here.
+
+    LocoState new_state;
+    new_state.dcc_address = address;
+    new_state.speed = speed;
+    new_state.direction = direction;
+    new_state.functions = 0;
+    new_state.last_source = LocoSource::LOCONET;
+
+    LocoState existing;
+    bool already_subscribed = false;
+    if (state_engine.getLoco(address, existing)) {
+        new_state.functions = existing.functions;
+        already_subscribed = existing.subscribed_to_ecos;
+    }
+    new_state.subscribed_to_ecos = true;
+
+    if (!state_engine.addOrUpdateLoco(address, new_state)) {
+        DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u (state engine full?)\n", address);
+        return;
+    }
+
+    if (!already_subscribed) {
+        DEBUG_STATE_PRINTF("New loco from LocoNet: requesting Ecos subscription\n");
+        requestEcosSubscription(address);
+    }
+
+    // Drive-only, functions untouched here
+    broadcastCommand(address, new_state, LocoSource::LOCONET, false);
+
+    total_commands_count++;
+    last_command.address = address;
+    last_command.speed = speed;
+    last_command.direction = direction;
+    last_command.functions = new_state.functions;
+    last_command.source = LocoSource::LOCONET;
+
+    echo_state.last_loco_address = address;
+    echo_state.last_command_type = 0;  // SPEED command type
+    echo_state.last_timestamp_ms = now_ms();
+    echo_state.last_source = LocoSource::LOCONET;
+}
+
+void CommandRouter::handleLocoNetFunctionCommand(uint16_t address, uint32_t functions) {
+    DEBUG_PRINTF("LocoNet: Loco %u Functions 0x%08lx\n", address, (unsigned long)functions);
+
+    if (!isValidDccAddress(address)) {
+        DEBUG_PRINTF("ERROR: Invalid LocoNet address: %u\n", address);
+        return;
+    }
+
+    LocoState new_state;
+    if (!state_engine.getLoco(address, new_state)) {
+        new_state.dcc_address = address;
+        new_state.speed = 0;
+        new_state.direction = 1;
+        new_state.functions = functions;
+        new_state.last_source = LocoSource::LOCONET;
+        new_state.subscribed_to_ecos = true;
+
+        if (!state_engine.addOrUpdateLoco(address, new_state)) {
+            DEBUG_STATE_PRINTF("ERROR: Failed to add loco %u\n", address);
+            return;
+        }
+
+        requestEcosSubscription(address);
+    } else {
+        new_state.functions = functions;
+        new_state.last_source = LocoSource::LOCONET;
+        state_engine.addOrUpdateLoco(address, new_state);
+    }
+
+    broadcastCommand(address, new_state, LocoSource::LOCONET);
+
+    total_commands_count++;
+    last_command.address = address;
+    last_command.speed = new_state.speed;
+    last_command.direction = new_state.direction;
+    last_command.functions = new_state.functions;
+    last_command.source = LocoSource::LOCONET;
+
+    echo_state.last_loco_address = address;
+    echo_state.last_command_type = 1;  // FUNCTION command type
+    echo_state.last_timestamp_ms = now_ms();
+    echo_state.last_source = LocoSource::LOCONET;
+}
+
+void CommandRouter::trackLocoForThrottle(uint16_t address) {
+    if (!isValidDccAddress(address)) {
+        return;
+    }
+
+    LocoState existing;
+    if (state_engine.getLoco(address, existing)) {
+        if (!existing.subscribed_to_ecos) {
+            existing.subscribed_to_ecos = true;
+            state_engine.addOrUpdateLoco(address, existing);
+            requestEcosSubscription(address);
+        }
+        return;
+    }
+
+    LocoState new_state;
+    new_state.dcc_address = address;
+    new_state.speed = 0;
+    new_state.direction = 1;
+    new_state.functions = 0;
+    new_state.last_source = LocoSource::LOCONET;
+    new_state.subscribed_to_ecos = true;
+    if (!state_engine.addOrUpdateLoco(address, new_state)) {
+        return;
+    }
+    DEBUG_STATE_PRINTF("LocoNet throttle selected new loco %u: requesting Ecos subscription\n", address);
+    requestEcosSubscription(address);
+}
+#endif  // ENABLE_LOCONET
+
+// ============================================================================
 // HANDLE ECOS COMMANDS
 // ============================================================================
 
@@ -648,6 +784,11 @@ void CommandRouter::emergencyStopAll(LocoSource source) {
             z21->sendSpeedCommand(loco->dcc_address, 0, loco->direction);
         }
         #endif
+        #if ENABLE_LOCONET
+        if (loconet != nullptr) {
+            loconet->sendSpeedCommand(loco->dcc_address, 0, loco->direction);
+        }
+        #endif
     }
 
     // The system-wide stop only goes to whichever side didn't already
@@ -675,6 +816,12 @@ void CommandRouter::emergencyStopAll(LocoSource source) {
         z21->sendEmergencyStop();
     }
     #endif
+
+    #if ENABLE_LOCONET
+    if (source != LocoSource::LOCONET && loconet != nullptr) {
+        loconet->sendEmergencyStop();
+    }
+    #endif
 }
 
 void CommandRouter::resumeOperation(LocoSource source) {
@@ -698,6 +845,12 @@ void CommandRouter::resumeOperation(LocoSource source) {
     #if ENABLE_Z21_LAN
     if (source != LocoSource::Z21_LAN && z21 != nullptr) {
         z21->sendResumeOperation();
+    }
+    #endif
+
+    #if ENABLE_LOCONET
+    if (source != LocoSource::LOCONET && loconet != nullptr) {
+        loconet->sendResumeOperation();
     }
     #endif
 }
@@ -797,7 +950,8 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
      * subsequent speed change re-asserted the bridge's stale belief.
      */
 
-    if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN) {
+    if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN ||
+        source == LocoSource::LOCONET) {
         // Forward to Ecos, the persistent source of truth for this loco's
         // state.
         #if ENABLE_ECOS_LAN
@@ -844,6 +998,15 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
             }
         }
         #endif
+        #if ENABLE_LOCONET
+        if (source != LocoSource::LOCONET && loconet != nullptr) {
+            DEBUG_PRINTF("Broadcasting %s command directly to LocoNet\n", locoSourceToString(source));
+            loconet->sendSpeedCommand(address, state.speed, state.direction);
+            if (functions_changed) {
+                loconet->sendFunctionCommand(address, state.functions);
+            }
+        }
+        #endif
     }
     else if (source == LocoSource::ECOS) {
         // Send to every throttle-facing protocol EXCEPT whichever one just
@@ -881,6 +1044,15 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
             z21->sendSpeedCommand(address, state.speed, state.direction);
             if (functions_changed) {
                 z21->sendFunctionCommand(address, state.functions);
+            }
+        }
+        #endif
+        #if ENABLE_LOCONET
+        if (loconet != nullptr && !wasRecentSource(address, LocoSource::LOCONET)) {
+            DEBUG_PRINTF("Broadcasting Ecos command to LocoNet\n");
+            loconet->sendSpeedCommand(address, state.speed, state.direction);
+            if (functions_changed) {
+                loconet->sendFunctionCommand(address, state.functions);
             }
         }
         #endif
