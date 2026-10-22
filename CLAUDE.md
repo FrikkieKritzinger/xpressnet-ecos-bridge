@@ -1590,16 +1590,18 @@ real needs come up rather than pre-committing to a fixed scope.
      deferred as its own low-priority follow-up (Phase 7, new item 6
      below), not blocking anything else.
 3. ⬜ **LocoNet support** - parallel to XpressNet, carried over from
-   Phase 6 step 5. **Status as of 2026-10-11**: pins confirmed against
-   Philipp Gahtow's D1 Mini LocoNet design (TX D3/GPIO0, RX GPIO3 - see
-   Hardware Configuration). The first assembled LocoNet section had a PCB
-   error (a KiCad auto-connection after track rearrangement tied R6 to the
-   permanent 5V rail; a transistor overheated within seconds of power-up) -
-   board design corrected and re-verified, **new boards ordered from PCBWay**
-   (2026-10-11), so no LocoNet hardware is usable until they arrive. The
-   user's own Digitrax throttle is lost; a **UT6** (has a display, so
-   other-throttle changes are visible) is on order. Don't start
-   implementation until a board and a throttle are both in hand.
+   Phase 6 step 5. **Status as of 2026-10-22**: the corrected v2.1 main
+   board arrived and **hardware bring-up steps 1-2 passed** (see the
+   bring-up bullet below); LocoNet bus power is confirmed - a Digitrax
+   **UT6** (has a display, so other-throttle changes are visible) plugged
+   into the LocoNet socket powers up, beeps and shows its loco-select
+   screen. **No LocoNet firmware exists yet** (`ENABLE_LOCONET` = 0, stub
+   header only), so the UT6 has no command station to talk to. Pins per
+   Gahtow's D1 Mini design (TX D3/GPIO0, RX GPIO3 - see Hardware
+   Configuration). History: the first board had a PCB error (a KiCad
+   auto-connection tied R6 to the permanent 5V rail), fixed in v2.1.
+   **Next: start firmware** - first a passive RX-only capture of what the
+   UT6 sends, then the command-station behaviour it needs.
    - **Bring-up plan for the v2.1 board (agreed 2026-10-11)**: flash
      nothing new first - keep the proven v1.4.0 firmware on the D1 (current
      `main`, `325b1d8`, is functionally identical) so any fault is
@@ -1608,6 +1610,11 @@ real needs come up rather than pre-committing to a fixed scope.
      the one that overheated on v2); (2) D1 seated, LocoNet idle - confirm
      XpressNet and Ecos behave as on the old board; (3) only then bring up
      LocoNet.
+     **Result (2026-10-22): steps 1 and 2 passed** - rails 12.08V/5.01V, no
+     heat or shorts; D1 + MAX485 + OLED up; MultiMaus and WLANmaus both
+     attach and interact exactly as before the rebuild (same v1.4.0
+     firmware, nothing reflashed). Step 3 started: UT6 powers from the
+     LocoNet socket.
    - **Design decision agreed 2026-09-23, before any implementation**:
      LocoNet's real select/steal/dispatch slot-ownership model (a
      throttle must actively select or steal a loco's slot before

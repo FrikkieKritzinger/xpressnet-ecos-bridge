@@ -7,6 +7,12 @@ here. Newest entries first.
 
 ---
 
+**2026-10-22 — v2.1 main board bring-up: passed; UT6 powers from the LocoNet socket**
+
+The corrected main PCB (v2.1, after the R6/5V KiCad auto-connection error on the first board) arrived and was assembled to the circuit diagram. Followed the agreed bring-up order with the proven v1.4.0 firmware unchanged on the D1, so any fault would have been hardware: (1) power only with a 15V supply and daughter boards off - 12.08V on the 12V rail, 5.01V on the 5V rail, GND/12V correct on both the XpressNet and LocoNet RJ12 sockets; (2) D1 Mini, MAX485 and OLED fitted - no heat, no shorts, OLED boots to its first page; MultiMaus attached first time and showed on the OLED, WLANmaus connected immediately, and the two throttles interacted as they did before the rebuild. Step 3 began: a Digitrax UT6 plugged into the LocoNet socket powered up, beeped and showed its loco-select screen, confirming LocoNet bus power. No LocoNet firmware exists yet, so nothing answers the UT6; that is the next piece of work.
+
+---
+
 **2026-10-11 — Documentation/code alignment audit; LocoNet PCB error found and boards re-ordered**
 
 *Hardware.* The first assembled LocoNet section of the motherboard PCB had a layout error: one transistor ran very hot within seconds of power-up because a trace to its pin 1 was wrong. Root cause on the user's review: after rearranging tracks in the PCB editor, some traces ended up too close to a component and KiCad treated them as intended connections, tying R6 to the permanent 5V rail. The board design was corrected and re-checked from both the schematic and PCB-editor perspectives (several full trace-throughs), and new boards were ordered from PCBWay. Not fixable by board hack; the interim workaround of feeding 12V from the LocoNet master-power jumper to pin 1 is bench-only. LocoNet firmware remains unstarted (needs the new boards and the UT6 throttle on order).
