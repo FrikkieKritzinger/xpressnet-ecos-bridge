@@ -7,6 +7,16 @@ here. Newest entries first.
 
 ---
 
+**2026-10-22 (end of day) — dev network updater built; board flashed with `wemos_dev`; stop point**
+
+Added a development-only network firmware updater, agreed with the user because pulling the D1 for every flash does not scale (esptool cannot sync while it is seated in the motherboard): `utils/dev_ota` (HTTP `/update` on port 8266 via the standard `ESP8266HTTPUpdateServer`), compiled in only by the new `wemos_dev` PlatformIO environment (`ENABLE_DEV_OTA`, default 0 in config.h), with `tools/devflash.py` to build and upload then show the bridge's log. Verified the plain `wemos` firmware contains none of it (no "DEV OTA" string). It has no authentication - dev builds only, never publish from `wemos_dev`; always develop with `wemos_dev` or the updater is lost.
+
+The D1 was flashed over USB (pulled from the motherboard) with `wemos_dev` carrying the P3 routing code and confirmed running on the bench (log shows "DEV OTA listening on port 8266"). **Stopped here**: the D1 had not yet been reseated in the motherboard, so the P3 routing and the updater itself are untested on the real layout. Native suite 372/372 passing. Branch `loconet` pushed (`main` unchanged at v1.4.0).
+
+**Resume with**: reseat the D1 with the UT6 attached, run a no-change `python tools/devflash.py` to prove the network flash, then test routing against Ecos with a real loco (speed, direction polarity, functions F0-F28, e-stop, UT6 <-> MultiMaus/WLANmaus both ways). See CLAUDE.md Phase 7 item 3.
+
+---
+
 **2026-10-22 (later) — LocoNet P1-P3 built on the `loconet` branch; P1/P2 confirmed on hardware**
 
 Followed the agreed plan (read, then P1 passive listen, P2 slot server, P3 routing). Ground truth: the Digitrax LocoNet Personal Use Edition 1.0 spec (downloaded, local only) plus Gahtow's Z21 firmware, which does NOT use the mrrwa library on ESP8266 - hardware UART0 receive and SoftwareSerial transmit, copied here.

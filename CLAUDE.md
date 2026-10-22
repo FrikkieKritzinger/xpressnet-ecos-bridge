@@ -1606,9 +1606,11 @@ real needs come up rather than pre-committing to a fixed scope.
      events -> `CommandRouter` (`handleLocoNetCommand` etc.), fan-out to Ecos
      and the other protocols and back (slot updates sent as OPC_LOCO_SPD/
      DIRF/SND), slots loaded with the loco's real state on selection.
-     **Next session: flash P3 (pull the D1 and flash on USB - flashing with
-     the D1 seated in the motherboard fails), then test against Ecos with a
-     real loco: speed, direction polarity (LocoNet DIRF bit5=1 forward is
+     **RESUME HERE (end of 2026-10-22): the D1 was last flashed over USB
+     with the `wemos_dev` build (includes P3 + the dev updater) and was still
+     on the bench, NOT yet reseated in the motherboard. Next: reseat it with
+     the UT6 attached, run a no-change `python tools/devflash.py` to prove the
+     network flash, then test P3 against Ecos with a real loco: speed, direction polarity (LocoNet DIRF bit5=1 forward is
      mapped straight to the bridge's 1=forward - unverified against Ecos),
      functions F0-F28, e-stop, and a second throttle (MultiMaus/WLANmaus)
      seeing UT6 changes and vice versa.**
