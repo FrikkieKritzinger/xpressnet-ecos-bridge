@@ -1616,10 +1616,16 @@ real needs come up rather than pre-committing to a fixed scope.
      UART0 belongs to LocoNet; any global-constructor logging must not touch
      non-constant-initialized state (caused a boot loop, fixed). Spec:
      `docs/loconet-personal-use-edition-1.0.pdf` (gitignored). Wire-verified
-     findings: `E:\Claude\shared\loconet.md`. Open ideas: a dev-only network
-     updater to avoid pulling the D1 for every flash (needs the user's
-     agreement - loosens the OTA-only-in-Setup-Mode rule); LACK/accessory
-     (SW_REQ) handling and an OLED slot page are not done yet.
+     findings: `E:\Claude\shared\loconet.md`. **Dev network updater
+     (agreed and built 2026-10-22)**: `python tools/devflash.py` builds the
+     `wemos_dev` environment and flashes it over WiFi (port 8266, `/update`)
+     so the D1 can stay seated. The updater exists ONLY in `wemos_dev`
+     (`ENABLE_DEV_OTA`, off in config.h and in the plain `wemos` build - no
+     authentication, never publish a .bin from `wemos_dev`). The first
+     `wemos_dev` flash must still go over USB with the D1 pulled; always
+     develop with `wemos_dev` afterwards, since flashing plain `wemos` over
+     the network removes the updater. Not done yet: SW_REQ (turnout) handling
+     and an OLED slot page.
    - **Bring-up plan for the v2.1 board (agreed 2026-10-11)**: flash
      nothing new first - keep the proven v1.4.0 firmware on the D1 (current
      `main`, `325b1d8`, is functionally identical) so any fault is
