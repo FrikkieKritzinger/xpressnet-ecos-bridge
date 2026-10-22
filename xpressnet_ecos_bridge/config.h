@@ -355,6 +355,14 @@
 // `ncat <bridge-ip> 23`. Read-only, no authentication (matches this
 // project's posture elsewhere). Needed because LocoNet takes over UART0.
 #define ENABLE_NET_LOG              1
+
+// Development-only network firmware updater (utils/dev_ota.h). OFF here and
+// in every release build; only the `wemos_dev` PlatformIO environment turns
+// it on (-DENABLE_DEV_OTA=1). It has no authentication.
+#ifndef ENABLE_DEV_OTA
+#define ENABLE_DEV_OTA              0
+#endif
+#define DEV_OTA_PORT                8266
 #define NET_LOG_PORT                23
 #define NET_LOG_BUFFER_SIZE         4096  // bytes of history kept for late-connecting clients
 

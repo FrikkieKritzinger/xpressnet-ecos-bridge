@@ -50,6 +50,7 @@
 // Utilities
 #include "utils/debug.h"
 #include "utils/net_log.h"
+#include "utils/dev_ota.h"
 #include "utils/timing.h"
 
 // ============================================================================
@@ -270,6 +271,7 @@ void loop() {
     #endif
 
     netLogUpdate();
+    devOtaUpdate();
 
     // ========================================================================
     // PHASE 3: PERIODIC HOUSEKEEPING (low priority)
