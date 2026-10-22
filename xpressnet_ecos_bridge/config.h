@@ -36,7 +36,7 @@
 
 #define ENABLE_XPRESSNET        1    // XpressNet interface (hardwired, timing-critical)
 #define ENABLE_ECOS_LAN         1    // Ecos LAN interface (WiFi, text object protocol)
-#define ENABLE_LOCONET          0    // LocoNet interface (future)
+#define ENABLE_LOCONET          1    // LocoNet interface (Phase 7 item 3 - in development)
 #define ENABLE_Z21_LAN          1    // Z21 LAN protocol (Phase 6 step 4 - WLANmaus support)
 #define ENABLE_OLED_DISPLAY     1    // OLED status display
 
@@ -171,9 +171,36 @@
 // ============================================================================
 
 #if ENABLE_LOCONET
-    // TODO: Define LocoNet pins and configuration when implementing
-    #define LOCONET_RX_PIN          0    // Placeholder
-    #define LOCONET_TX_PIN          0    // Placeholder
+    // Wiring follows Philipp Gahtow's D1 Mini LocoNet design (confirmed
+    // against his Z21 firmware, LNHwSerial.h): receive on the HARDWARE UART0
+    // RX pin (GPIO3 - immune to the interrupt latency that XpressNet's
+    // SoftwareSerial causes), transmit on D3/GPIO0 through a BC547 that pulls
+    // the bus low, so the TX line is INVERTED (GPIO high = bus low/"space",
+    // GPIO low = bus released).
+    //
+    // Consequences, all inherent to this pin choice:
+    // - UART0 is the LocoNet receiver, so Serial runs at LOCONET_BAUD and USB
+    //   serial debug is unreliable; debug output goes to the network log
+    //   (utils/net_log.h) instead - see DEBUG_TO_SERIAL below.
+    // - GPIO0 is a boot-strap pin: at reset the base resistor holds the bus
+    //   low until setup() releases it, so release it first thing in setup().
+    // - Flashing over USB needs the D1 Mini removed from its socket (or use
+    //   OTA from Setup Mode).
+    #define LOCONET_RX_PIN          3    // GPIO3 / UART0 RX (hardware serial, not configurable)
+    #define LOCONET_TX_PIN          0    // D3 / GPIO0, inverted, through BC547
+    #define LOCONET_BAUD            16660   // Spec: 60us bit time = 16.66 kbaud +/-1.5%
+    #define LOCONET_RX_BUFFER_BYTES 512     // UART0 software RX buffer (default 256)
+
+    // Status reads CONNECTED while a valid frame was seen this recently.
+    // LocoNet has no polling, so an idle layout is legitimately silent;
+    // a throttle pings well inside this (spec: about every 100 s).
+    #define LOCONET_BUS_TIMEOUT_MS  120000
+
+    // Bring-up aid: also log each batch of raw received bytes (one line per
+    // update() pass that received anything). Shows garbage if RX polarity or
+    // baud is wrong, which framed-message logging alone would hide. Turn off
+    // once LocoNet is proven - it is noisy.
+    #define LOCONET_RAW_TRACE       1
 #endif
 
 // ============================================================================
@@ -308,7 +335,24 @@
 // Enable/disable serial debug output
 
 #define ENABLE_DEBUG                1     // Master debug enable
-#define DEBUG_BAUD                  115200  // Serial monitor speed
+#define DEBUG_BAUD                  115200  // Serial monitor speed (used only when LocoNet is disabled)
+
+// Network debug log (utils/net_log.h): all debug output is also streamed
+// over TCP to one client on NET_LOG_PORT once WiFi is up, e.g.
+// `ncat <bridge-ip> 23`. Read-only, no authentication (matches this
+// project's posture elsewhere). Needed because LocoNet takes over UART0.
+#define ENABLE_NET_LOG              1
+#define NET_LOG_PORT                23
+#define NET_LOG_BUFFER_SIZE         4096  // bytes of history kept for late-connecting clients
+
+// Mirror debug output to Serial as well. Off while LocoNet owns UART0: at
+// LOCONET_BAUD (16660) Serial.print() blocks ~7x longer than at 115200 once
+// its FIFO fills, which is exactly the slow-output-in-a-hot-path hazard.
+#if ENABLE_LOCONET
+    #define DEBUG_TO_SERIAL         0
+#else
+    #define DEBUG_TO_SERIAL         1
+#endif
 
 // Specific debug output (only if ENABLE_DEBUG is 1)
 #define DEBUG_STARTUP               1     // Show startup messages
@@ -316,6 +360,7 @@
 #define DEBUG_ECOS                  1     // Show Ecos TCP messages
 #define DEBUG_STATE_ENGINE          1     // Show state engine operations
 #define DEBUG_ECHO_PREVENTION       1     // Show echo prevention decisions
+#define DEBUG_LOCONET               1     // Show LocoNet frames
 #define DEBUG_TIMING                0     // Show loop timing (verbose)
 #define DEBUG_MEMORY                0     // Show heap usage (verbose)
 

@@ -58,6 +58,15 @@ public:
     #endif
 
     /**
+     * Set reference to the LocoNet interface (Phase 7 item 3). While
+     * LocoNet is passive-listen only, the router uses it just to surface
+     * status and frame counters; routing comes with the slot server.
+     */
+    #if ENABLE_LOCONET
+    void setLocoNetInterface(ProtocolInterface* loconet);
+    #endif
+
+    /**
      * Handle incoming command from XpressNet
      * 1. Update state engine
      * 2. Check echo prevention
@@ -212,6 +221,10 @@ private:
 
     #if ENABLE_Z21_LAN
     ProtocolInterface* z21 = nullptr;
+    #endif
+
+    #if ENABLE_LOCONET
+    ProtocolInterface* loconet = nullptr;
     #endif
 
     // Echo prevention state

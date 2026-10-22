@@ -118,7 +118,8 @@ private:
         PAGE_XNET = 2,
         PAGE_ECOS = 3,
         PAGE_Z21 = 4,
-        PAGE_COUNT = 5
+        PAGE_LOCONET = 5,
+        PAGE_COUNT = 6
     };
     
     DisplayPage current_page;
@@ -152,6 +153,7 @@ private:
     void drawXpressNetScreen();
     void drawEcosScreen();
     void drawZ21Screen();
+    void drawLocoNetScreen();
     void drawErrorPopup();
     void drawBootLogo();
 

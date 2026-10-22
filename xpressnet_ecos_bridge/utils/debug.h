@@ -32,12 +32,16 @@
 #if ENABLE_DEBUG
 
 #ifdef ARDUINO
+    // All Arduino debug output goes through debugEmit() (utils/net_log.h):
+    // into the network log ring, and to Serial only if DEBUG_TO_SERIAL.
+    #include "net_log.h"
+
     /**
      * Debug print with newline
      * Usage: DEBUG_PRINT("Message\n");
      */
     #define DEBUG_PRINT(msg) \
-        do { Serial.print(msg); } while(0)
+        do { debugEmit(msg); } while(0)
 
     /**
      * Debug printf (formatted output)
@@ -47,7 +51,7 @@
         do { \
             char _debug_buf[256]; \
             snprintf(_debug_buf, sizeof(_debug_buf), fmt, ##__VA_ARGS__); \
-            Serial.print(_debug_buf); \
+            debugEmit(_debug_buf); \
         } while(0)
 
     /**
@@ -57,10 +61,9 @@
      */
     #define DEBUG_PRINT_TS(msg) \
         do { \
-            Serial.print("["); \
-            Serial.print(millis()); \
-            Serial.print("ms] "); \
-            Serial.print(msg); \
+            char _debug_buf[256]; \
+            snprintf(_debug_buf, sizeof(_debug_buf), "[%lums] %s", (unsigned long)millis(), msg); \
+            debugEmit(_debug_buf); \
         } while(0)
 
     /**
@@ -70,11 +73,9 @@
     #define DEBUG_PRINTF_TS(fmt, ...) \
         do { \
             char _debug_buf[256]; \
-            snprintf(_debug_buf, sizeof(_debug_buf), fmt, ##__VA_ARGS__); \
-            Serial.print("["); \
-            Serial.print(millis()); \
-            Serial.print("ms] "); \
-            Serial.print(_debug_buf); \
+            int _debug_n = snprintf(_debug_buf, sizeof(_debug_buf), "[%lums] ", (unsigned long)millis()); \
+            snprintf(_debug_buf + _debug_n, sizeof(_debug_buf) - _debug_n, fmt, ##__VA_ARGS__); \
+            debugEmit(_debug_buf); \
         } while(0)
 #else  // !ARDUINO (native/test environment)
     // When compiling natively (not Arduino), debug output goes to stdout
@@ -135,6 +136,14 @@
     #define DEBUG_ECOS_PRINT(msg) do {} while(0)
     #define DEBUG_ECOS_PRINTF(fmt, ...) do {} while(0)
     #define DEBUG_ECOS_PRINT_TS(msg) do {} while(0)
+#endif
+
+#if ENABLE_DEBUG && DEBUG_LOCONET
+    #define DEBUG_LOCONET_PRINTF(fmt, ...) DEBUG_PRINTF(fmt, ##__VA_ARGS__)
+    #define DEBUG_LOCONET_PRINTF_TS(fmt, ...) DEBUG_PRINTF_TS(fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOCONET_PRINTF(fmt, ...) do {} while(0)
+    #define DEBUG_LOCONET_PRINTF_TS(fmt, ...) do {} while(0)
 #endif
 
 #if ENABLE_DEBUG && DEBUG_STATE_ENGINE

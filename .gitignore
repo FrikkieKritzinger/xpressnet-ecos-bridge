@@ -74,3 +74,6 @@ xpressnet_ecos_bridge/wifi_credentials.local.h
 # reference material only, never commit (this repo is public)
 docs/ecos_pc_interface3.pdf
 docs/z21-lan-protokoll-en.pdf
+
+# Digitrax LocoNet Personal Use Edition spec - private-use licence, no redistribution
+docs/loconet-personal-use-edition-1.0.pdf

@@ -25,8 +25,8 @@ enum class LocoSource {
     UNKNOWN = 0,
     XPRESSNET = 1,
     ECOS = 2,
-    LOCONET = 3,       // Future
-    Z21_LAN = 4        // Future
+    LOCONET = 3,
+    Z21_LAN = 4
 };
 
 /**
@@ -104,7 +104,8 @@ struct SystemStatus {
     ComponentStatus xnet_status;
     ComponentStatus ecos_status;
     ComponentStatus z21_status;
-    
+    ComponentStatus loconet_status;
+
     // Session info
     int active_locos;               // Number of locos in state engine
 
@@ -138,6 +139,11 @@ struct SystemStatus {
     uint8_t z21_client_count;
     unsigned long z21_last_message_age_ms;
     char z21_last_message_ip[16];  // Dotted-quad IPv4, e.g. "192.168.0.115"
+
+    // LocoNet OLED page (Phase 7 item 3)
+    uint32_t loconet_frames_ok;
+    uint32_t loconet_rx_errors;
+    unsigned long loconet_last_frame_age_ms;
 };
 
 // ============================================================================

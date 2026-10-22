@@ -70,6 +70,13 @@ void CommandRouter::setZ21Interface(ProtocolInterface* z21_intf) {
 }
 #endif
 
+#if ENABLE_LOCONET
+void CommandRouter::setLocoNetInterface(ProtocolInterface* loconet_intf) {
+    loconet = loconet_intf;
+    DEBUG_PRINT("LocoNet interface registered with router\n");
+}
+#endif
+
 // ============================================================================
 // HANDLE XPRESSNET COMMANDS
 // ============================================================================
@@ -942,6 +949,22 @@ SystemStatus CommandRouter::getSystemStatus() const {
     status.z21_client_count = 0;
     status.z21_last_message_age_ms = ProtocolInterface::NO_TIMESTAMP;
     status.z21_last_message_ip[0] = '\0';
+    #endif
+
+    #if ENABLE_LOCONET
+    status.loconet_status = (loconet != nullptr) ?
+                         loconet->getStatus() :
+                         ComponentStatus::DISCONNECTED;
+    status.loconet_frames_ok = (loconet != nullptr) ? loconet->getRxFrameCount() : 0;
+    status.loconet_rx_errors = (loconet != nullptr) ? loconet->getRxErrorCount() : 0;
+    status.loconet_last_frame_age_ms = (loconet != nullptr) ?
+                         loconet->getLastMessageAgeMs() :
+                         ProtocolInterface::NO_TIMESTAMP;
+    #else
+    status.loconet_status = ComponentStatus::DISCONNECTED;
+    status.loconet_frames_ok = 0;
+    status.loconet_rx_errors = 0;
+    status.loconet_last_frame_age_ms = ProtocolInterface::NO_TIMESTAMP;
     #endif
 
     // Deferred OLED fields (Phase 5 step 8)

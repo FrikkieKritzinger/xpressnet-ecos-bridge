@@ -49,6 +49,7 @@
 
 // Utilities
 #include "utils/debug.h"
+#include "utils/net_log.h"
 #include "utils/timing.h"
 
 // ============================================================================
@@ -106,10 +107,18 @@ TimedTask debug_output_task(10000);     // Every 10 seconds (if debug enabled)
 // ============================================================================
 
 void setup() {
-    // Initialize serial for debug output
-    #if ENABLE_DEBUG
+    // With LocoNet enabled this must come first: it releases the bus (held
+    // low by the GPIO0 boot strap until now) and starts UART0 as the LocoNet
+    // receiver, so Serial is NOT the debug port - debug text goes to the
+    // network log ring instead (see utils/net_log.h).
+    #if ENABLE_LOCONET
+        LocoNetInterface::initHardware();
+    #elif ENABLE_DEBUG
         Serial.begin(DEBUG_BAUD);
         delay(100);
+    #endif
+
+    #if ENABLE_DEBUG
         debugPrintf("\n\n=== XpressNet-Ecos Bridge Starting ===\n");
         debugPrintf("Version: %s\n", FIRMWARE_VERSION);
         debugPrintf("Build: %s %s\n", __DATE__, __TIME__);
@@ -198,6 +207,7 @@ void setup() {
             debugPrintf("ERROR: LocoNet initialization failed!\n");
         } else {
             debugPrintf("LocoNet interface initialized\n");
+            router.setLocoNetInterface(&loconet_interface);
         }
     #endif
 
@@ -257,7 +267,9 @@ void loop() {
     #if ENABLE_Z21_LAN
         z21_interface.update();
     #endif
-    
+
+    netLogUpdate();
+
     // ========================================================================
     // PHASE 3: PERIODIC HOUSEKEEPING (low priority)
     // ========================================================================
@@ -334,7 +346,7 @@ void debugPrintf(const char* format, ...) {
         va_start(args, format);
         vsnprintf(buffer, sizeof(buffer), format, args);
         va_end(args);
-        Serial.print(buffer);
+        debugEmit(buffer);
     #else
         (void)format;  // Avoid unused parameter warning
     #endif

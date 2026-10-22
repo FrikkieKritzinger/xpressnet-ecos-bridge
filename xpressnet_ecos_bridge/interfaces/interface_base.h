@@ -184,6 +184,15 @@ public:
             buf[0] = '\0';
         }
     }
+
+    /**
+     * Frame counters for a wire-level protocol, for the OLED LocoNet page:
+     * complete good frames received, and frames/bytes rejected (bad
+     * checksum, truncated, stray). No-op by default, returning 0. Only
+     * LocoNetInterface overrides these.
+     */
+    virtual uint32_t getRxFrameCount() const { return 0; }
+    virtual uint32_t getRxErrorCount() const { return 0; }
 };
 
 // ============================================================================

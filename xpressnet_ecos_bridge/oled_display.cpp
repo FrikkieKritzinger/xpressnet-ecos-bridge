@@ -204,6 +204,9 @@ void OledDisplay::update(const SystemStatus& status) {
         case PAGE_Z21:
             drawZ21Screen();
             break;
+        case PAGE_LOCONET:
+            drawLocoNetScreen();
+            break;
         default:
             current_page = PAGE_MAIN;
             drawMainScreen();
@@ -562,6 +565,41 @@ void OledDisplay::drawZ21Screen() {
         display.print(F("N/A"));
     } else {
         display.print(current_status.z21_last_message_ip);
+    }
+}
+
+// ============================================================================
+// PAGE 5: LOCONET STATUS
+// ============================================================================
+
+void OledDisplay::drawLocoNetScreen() {
+    // ========== YELLOW SECTION ==========
+    display.setTextSize(1);
+    display.setCursor(0, YELLOW_TITLE_Y);
+    display.println(F("LocoNet"));
+
+    // "Connected" means a valid frame was seen recently - LocoNet has no
+    // polling, so an idle bus with no throttle active reads as disconnected.
+    drawConnectionIcon(PROTOCOL_ICON_X, ICON_Y, current_status.loconet_status);
+
+    // ========== BLUE SECTION ==========
+    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
+
+    display.setCursor(0, BLUE_CONTENT_Y);
+    display.print(F("Frames: "));
+    display.print(current_status.loconet_frames_ok);
+
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
+    display.print(F("Errors: "));
+    display.print(current_status.loconet_rx_errors);
+
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
+    display.print(F("Last Msg: "));
+    if (current_status.loconet_last_frame_age_ms == ProtocolInterface::NO_TIMESTAMP) {
+        display.print(F("N/A"));
+    } else {
+        display.print(current_status.loconet_last_frame_age_ms / 1000);
+        display.print(F("s"));
     }
 }
 
