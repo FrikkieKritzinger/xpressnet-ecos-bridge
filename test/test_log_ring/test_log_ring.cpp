@@ -86,6 +86,27 @@ void test_writes_with_no_reader_keep_only_recent_history(void) {
     TEST_ASSERT_EQUAL_size_t(16, ring.pending());
 }
 
+// Real crash found live 2026-10-22: a global object's constructor logged
+// before the ring's own file had run its static initializers, so the ring was
+// still all zero (capacity 0) and write() divided by zero - a boot loop.
+void test_zero_capacity_ring_is_inert(void) {
+    LogRing empty(nullptr, 0);
+    empty.write("abc", 3);
+    char buf[4];
+    TEST_ASSERT_EQUAL_size_t(0, empty.read(buf, sizeof(buf)));
+    empty.rewindToOldest();
+    TEST_ASSERT_EQUAL_size_t(0, empty.pending());
+}
+
+// A namespace-scope ring must be constant-initialized (valid before any
+// dynamic initializer runs), not merely cheap to construct.
+static char early_storage[8];
+static constexpr LogRing early_ring(early_storage, sizeof(early_storage));
+
+void test_global_ring_is_constant_initialized(void) {
+    TEST_ASSERT_EQUAL_size_t(8, early_ring.capacity());
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -97,6 +118,8 @@ int main(void) {
     RUN_TEST(test_rewind_returns_buffered_history);
     RUN_TEST(test_rewind_after_wrap_starts_at_oldest_retained);
     RUN_TEST(test_writes_with_no_reader_keep_only_recent_history);
+    RUN_TEST(test_zero_capacity_ring_is_inert);
+    RUN_TEST(test_global_ring_is_constant_initialized);
 
     return UNITY_END();
 }

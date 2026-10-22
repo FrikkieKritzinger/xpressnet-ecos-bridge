@@ -18,7 +18,13 @@
 
 class LogRing {
 public:
-    LogRing(char* storage, size_t capacity)
+    // constexpr, so a global LogRing is constant-initialized at load time and
+    // is already valid when other globals' constructors log through it - C++
+    // gives no cross-file static-initialization order, and a ring that is
+    // still zeroed (capacity 0) would divide by zero in write(). Real crash
+    // found live 2026-10-22 (boot loop before setup()): a global object's
+    // constructor printed debug text before this file's ring was constructed.
+    constexpr LogRing(char* storage, size_t capacity)
         : buf(storage), cap(capacity), write_pos(0), read_pos(0), dropped_total(0) {}
 
     // Appends data. If the reader has fallen more than `capacity` bytes

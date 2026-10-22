@@ -1,6 +1,9 @@
 #include "log_ring.h"
 
 void LogRing::write(const char* data, size_t len) {
+    if (cap == 0) {
+        return;
+    }
     for (size_t i = 0; i < len; i++) {
         buf[write_pos % cap] = data[i];
         write_pos++;
@@ -13,6 +16,9 @@ void LogRing::write(const char* data, size_t len) {
 }
 
 size_t LogRing::read(char* out, size_t max) {
+    if (cap == 0) {
+        return 0;
+    }
     size_t n = pending();
     if (n > max) {
         n = max;
@@ -25,6 +31,9 @@ size_t LogRing::read(char* out, size_t max) {
 }
 
 void LogRing::rewindToOldest() {
+    if (cap == 0) {
+        return;
+    }
     read_pos = (write_pos > cap) ? (uint32_t)(write_pos - cap) : 0;
     dropped_total = 0;
 }
