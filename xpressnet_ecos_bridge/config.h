@@ -230,9 +230,9 @@
     // holding, at most every LOCONET_RESYNC_INTERVAL_MS, and only after the
     // bus has been quiet for LOCONET_RESYNC_QUIET_MS so it never interrupts
     // someone turning the knob. 0 disables it.
-    #define LOCONET_RESYNC_INTERVAL_MS 20000
+    #define LOCONET_RESYNC_INTERVAL_MS 5000
     #define LOCONET_RESYNC_HOLD_MS     250    // margin above the ~200 ms the UT6 needs
-    #define LOCONET_RESYNC_QUIET_MS    3000
+    #define LOCONET_RESYNC_QUIET_MS    2000
     #define LOCONET_PUSH_BYTE_FRAMES   0   // also OPC_LOCO_SPD/DIRF/SND for every change
 #endif
 

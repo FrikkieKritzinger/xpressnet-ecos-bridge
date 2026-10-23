@@ -2742,3 +2742,11 @@ A single very long session picking up from the 2026-08-27 checkpoint (Z21 code-c
 Full narrative detail (root causes, exact numbers, investigation steps) belongs here.
 `CLAUDE.md` only carries a short current-state summary and links back to the relevant
 dated entry when detail is needed.
+
+---
+
+**2026-10-23 (evening) — UT6 display refresh solved by a forced bus disconnect**
+
+Asked whether the track-power broadcast hinted at a way to make the UT6 apply outside speed/direction/function changes, the answer was: broadcasts (GPON/GPOFF) are global master state every device follows; speed/direction/function belong to the throttle holding the slot and the protocol defines no master-to-throttle notification for them. An experiment imitating a second throttle taking the slot (null move, master slot read, slot write with a different device ID, ack) showed the UT6 gives no "stolen" notice, does not follow the foreign write, and re-sends its own direction/function state; the speed/dir/function frames carry only a slot number, never an origin. (That dev experiment also leaked a fake speed to Ecos via the UT6's reaction; removed, in git history as 3428165/a9d3389.)
+
+What does work, from the spec's disconnect rule: holding the LocoNet data line low makes every device treat it as a disconnect and re-read its slot. Measured on the user's UT6 with a dev trigger: 150 ms - nothing; 200, 250 and 400 ms - the UT6 sends `BB slot 00` then `DF ...` (as at power-up), receives the slot with the real current values and device ID, shows them, keeps the loco, one screen flash. Productised as an automatic resync: when another protocol changes a slot a throttle holds (`LnSlotServer::resyncNeeded()`), and `lnResyncDue()` (pure, unit-tested) allows it - at most every interval, after a quiet period - the bridge holds the bus low for 250 ms without blocking the loop (`LocoNetInterface::forceBusDisconnect()`). Tuning by the user's feel: 20 s and 10 s felt sluggish; 5 s interval with 2 s quiet is the current setting. Confirmed three-way with the WLANmaus in the loop (Ecos -> UT6 + WLANmaus; WLANmaus -> UT6 + Ecos; UT6 -> Ecos + WLANmaus) with zero collisions/framing errors over 10 resyncs. The UT6 displays speed as 0-99 (percentage of 126 steps), not the Ecos step number - not a bug. Slot-read push default turned off (the UT6 ignores it). 391 native tests.

@@ -1608,23 +1608,26 @@ real needs come up rather than pre-committing to a fixed scope.
      immediately. The UT6's built-in "direction change ramps speed back up"
      behaviour is the UT6's own, relayed faithfully. `tools/devflash.py`
      network flashing proven with the D1 seated (USB can stay unplugged).
-   - **Known behaviour, accepted: the UT6 refreshes its display only when
-     it (re)selects a loco, not on changes made elsewhere.** On select (or
-     power-cycling the UT6) it pulls the slot and shows the real speed,
-     direction and functions - confirmed 100% repeatable. Changes from Ecos/
-     WLANmaus/XpressNet while it holds the loco are transmitted correctly
-     (OPC_LOCO_SPD/DIRF/SND and a coalesced OPC_SL_RD_DATA, verified in the
-     log) but the UT6 ignores unsolicited ones and its next knob turn continues
-     from its own value. Not a bridge fault. A "steal" experiment (2026-10-23:
-     the bridge imitated a second throttle writing the UT6 slot with a different
-     device ID) showed the UT6 gives NO stolen notice, does not follow the
-     foreign write, and quietly re-sends its own direction/function state - it
-     treats its own state as authoritative, so there is no origin handling to
-     exploit. No safe way to force a refresh (a bus drop could kick it off the
-     loco); re-select or reconnect the UT6 instead. Defaults:
-     slot-read push ON, per-change byte frames OFF (`LOCONET_PUSH_SLOT_READ` /
-     `LOCONET_PUSH_BYTE_FRAMES`, config.h). **Track power DOES follow**: the
-     UT6's Trk indicator toggles with STOP/GO from Ecos/WLANmaus/XpressNet.
+   - **UT6 display refresh: solved with a forced bus disconnect (2026-10-23).**
+     A UT6 ignores unsolicited changes to its slot (bare OPC_LOCO_SPD/DIRF/SND
+     and unsolicited OPC_SL_RD_DATA were transmitted correctly and ignored; an
+     experiment imitating a second throttle taking its slot got no "stolen"
+     notice - it just re-sent its own direction/function state; the frames carry
+     only a slot number, no origin). What works: hold the data line low for
+     ~200 ms (tested: 150 ms did nothing; 200, 250, 400 ms all worked). The UT6
+     treats it as a bus disconnect, re-reads its slot (`BB`), adopts the real
+     speed/direction/functions, keeps the loco, one screen flash.
+     `LnSlotServer::resyncNeeded()` flags a change to a slot a throttle holds;
+     `LocoNetInterface` then drops the bus (`forceBusDisconnect()`, non-blocking)
+     when `lnResyncDue()` says so: at most every `LOCONET_RESYNC_INTERVAL_MS`
+     (5 s, user's choice - 20 s and 10 s felt sluggish), only after
+     `LOCONET_RESYNC_QUIET_MS` (2 s) of bus quiet so it never interrupts the
+     knob, hold `LOCONET_RESYNC_HOLD_MS` (250 ms). Confirmed three-way: Ecos ->
+     UT6 + WLANmaus, WLANmaus -> UT6 + Ecos, UT6 -> Ecos + WLANmaus, no
+     collisions or framing errors. Set the interval to 0 to disable. The UT6
+     shows speed as 0-99 (a percentage of 126 steps), not the Ecos step number.
+     Track power needs no resync - it follows STOP/GO directly (GPON/GPOFF).
+     Dev trigger for experiments: `GET :8266/action?name=disconnect[:<ms>]`.
    - **Fixed and confirmed live (2026-10-23)**: (a) bridge reboot left the UT6
      on a phantom address-0 slot; (b) WLANmaus STOP never confirmed to the
      sender, so it could not cancel the stop (Z21 now confirms stop/go to all
