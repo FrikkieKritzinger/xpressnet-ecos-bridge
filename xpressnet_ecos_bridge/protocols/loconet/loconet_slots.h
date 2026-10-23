@@ -139,6 +139,12 @@ public:
     // another throttle) becomes a single up-to-date read, not a flood.
     void pushDirtySlots(uint32_t now_ms);
 
+    // True once another protocol has changed a slot a throttle currently holds
+    // (IN_USE) - i.e. the throttle's display is now out of date - until
+    // clearResyncNeeded(). Drives the forced-disconnect resync.
+    bool resyncNeeded() const { return resync_needed; }
+    void clearResyncNeeded() { resync_needed = false; }
+
     // Whether applyExternal*() also queues the per-change OPC_LOCO_SPD/DIRF/
     // SND frames (default true). The slot read above is what a UT6 follows.
     void setPushByteFrames(bool on) { push_byte_frames = on; }
@@ -173,11 +179,13 @@ private:
     uint8_t reply_count;
     uint32_t dropped_replies;
     bool push_byte_frames;                      // also queue OPC_LOCO_SPD/DIRF/SND per change
+    bool resync_needed;                         // a held slot changed from elsewhere
     uint32_t dirty_slots;                       // bit n set = slot n changed, read not yet pushed
     uint32_t last_push_ms[LN_SLOT_COUNT + 1];
 
     void queueReply(const LnFrame& f);
     void queueSlotRead(uint8_t slot_number);
+    void markSlotChanged(uint8_t slot_number);
     void queueLongAck(uint8_t opcode_without_msb, uint8_t code);
 
     uint8_t findSlotByAddress(uint16_t address) const;

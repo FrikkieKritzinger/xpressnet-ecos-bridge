@@ -735,6 +735,36 @@ void test_slot_reads_for_one_slot_are_rate_limited(void) {
     TEST_ASSERT_EQUAL_HEX8(LN_OPC_SL_RD_DATA, popReply().data[0]);
 }
 
+void test_change_to_a_held_slot_asks_for_a_resync(void) {
+    selectLoco3();                                  // slot 1 is IN_USE
+    TEST_ASSERT_FALSE(server.resyncNeeded());
+    server.applyExternalDrive(3, 50, 1, now_ms);
+    TEST_ASSERT_TRUE(server.resyncNeeded());
+    server.clearResyncNeeded();
+    TEST_ASSERT_FALSE(server.resyncNeeded());
+}
+
+void test_change_to_a_slot_nobody_holds_does_not_ask_for_a_resync(void) {
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});            // loaded, but only COMMON
+    while (server.hasReply()) popReply();
+    server.applyExternalDrive(3, 50, 1, now_ms);
+    TEST_ASSERT_FALSE(server.resyncNeeded());
+}
+
+void test_a_change_that_matches_the_slot_does_not_ask_for_a_resync(void) {
+    selectLoco3();
+    server.applyExternalDrive(3, 50, 1, now_ms);
+    server.clearResyncNeeded();
+    server.applyExternalDrive(3, 50, 1, now_ms);    // same values again
+    TEST_ASSERT_FALSE(server.resyncNeeded());
+}
+
+void test_function_changes_ask_for_a_resync_too(void) {
+    selectLoco3();
+    server.applyExternalFunctions(3, 0x01, now_ms);
+    TEST_ASSERT_TRUE(server.resyncNeeded());
+}
+
 void test_byte_frames_can_be_switched_off(void) {
     selectLoco3();
     server.setPushByteFrames(false);
@@ -751,6 +781,10 @@ int main(void) {
     RUN_TEST(test_loco_adr_never_reports_a_slot_as_in_use);
     RUN_TEST(test_status_write_to_an_empty_slot_is_ignored);
     RUN_TEST(test_select_after_reboot_reads_as_empty_so_the_throttle_logs_on_again);
+    RUN_TEST(test_change_to_a_held_slot_asks_for_a_resync);
+    RUN_TEST(test_change_to_a_slot_nobody_holds_does_not_ask_for_a_resync);
+    RUN_TEST(test_a_change_that_matches_the_slot_does_not_ask_for_a_resync);
+    RUN_TEST(test_function_changes_ask_for_a_resync_too);
     RUN_TEST(test_external_change_marks_the_slot_for_a_pushed_slot_read);
     RUN_TEST(test_a_burst_of_changes_becomes_one_up_to_date_slot_read);
     RUN_TEST(test_slot_reads_for_one_slot_are_rate_limited);

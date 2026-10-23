@@ -25,7 +25,7 @@ static bool lookupLocoState(uint16_t address, LnLocoSnapshot* out, void* context
 }
 
 LocoNetInterface::LocoNetInterface()
-    : router(nullptr), seen_frame(false), last_frame_ms(0), last_rx_us(0), tx_not_before_ms(0),
+    : router(nullptr), seen_frame(false), bus_held(false), bus_hold_until_ms(0), last_resync_ms(0), last_frame_ms(0), last_rx_us(0), tx_not_before_ms(0),
       tx_attempts(0), tx_frames(0), tx_collisions(0), tx_dropped(0) {}
 
 void LocoNetInterface::setCommandRouter(CommandRouter* r) {
@@ -52,6 +52,9 @@ bool LocoNetInterface::begin() {
     ln_tx.begin(LOCONET_BAUD, SWSERIAL_8N1, -1, LOCONET_TX_PIN, true);
 
     tx_not_before_ms = millis() + LOCONET_TX_STARTUP_DELAY_MS;
+    // Start as if a resync happened a full interval ago, so the first change
+    // after boot is not made to wait.
+    last_resync_ms = millis() - LOCONET_RESYNC_INTERVAL_MS;
     last_rx_us = micros();
 
     DEBUG_LOCONET_PRINTF("LocoNet: slot server on UART0 RX (GPIO%d) at %d baud, TX on GPIO%d\n",
@@ -61,6 +64,22 @@ bool LocoNetInterface::begin() {
 
 void LocoNetInterface::update() {
     unsigned long now = millis();
+
+    if (bus_held) {
+        // The UART sees our own deliberate low as a stream of breaks; discard it.
+        while (Serial.available() > 0) {
+            Serial.read();
+        }
+        if ((long)(now - bus_hold_until_ms) >= 0) {
+            digitalWrite(LOCONET_TX_PIN, LOW);   // release the bus
+            bus_held = false;
+            parser.reset();
+            last_rx_us = micros();
+            tx_not_before_ms = now + 5;
+            DEBUG_LOCONET_PRINTF("LocoNet: bus released\n");
+        }
+        return;
+    }
 
 #if LOCONET_RAW_TRACE
     uint8_t raw[24];
@@ -107,6 +126,19 @@ void LocoNetInterface::update() {
 
 #if LOCONET_PUSH_SLOT_READ
     slot_server.pushDirtySlots(now);
+#endif
+
+#if LOCONET_RESYNC_INTERVAL_MS > 0
+    // Nothing queued to send first, so the blackout does not cut a reply short.
+    if (!slot_server.hasReply() &&
+        lnResyncDue(slot_server.resyncNeeded(), now, last_resync_ms, last_frame_ms,
+                    LOCONET_RESYNC_INTERVAL_MS, LOCONET_RESYNC_QUIET_MS)) {
+        slot_server.clearResyncNeeded();
+        last_resync_ms = now;
+        DEBUG_LOCONET_PRINTF("LocoNet: resync - a held loco changed elsewhere, making the throttle re-read it\n");
+        forceBusDisconnect(LOCONET_RESYNC_HOLD_MS);
+        return;
+    }
 #endif
 
 #if LOCONET_RAW_TRACE
@@ -276,6 +308,15 @@ void LocoNetInterface::sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t
 
 void LocoNetInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
     slot_server.applyExternalFunctions(address, functions, millis());
+}
+
+void LocoNetInterface::forceBusDisconnect(uint32_t duration_ms) {
+    // Inverted TX: GPIO high pulls the bus low.
+    digitalWrite(LOCONET_TX_PIN, HIGH);
+    bus_held = true;
+    bus_hold_until_ms = millis() + duration_ms;
+    DEBUG_LOCONET_PRINTF("LocoNet: holding the bus low for %lu ms (forced disconnect)\n",
+                         (unsigned long)duration_ms);
 }
 
 void LocoNetInterface::sendEmergencyStop() {

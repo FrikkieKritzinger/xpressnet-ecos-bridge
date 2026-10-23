@@ -51,6 +51,12 @@ public:
     void sendEmergencyStop() override;
     void sendResumeOperation() override;
 
+    // Holds the data line low for duration_ms (non-blocking: released from
+    // update()). The spec makes every device treat >100 ms of fixed low as a
+    // bus disconnect, after which a throttle re-reads its slot. Used to find
+    // out whether that refreshes a UT6 without unplugging it.
+    void forceBusDisconnect(uint32_t duration_ms);
+
     ComponentStatus getStatus() const override;
     const char* getName() const override { return "LocoNet"; }
 
@@ -65,6 +71,9 @@ private:
     CommandRouter* router;
 
     bool seen_frame;
+    bool bus_held;                   // line currently held low on purpose
+    unsigned long bus_hold_until_ms;
+    unsigned long last_resync_ms;    // when the last forced-disconnect resync started
     unsigned long last_frame_ms;
     uint32_t last_rx_us;            // when a byte was last read from the UART
     unsigned long tx_not_before_ms;  // start-up wait, then retry backoff

@@ -220,7 +220,19 @@
     // frames (live test 2026-10-23); the slot read below is what is being
     // tried. Left switchable so each can be tested alone from the network
     // flasher.
-    #define LOCONET_PUSH_SLOT_READ     1   // coalesced OPC_SL_RD_DATA per changed slot
+    #define LOCONET_PUSH_SLOT_READ     0   // coalesced OPC_SL_RD_DATA per changed slot (UT6 ignores it)
+
+    // What DOES refresh a UT6 (live 2026-10-23): hold the data line low for
+    // about 200 ms (150 ms did nothing, 200/250/400 ms all worked). Every
+    // device treats that as a bus disconnect and re-reads its slot, so the UT6
+    // shows the loco's real state and keeps the loco (one screen flash). It is
+    // done only when another protocol has changed a loco a throttle is
+    // holding, at most every LOCONET_RESYNC_INTERVAL_MS, and only after the
+    // bus has been quiet for LOCONET_RESYNC_QUIET_MS so it never interrupts
+    // someone turning the knob. 0 disables it.
+    #define LOCONET_RESYNC_INTERVAL_MS 20000
+    #define LOCONET_RESYNC_HOLD_MS     250    // margin above the ~200 ms the UT6 needs
+    #define LOCONET_RESYNC_QUIET_MS    3000
     #define LOCONET_PUSH_BYTE_FRAMES   0   // also OPC_LOCO_SPD/DIRF/SND for every change
 #endif
 

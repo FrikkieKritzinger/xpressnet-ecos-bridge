@@ -17,6 +17,7 @@ LnSlotServer::LnSlotServer() {
     lookup_context = nullptr;
     pending_select_address = 0;
     dirty_slots = 0;
+    resync_needed = false;
     push_byte_frames = true;
     memset(last_push_ms, 0, sizeof(last_push_ms));
 }
@@ -170,14 +171,14 @@ uint8_t LnSlotServer::applyExternalDrive(uint16_t address, uint8_t bridge_speed,
         if (dirf != s.dirf) {
             s.dirf = dirf;
             if (push_byte_frames) queueSlotByte(LN_OPC_LOCO_DIRF, i, dirf);
-            dirty_slots |= (1UL << i);
+            markSlotChanged(i);
         }
         // A stored emergency-stop (1) already means stopped.
         bool same = (ln_speed == s.speed) || (ln_speed == 0 && s.speed == 1);
         if (!same) {
             s.speed = ln_speed;
             if (push_byte_frames) queueSlotByte(LN_OPC_LOCO_SPD, i, ln_speed);
-            dirty_slots |= (1UL << i);
+            markSlotChanged(i);
         }
     }
     return affected;
@@ -198,15 +199,23 @@ uint8_t LnSlotServer::applyExternalFunctions(uint16_t address, uint32_t function
         if (dirf != s.dirf) {
             s.dirf = dirf;
             if (push_byte_frames) queueSlotByte(LN_OPC_LOCO_DIRF, i, dirf);
-            dirty_slots |= (1UL << i);
+            markSlotChanged(i);
         }
         if (snd != s.snd) {
             s.snd = snd;
             if (push_byte_frames) queueSlotByte(LN_OPC_LOCO_SND, i, snd);
-            dirty_slots |= (1UL << i);
+            markSlotChanged(i);
         }
     }
     return affected;
+}
+
+void LnSlotServer::markSlotChanged(uint8_t slot_number) {
+    dirty_slots |= (1UL << slot_number);
+    // Only a slot a throttle actually holds shows a stale display.
+    if ((slots[slot_number].stat1 & LN_STAT1_BUSY_MASK) == LN_STAT1_IN_USE) {
+        resync_needed = true;
+    }
 }
 
 void LnSlotServer::pushDirtySlots(uint32_t now_ms) {

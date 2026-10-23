@@ -135,4 +135,14 @@ const char* lnOpcodeName(uint8_t opcode);
 // "BF 00 05 FB  OPC_LOCO_ADR" style text for logging. Always NUL-terminates.
 void lnFormatFrame(const LnFrame& frame, char* out, size_t out_size);
 
+// Whether to force a bus disconnect now so a throttle re-reads its slot and
+// shows a change another protocol made (a UT6 does not follow such changes on
+// its own, but re-reads its slot after the bus has been held low for about
+// 200 ms - confirmed live 2026-10-23). Due only when: a held slot actually
+// changed (needed), the last resync was at least interval_ms ago, and the bus
+// has been quiet for quiet_ms (never interrupt someone turning the knob).
+// interval_ms == 0 disables it.
+bool lnResyncDue(bool needed, uint32_t now_ms, uint32_t last_resync_ms,
+                 uint32_t last_activity_ms, uint32_t interval_ms, uint32_t quiet_ms);
+
 #endif  // LOCONET_PROTOCOL_H

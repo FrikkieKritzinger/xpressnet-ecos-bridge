@@ -216,6 +216,40 @@ void test_byte_counter_counts_everything(void) {
 }
 
 // ============================================================================
+// FORCED-DISCONNECT RESYNC DECISION
+// ============================================================================
+
+// Arguments: needed, now, last_resync, last_activity, interval, quiet.
+void test_resync_due_when_needed_interval_elapsed_and_bus_quiet(void) {
+    TEST_ASSERT_TRUE(lnResyncDue(true, 100000, 70000, 90000, 20000, 3000));
+}
+
+void test_resync_not_due_when_nothing_changed(void) {
+    TEST_ASSERT_FALSE(lnResyncDue(false, 100000, 0, 0, 20000, 3000));
+}
+
+void test_resync_not_due_inside_the_interval(void) {
+    TEST_ASSERT_FALSE(lnResyncDue(true, 100000, 90000, 0, 20000, 3000));
+    TEST_ASSERT_TRUE(lnResyncDue(true, 110000, 90000, 0, 20000, 3000));   // exactly one interval
+}
+
+void test_resync_waits_for_the_bus_to_go_quiet(void) {
+    // A throttle was active 1 s ago - someone may be turning the knob.
+    TEST_ASSERT_FALSE(lnResyncDue(true, 100000, 0, 99000, 20000, 3000));
+    TEST_ASSERT_TRUE(lnResyncDue(true, 102000, 0, 99000, 20000, 3000));   // 3 s of quiet
+}
+
+void test_resync_disabled_by_a_zero_interval(void) {
+    TEST_ASSERT_FALSE(lnResyncDue(true, 100000, 0, 0, 0, 3000));
+}
+
+void test_resync_survives_the_millisecond_counter_wrapping(void) {
+    uint32_t last = 0xFFFFF000u;                  // just before the wrap
+    TEST_ASSERT_FALSE(lnResyncDue(true, 0x00001000u, last, 0, 20000, 3000));   // 8 s later
+    TEST_ASSERT_TRUE(lnResyncDue(true, 0x00005000u, last, 0, 20000, 3000));    // 24 s later
+}
+
+// ============================================================================
 // MAIN
 // ============================================================================
 
@@ -245,6 +279,13 @@ int main(void) {
     RUN_TEST(test_partial_frame_dropped_after_idle_timeout);
     RUN_TEST(test_tick_does_nothing_when_idle);
     RUN_TEST(test_byte_counter_counts_everything);
+
+    RUN_TEST(test_resync_due_when_needed_interval_elapsed_and_bus_quiet);
+    RUN_TEST(test_resync_not_due_when_nothing_changed);
+    RUN_TEST(test_resync_not_due_inside_the_interval);
+    RUN_TEST(test_resync_waits_for_the_bus_to_go_quiet);
+    RUN_TEST(test_resync_disabled_by_a_zero_interval);
+    RUN_TEST(test_resync_survives_the_millisecond_counter_wrapping);
 
     return UNITY_END();
 }

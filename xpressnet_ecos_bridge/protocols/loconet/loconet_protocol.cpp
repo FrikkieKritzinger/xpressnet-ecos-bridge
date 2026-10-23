@@ -164,3 +164,14 @@ void LnFrameParser::tick(uint32_t now_ms) {
         reset();
     }
 }
+
+bool lnResyncDue(bool needed, uint32_t now_ms, uint32_t last_resync_ms,
+                 uint32_t last_activity_ms, uint32_t interval_ms, uint32_t quiet_ms) {
+    if (!needed || interval_ms == 0) {
+        return false;
+    }
+    if ((uint32_t)(now_ms - last_resync_ms) < interval_ms) {
+        return false;
+    }
+    return (uint32_t)(now_ms - last_activity_ms) >= quiet_ms;
+}

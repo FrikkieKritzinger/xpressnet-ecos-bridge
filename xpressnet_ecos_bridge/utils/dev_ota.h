@@ -17,6 +17,11 @@
 #ifndef UTILS_DEV_OTA_H
 #define UTILS_DEV_OTA_H
 
+// Dev builds can also run named experiments on demand: `GET /action?name=<x>`
+// on the same port calls this handler with <x>. Not present in release builds.
+typedef void (*DevActionHandler)(const char* name);
+void devOtaSetActionHandler(DevActionHandler handler);
+
 // Call every loop iteration. Starts the server once WiFi is connected and
 // serves requests; a no-op when ENABLE_DEV_OTA is 0.
 void devOtaUpdate();
