@@ -1615,8 +1615,13 @@ real needs come up rather than pre-committing to a fixed scope.
      WLANmaus/XpressNet while it holds the loco are transmitted correctly
      (OPC_LOCO_SPD/DIRF/SND and a coalesced OPC_SL_RD_DATA, verified in the
      log) but the UT6 ignores unsolicited ones and its next knob turn continues
-     from its own value. Not a bridge fault; no safe way to force it (a fake
-     "stolen" notice or a bus drop could kick the UT6 off the loco). Defaults:
+     from its own value. Not a bridge fault. A "steal" experiment (2026-10-23:
+     the bridge imitated a second throttle writing the UT6 slot with a different
+     device ID) showed the UT6 gives NO stolen notice, does not follow the
+     foreign write, and quietly re-sends its own direction/function state - it
+     treats its own state as authoritative, so there is no origin handling to
+     exploit. No safe way to force a refresh (a bus drop could kick it off the
+     loco); re-select or reconnect the UT6 instead. Defaults:
      slot-read push ON, per-change byte frames OFF (`LOCONET_PUSH_SLOT_READ` /
      `LOCONET_PUSH_BYTE_FRAMES`, config.h). **Track power DOES follow**: the
      UT6's Trk indicator toggles with STOP/GO from Ecos/WLANmaus/XpressNet.

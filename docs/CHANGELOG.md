@@ -15,6 +15,8 @@ here. Newest entries first.
 - F10-F12 from the UT6 reach Ecos. Turnout (OPC_SW_REQ) control from the UT6 is not implemented yet.
 - 381 native tests passing.
 
+**Steal experiment (same day, dev build, since removed)**: asked what a throttle does when ANOTHER throttle changes its loco, the bridge was made to imitate a thief on the bus: its null move (`BA 04 04`), the master slot read (old owner ID `4F 64`), the thief slot write (`EF .. 28 10 .. 05 0B`: speed 40, direction flipped, F0 on, a different device ID) and the acknowledgement. Result: the UT6 showed no message, did not change its display, stayed on the loco, and about a millisecond later re-sent its own direction/function state (`A1 04 20`), not its speed (the encoder holds that). Speed/direction/function frames (`A0/A1/A2`) carry only a slot number - no origin or owner; identity exists only as ID1/ID2 inside slot reads/writes. Side effect found and noted: the fake write changed the stored slot speed, and the UT6 reaction then made the bridge send that fake speed (39) to the real loco on Ecos - the experiment code was removed afterwards (kept in git history, commit 3428165, reverted in a9d3389). In normal operation the stored slot speed always equals the real speed, so this cannot happen.
+
 ---
 
 **2026-10-23 — LocoNet P3 routing confirmed on hardware; two real bugs fixed; UT6 display limitation documented**
