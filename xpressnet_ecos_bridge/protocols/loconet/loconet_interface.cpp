@@ -278,6 +278,18 @@ void LocoNetInterface::sendFunctionCommand(uint16_t address, uint32_t functions)
     slot_server.applyExternalFunctions(address, functions, millis());
 }
 
+bool LocoNetInterface::devSimulateSteal() {
+    // Another throttle's device ID (not the UT6's 4F 64), a mid-range speed.
+    uint8_t slot = slot_server.simulateSteal(0x05, 0x0B, 40, millis());
+    if (slot == 0) {
+        DEBUG_LOCONET_PRINTF("DEV steal experiment: no slot is held by a throttle\n");
+        return false;
+    }
+    DEBUG_LOCONET_PRINTF("DEV steal experiment: imitating another throttle taking slot %u "
+                         "(null move, slot read, slot write with ID 05 0B, ack)\n", slot);
+    return true;
+}
+
 void LocoNetInterface::sendEmergencyStop() {
     slot_server.applyExternalEmergencyStop();
 }

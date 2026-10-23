@@ -144,6 +144,15 @@ public:
     void setPushByteFrames(bool on) { push_byte_frames = on; }
     void applyExternalResume();
 
+    // DEVELOPMENT EXPERIMENT (never called in normal operation): imitate a
+    // second throttle taking over the slot a throttle currently holds, using
+    // the frames a real thief produces - its null move, the master's slot
+    // read, then its slot write carrying ITS device ID with new drive and
+    // function values, and the master's acknowledgement. Used to learn how a
+    // Digitrax throttle reacts when it overhears someone else write its slot.
+    // Returns the slot used, or 0 if no slot is currently IN_USE.
+    uint8_t simulateSteal(uint8_t thief_id1, uint8_t thief_id2, uint8_t new_ln_speed, uint32_t now_ms);
+
     // Reply queue (oldest first).
     bool hasReply() const { return reply_count != 0; }
     bool peekReply(LnFrame& out) const;

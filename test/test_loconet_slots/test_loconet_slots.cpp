@@ -745,9 +745,46 @@ void test_byte_frames_can_be_switched_off(void) {
     TEST_ASSERT_TRUE(server.hasReply());        // ... but the slot read still goes out
 }
 
+// ============================================================================
+// DEV EXPERIMENT: imitate a second throttle taking over a held slot
+// ============================================================================
+
+void test_simulated_steal_emits_the_frames_a_thief_produces(void) {
+    selectLoco3();
+    TEST_ASSERT_EQUAL_UINT8(1, server.simulateSteal(0x05, 0x0B, 40, now_ms));
+
+    LnFrame move = popReply();                       // the thief's null move
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_MOVE_SLOTS, move.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(1, move.data[1]);
+    TEST_ASSERT_EQUAL_UINT8(1, move.data[2]);
+
+    LnFrame read = popReply();                       // the master's slot read
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_SL_RD_DATA, read.data[0]);
+
+    LnFrame write = popReply();                      // the thief's slot write
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_WR_SL_DATA, write.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(1, write.data[2]);
+    TEST_ASSERT_EQUAL_UINT8(40, write.data[5]);      // new speed
+    TEST_ASSERT_EQUAL_HEX8(0x10, write.data[6]);     // direction flipped, F0 on
+    TEST_ASSERT_EQUAL_HEX8(0x05, write.data[11]);    // the thief's ID, not the holder's
+    TEST_ASSERT_EQUAL_HEX8(0x0B, write.data[12]);
+
+    LnFrame ack = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_LONG_ACK, ack.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x6F, ack.data[1]);
+    TEST_ASSERT_FALSE(server.hasReply());
+}
+
+void test_simulated_steal_needs_a_held_slot(void) {
+    TEST_ASSERT_EQUAL_UINT8(0, server.simulateSteal(0x05, 0x0B, 40, now_ms));
+    TEST_ASSERT_FALSE(server.hasReply());
+}
+
 int main(void) {
     UNITY_BEGIN();
 
+    RUN_TEST(test_simulated_steal_emits_the_frames_a_thief_produces);
+    RUN_TEST(test_simulated_steal_needs_a_held_slot);
     RUN_TEST(test_loco_adr_never_reports_a_slot_as_in_use);
     RUN_TEST(test_status_write_to_an_empty_slot_is_ignored);
     RUN_TEST(test_select_after_reboot_reads_as_empty_so_the_throttle_logs_on_again);

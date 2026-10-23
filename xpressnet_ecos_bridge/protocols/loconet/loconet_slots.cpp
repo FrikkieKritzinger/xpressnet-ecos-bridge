@@ -237,6 +237,64 @@ void LnSlotServer::applyExternalEmergencyStop() {
     queueReply(f);
 }
 
+uint8_t LnSlotServer::simulateSteal(uint8_t thief_id1, uint8_t thief_id2, uint8_t new_ln_speed, uint32_t now_ms) {
+    uint8_t n = 0;
+    for (uint8_t i = 1; i <= LN_SLOT_COUNT; i++) {
+        if ((slots[i].stat1 & LN_STAT1_BUSY_MASK) == LN_STAT1_IN_USE) {
+            n = i;
+            break;
+        }
+    }
+    if (n == 0) {
+        return 0;
+    }
+    LnSlot& s = slots[n];
+
+    // 1. The thief's null move (a request, normally sent by the other throttle).
+    LnFrame move;
+    memset(&move, 0, sizeof(move));
+    move.data[0] = LN_OPC_MOVE_SLOTS;
+    move.data[1] = n;
+    move.data[2] = n;
+    move.len = 4;
+    move.data[3] = lnChecksum(move.data, 3);
+    queueReply(move);
+
+    // 2. The master's reply: the slot as it stands, still with the old owner's ID.
+    queueSlotRead(n);
+
+    // 3. The thief writes the slot back: its own ID, new speed, flipped
+    //    direction, F0 on.
+    s.speed = new_ln_speed & 0x7F;
+    s.dirf = (uint8_t)((s.dirf ^ LN_DIRF_FORWARD) | LN_DIRF_F0);
+    s.id1 = thief_id1 & 0x7F;
+    s.id2 = thief_id2 & 0x7F;
+    s.last_use_ms = now_ms;
+
+    LnFrame write;
+    memset(&write, 0, sizeof(write));
+    write.data[0] = LN_OPC_WR_SL_DATA;
+    write.data[1] = 14;
+    write.data[2] = n;
+    write.data[3] = s.stat1;
+    write.data[4] = (uint8_t)(s.address & 0x7F);
+    write.data[5] = s.speed;
+    write.data[6] = s.dirf;
+    write.data[7] = trk;
+    write.data[8] = s.ss2;
+    write.data[9] = (uint8_t)((s.address >> 7) & 0x7F);
+    write.data[10] = s.snd;
+    write.data[11] = s.id1;
+    write.data[12] = s.id2;
+    write.len = 14;
+    write.data[13] = lnChecksum(write.data, 13);
+    queueReply(write);
+
+    // 4. The master acknowledges the write.
+    queueLongAck(LN_LACK_OPC_WR_SL_DATA, 0x7F);
+    return n;
+}
+
 void LnSlotServer::applyExternalResume() {
     trk |= LN_TRK_POWER | LN_TRK_RUNNING;
     LnFrame f;

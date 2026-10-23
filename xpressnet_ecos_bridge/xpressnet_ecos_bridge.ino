@@ -107,6 +107,24 @@ TimedTask debug_output_task(10000);     // Every 10 seconds (if debug enabled)
 // ARDUINO SETUP - Called once at startup
 // ============================================================================
 
+// Declared explicitly (defined at the bottom of this file): the build tool
+// auto-generates prototypes just before the first function it finds, and that
+// must not be one inside the dev-only block below, or release builds lose them.
+void debugPrintf(const char* format, ...);
+
+#if ENABLE_DEV_OTA
+// Named experiments run on demand over HTTP (utils/dev_ota.h), dev builds only.
+static void devAction(const char* name) {
+    #if ENABLE_LOCONET
+    if (strcmp(name, "steal") == 0) {
+        loconet_interface.devSimulateSteal();
+        return;
+    }
+    #endif
+    debugPrintf("DEV action: unknown experiment '%s'\n", name);
+}
+#endif
+
 void setup() {
     // With LocoNet enabled this must come first: it releases the bus (held
     // low by the GPIO0 boot strap until now) and starts UART0 as the LocoNet
@@ -222,6 +240,10 @@ void setup() {
             router.setZ21Interface(&z21_interface);
             z21_interface.setCommandRouter(&router);
         }
+    #endif
+
+    #if ENABLE_DEV_OTA
+        devOtaSetActionHandler(devAction);
     #endif
 
     debugPrintf("=== Setup Complete - Ready to operate ===\n\n");
