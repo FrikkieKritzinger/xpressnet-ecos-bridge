@@ -51,10 +51,6 @@ public:
     void sendEmergencyStop() override;
     void sendResumeOperation() override;
 
-    // Development experiment trigger (see LnSlotServer::simulateSteal()).
-    // Returns true if a held slot was found and the frames were queued.
-    bool devSimulateSteal();
-
     ComponentStatus getStatus() const override;
     const char* getName() const override { return "LocoNet"; }
 

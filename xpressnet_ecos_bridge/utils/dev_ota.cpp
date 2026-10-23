@@ -15,21 +15,6 @@
 // would be one more thing to get wrong that way (see utils/log_ring.h).
 static ESP8266WebServer* g_dev_server = nullptr;
 static ESP8266HTTPUpdateServer* g_dev_updater = nullptr;
-static DevActionHandler g_dev_action = nullptr;
-
-void devOtaSetActionHandler(DevActionHandler handler) {
-    g_dev_action = handler;
-}
-
-static void handleAction() {
-    String name = g_dev_server->arg("name");
-    if (g_dev_action != nullptr && name.length() > 0) {
-        g_dev_action(name.c_str());
-        g_dev_server->send(200, "text/plain", String("ok: ") + name + "\n");
-    } else {
-        g_dev_server->send(400, "text/plain", "usage: /action?name=<experiment>\n");
-    }
-}
 
 void devOtaUpdate() {
     if (g_dev_server == nullptr) {
@@ -39,7 +24,6 @@ void devOtaUpdate() {
         g_dev_server = new ESP8266WebServer(DEV_OTA_PORT);
         g_dev_updater = new ESP8266HTTPUpdateServer();
         g_dev_updater->setup(g_dev_server, "/update");
-        g_dev_server->on("/action", HTTP_GET, handleAction);
         g_dev_server->begin();
         DEBUG_PRINTF("DEV OTA listening on port %u (/update) - dev build, no authentication\n",
                      (unsigned)DEV_OTA_PORT);
@@ -49,7 +33,6 @@ void devOtaUpdate() {
 
 #else  // !ENABLE_DEV_OTA
 
-void devOtaSetActionHandler(DevActionHandler handler) { (void)handler; }
 void devOtaUpdate() {}
 
 #endif  // ENABLE_DEV_OTA
