@@ -358,6 +358,11 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         DEBUG_PRINTF("Z21 RX: Emergency stop\n");
         recordAction(client_index);
         if (router) router->emergencyStopAll(LocoSource::Z21_LAN);
+        // The router never echoes a stop back to its originator, but a Z21
+        // client expects the state change confirmed to EVERY client including
+        // the sender; without it a WLANmaus keeps showing "running" and its
+        // next press sends STOP again instead of power-on (live 2026-10-23).
+        sendEmergencyStop();
         return;
     }
 
@@ -371,6 +376,7 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         DEBUG_PRINTF("Z21 RX: Track power OFF\n");
         recordAction(client_index);
         if (router) router->emergencyStopAll(LocoSource::Z21_LAN);
+        sendEmergencyStop();   // confirm to all clients incl. the sender - see SET_STOP above
         return;
     }
 
@@ -378,6 +384,7 @@ void Z21LanInterface::handleDataset(uint16_t header, const uint8_t* data, size_t
         DEBUG_PRINTF("Z21 RX: Track power ON\n");
         recordAction(client_index);
         if (router) router->resumeOperation(LocoSource::Z21_LAN);
+        sendResumeOperation();   // confirm to all clients incl. the sender - see SET_STOP above
         return;
     }
 

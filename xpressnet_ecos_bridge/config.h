@@ -214,6 +214,14 @@
     #define LOCONET_TX_STARTUP_DELAY_MS 250
     // How long to wait for our own transmitted byte to echo back on RX.
     #define LOCONET_ECHO_TIMEOUT_US    1500
+
+    // How a change made by another protocol reaches a LocoNet throttle. A
+    // Digitrax UT6 did NOT update its display from bare OPC_LOCO_SPD/DIRF/SND
+    // frames (live test 2026-10-23); the slot read below is what is being
+    // tried. Left switchable so each can be tested alone from the network
+    // flasher.
+    #define LOCONET_PUSH_SLOT_READ     1   // coalesced OPC_SL_RD_DATA per changed slot
+    #define LOCONET_PUSH_BYTE_FRAMES   0   // also OPC_LOCO_SPD/DIRF/SND for every change
 #endif
 
 // ============================================================================

@@ -45,6 +45,7 @@ void LocoNetInterface::initHardware() {
 bool LocoNetInterface::begin() {
     parser.reset();
     seen_frame = false;
+    slot_server.setPushByteFrames(LOCONET_PUSH_BYTE_FRAMES != 0);
 
     // Transmit-only SoftwareSerial, inverted (the BC547 pulls the bus low
     // when the pin is high). The receive side is the hardware UART.
@@ -103,6 +104,10 @@ void LocoNetInterface::update() {
     }
 
     parser.tick(now);
+
+#if LOCONET_PUSH_SLOT_READ
+    slot_server.pushDirtySlots(now);
+#endif
 
 #if LOCONET_RAW_TRACE
     if (raw_count > 0) {

@@ -7,6 +7,21 @@ here. Newest entries first.
 
 ---
 
+**2026-10-23 — LocoNet P3 routing confirmed on hardware; two real bugs fixed; UT6 display limitation documented**
+
+Network flashing (`tools/devflash.py`, `wemos_dev`) proven with the D1 seated; USB is no longer needed.
+
+- **Routing works end to end** with a real loco (Ecos "BN U28B #5452", a long address): UT6 speed/direction/F-keys reach Ecos, XpressNet and the WLANmaus immediately; UT6 forward matches Ecos and XpressNet forward with no inversion. The UT6's own behaviour of dropping speed to 0 on a direction change and ramping back is the throttle's, relayed faithfully (verified: the speed frames after the direction change came from the UT6, none from the bridge).
+- **Capture tooling bug**: `tools/netlog.py` crashed on the arrow character in an Ecos log line (Windows cp1252 console), silently losing a whole test run; fixed (UTF-8 with replacement). Also learned the bridge's 4 KB log history only covers ~20 s because the Ecos heartbeat dumps the whole loco list every 5 s - start the capture before the test.
+- **Bug 1 - phantom slot after a bridge reboot**: the UT6 still remembered slot 1 and sent `B5 01 13` (release) then `BA 01 01` (select). The server accepted the release on an EMPTY slot, then the select succeeded, so the UT6 believed it held a loco at address 0 whose commands went nowhere ("out of sync until I reselected"). Now a status write to an empty slot is ignored, the select gets `B4 3A 00`, and the UT6 logs on again (confirmed live: it returns to loco-select after a bridge reboot). Two regression tests.
+- **Bug 2 - WLANmaus could not cancel a stop**: the router never echoes a stop/go back to its originator (right for XpressNet), so a Z21 client that pressed STOP never got `LAN_X_BC_STOPPED` back, kept showing "running" and its next press sent STOP again (log: repeated `Z21 RX: Emergency stop`, never `Track power ON`). A real Z21 confirms state to every client including the sender; `Z21LanInterface` now does (`sendEmergencyStop()`/`sendResumeOperation()` after the router call). Confirmed live: STOP now toggles STOP/GO.
+- **UT6 does not follow outside changes (open, accepted)**: tried (1) bare `OPC_LOCO_SPD/DIRF/SND` frames and (2) a coalesced `OPC_SL_RD_DATA` of the slot (stat IN_USE, the UT6's own ID1/ID2 `4F 64`), both transmitted without collision with the right values (visible in the log); the UT6 shows neither and, asked to continue after an outside change, carries on from its own internal value. Added `LnSlotServer::pushDirtySlots()` (120 ms coalescing) and the config switches `LOCONET_PUSH_SLOT_READ` (on) / `LOCONET_PUSH_BYTE_FRAMES` (off). The Digitrax UT6 spec sheet (an encoder-knob throttle) says nothing on this.
+- Also observed, not yet addressed: the UT6 starts in "track off" and needs the power button - the bridge does not read Ecos's real power state at start-up (its TRK byte is a fixed default).
+
+378 native tests passing.
+
+---
+
 **2026-10-22 (end of day) — dev network updater built; board flashed with `wemos_dev`; stop point**
 
 Added a development-only network firmware updater, agreed with the user because pulling the D1 for every flash does not scale (esptool cannot sync while it is seated in the motherboard): `utils/dev_ota` (HTTP `/update` on port 8266 via the standard `ESP8266HTTPUpdateServer`), compiled in only by the new `wemos_dev` PlatformIO environment (`ENABLE_DEV_OTA`, default 0 in config.h), with `tools/devflash.py` to build and upload then show the bridge's log. Verified the plain `wemos` firmware contains none of it (no "DEV OTA" string). It has no authentication - dev builds only, never publish from `wemos_dev`; always develop with `wemos_dev` or the updater is lost.

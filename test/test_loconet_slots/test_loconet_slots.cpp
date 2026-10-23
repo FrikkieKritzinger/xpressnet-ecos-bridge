@@ -623,8 +623,96 @@ void test_external_emergency_stop_and_resume_queue_the_bus_frames(void) {
     TEST_ASSERT_EQUAL_HEX8(LN_TRK_POWER | LN_TRK_RUNNING, server.trackStatus() & 0x03);
 }
 
+// Real capture after a bridge reboot: the UT6 still remembered slot 1 and sent
+// B5 01 13 (release) then BA 01 01 (select) into an EMPTY slot table.
+void test_status_write_to_an_empty_slot_is_ignored(void) {
+    send({LN_OPC_SLOT_STAT1, 0x01, 0x13});
+    TEST_ASSERT_EQUAL_UINT8(0, server.slot(1).stat1);
+    TEST_ASSERT_FALSE(server.hasReply());
+}
+
+void test_select_after_reboot_is_refused_so_the_throttle_logs_on_again(void) {
+    send({LN_OPC_SLOT_STAT1, 0x01, 0x13});
+    LnSlotEvent ev = send({LN_OPC_MOVE_SLOTS, 0x01, 0x01});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, ev.flags);   // no phantom selection
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_LONG_ACK, r.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x3A, r.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, r.data[2]);
+    // ...and a normal log-on then works.
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    TEST_ASSERT_EQUAL_UINT8(1, popReply().data[2]);
+}
+
+// ============================================================================
+// COALESCED SLOT READS FOR THROTTLE DISPLAYS
+// ============================================================================
+
+void test_external_change_marks_the_slot_for_a_pushed_slot_read(void) {
+    selectLoco3();
+    server.applyExternalDrive(3, 50, 1, now_ms);
+    while (server.hasReply()) popReply();       // drop the per-change frames
+
+    now_ms += LN_SLOT_PUSH_INTERVAL_MS;
+    server.pushDirtySlots(now_ms);
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_SL_RD_DATA, r.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(1, r.data[2]);
+    TEST_ASSERT_EQUAL_UINT8(51, r.data[5]);     // carries the new speed
+    TEST_ASSERT_FALSE(server.hasReply());
+}
+
+void test_a_burst_of_changes_becomes_one_up_to_date_slot_read(void) {
+    selectLoco3();
+    server.pushDirtySlots(now_ms + 1000);       // nothing dirty yet
+    for (uint8_t speed = 10; speed <= 40; speed += 10) {
+        server.applyExternalDrive(3, speed, 1, now_ms);
+    }
+    while (server.hasReply()) popReply();
+
+    server.pushDirtySlots(now_ms + 2000);
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_UINT8(41, r.data[5]);     // the last value, 40 -> 41
+    TEST_ASSERT_FALSE(server.hasReply());
+    server.pushDirtySlots(now_ms + 3000);
+    TEST_ASSERT_FALSE(server.hasReply());       // nothing left to push
+}
+
+void test_slot_reads_for_one_slot_are_rate_limited(void) {
+    selectLoco3();
+    server.applyExternalDrive(3, 10, 1, now_ms);
+    while (server.hasReply()) popReply();
+    server.pushDirtySlots(now_ms + 1000);
+    popReply();
+
+    server.applyExternalDrive(3, 20, 1, now_ms + 1010);
+    while (server.hasReply()) popReply();
+    // The interval runs from the previous push (at +1000), not from the change.
+    server.pushDirtySlots(now_ms + 1000 + LN_SLOT_PUSH_INTERVAL_MS - 1);
+    TEST_ASSERT_FALSE(server.hasReply());       // too soon, stays dirty
+    server.pushDirtySlots(now_ms + 1000 + LN_SLOT_PUSH_INTERVAL_MS);
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_SL_RD_DATA, popReply().data[0]);
+}
+
+void test_byte_frames_can_be_switched_off(void) {
+    selectLoco3();
+    server.setPushByteFrames(false);
+    server.applyExternalDrive(3, 50, 1, now_ms);
+    server.applyExternalFunctions(3, 0x01, now_ms);
+    TEST_ASSERT_FALSE(server.hasReply());       // no A0/A1/A2 ...
+    server.pushDirtySlots(now_ms + 1000);
+    TEST_ASSERT_TRUE(server.hasReply());        // ... but the slot read still goes out
+}
+
 int main(void) {
     UNITY_BEGIN();
+
+    RUN_TEST(test_status_write_to_an_empty_slot_is_ignored);
+    RUN_TEST(test_select_after_reboot_is_refused_so_the_throttle_logs_on_again);
+    RUN_TEST(test_external_change_marks_the_slot_for_a_pushed_slot_read);
+    RUN_TEST(test_a_burst_of_changes_becomes_one_up_to_date_slot_read);
+    RUN_TEST(test_slot_reads_for_one_slot_are_rate_limited);
+    RUN_TEST(test_byte_frames_can_be_switched_off);
 
     RUN_TEST(test_speed_conversion_between_loconet_and_bridge);
     RUN_TEST(test_speed_frame_reports_a_drive_event);

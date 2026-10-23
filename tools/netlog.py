@@ -14,6 +14,14 @@ import time
 
 
 def main():
+    # Log lines can contain non-ASCII characters (the bridge prints arrows); a
+    # Windows console in cp1252 would otherwise crash the capture on them.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("host", nargs="?", default="192.168.0.51")
     ap.add_argument("--port", type=int, default=23)

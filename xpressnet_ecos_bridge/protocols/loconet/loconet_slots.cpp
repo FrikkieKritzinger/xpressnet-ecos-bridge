@@ -13,6 +13,9 @@ LnSlotServer::LnSlotServer() {
     lookup = nullptr;
     lookup_context = nullptr;
     pending_select_address = 0;
+    dirty_slots = 0;
+    push_byte_frames = true;
+    memset(last_push_ms, 0, sizeof(last_push_ms));
 }
 
 // ============================================================================
@@ -163,13 +166,15 @@ uint8_t LnSlotServer::applyExternalDrive(uint16_t address, uint8_t bridge_speed,
         uint8_t dirf = (uint8_t)((s.dirf & ~LN_DIRF_FORWARD) | (direction ? LN_DIRF_FORWARD : 0));
         if (dirf != s.dirf) {
             s.dirf = dirf;
-            queueSlotByte(LN_OPC_LOCO_DIRF, i, dirf);
+            if (push_byte_frames) queueSlotByte(LN_OPC_LOCO_DIRF, i, dirf);
+            dirty_slots |= (1UL << i);
         }
         // A stored emergency-stop (1) already means stopped.
         bool same = (ln_speed == s.speed) || (ln_speed == 0 && s.speed == 1);
         if (!same) {
             s.speed = ln_speed;
-            queueSlotByte(LN_OPC_LOCO_SPD, i, ln_speed);
+            if (push_byte_frames) queueSlotByte(LN_OPC_LOCO_SPD, i, ln_speed);
+            dirty_slots |= (1UL << i);
         }
     }
     return affected;
@@ -189,14 +194,30 @@ uint8_t LnSlotServer::applyExternalFunctions(uint16_t address, uint32_t function
         uint8_t dirf = (uint8_t)((s.dirf & LN_DIRF_FORWARD) | dirf_bits);
         if (dirf != s.dirf) {
             s.dirf = dirf;
-            queueSlotByte(LN_OPC_LOCO_DIRF, i, dirf);
+            if (push_byte_frames) queueSlotByte(LN_OPC_LOCO_DIRF, i, dirf);
+            dirty_slots |= (1UL << i);
         }
         if (snd != s.snd) {
             s.snd = snd;
-            queueSlotByte(LN_OPC_LOCO_SND, i, snd);
+            if (push_byte_frames) queueSlotByte(LN_OPC_LOCO_SND, i, snd);
+            dirty_slots |= (1UL << i);
         }
     }
     return affected;
+}
+
+void LnSlotServer::pushDirtySlots(uint32_t now_ms) {
+    for (uint8_t i = 1; i <= LN_SLOT_COUNT; i++) {
+        if (!(dirty_slots & (1UL << i))) {
+            continue;
+        }
+        if ((uint32_t)(now_ms - last_push_ms[i]) < LN_SLOT_PUSH_INTERVAL_MS) {
+            continue;   // stays dirty; the next call after the interval sends the latest values
+        }
+        queueSlotRead(i);
+        dirty_slots &= ~(1UL << i);
+        last_push_ms[i] = now_ms;
+    }
 }
 
 void LnSlotServer::applyExternalEmergencyStop() {
@@ -304,7 +325,14 @@ LnSlotEvent LnSlotServer::handleFrame(const LnFrame& f, uint32_t now_ms) {
             break;
 
         case LN_OPC_SLOT_STAT1:
-            if (f.len == 4 && isValidSlot(b[1])) {
+            // Ignored for a slot nothing is loaded in. After a bridge reboot a
+            // throttle still remembers its old slot and "releases" it (B5 .. 13)
+            // before re-selecting; accepting that on an empty slot made the
+            // following null move succeed, leaving the throttle driving a
+            // phantom loco at address 0 whose commands went nowhere (live
+            // 2026-10-23). Refusing it makes the throttle log on properly.
+            if (f.len == 4 && isValidSlot(b[1]) &&
+                (slots[b[1]].stat1 & LN_STAT1_BUSY_MASK) != LN_STAT1_FREE) {
                 bool was_in_use = (slots[b[1]].stat1 & LN_STAT1_BUSY_MASK) == LN_STAT1_IN_USE;
                 slots[b[1]].stat1 = b[2];
                 slots[b[1]].last_use_ms = now_ms;

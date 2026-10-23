@@ -1601,19 +1601,37 @@ real needs come up rather than pre-committing to a fixed scope.
      selects locos (LOCO_ADR/MOVE_SLOTS/WR_SL_DATA), shows LN and Trk icons,
      and its speed/direction/function frames are received; replies go out
      9 ms after a request with no collisions. Flashed and running.
-   - **P3 routing - written, 372 native tests pass, firmware builds, NOT yet
-     flashed or hardware-tested**: LocoNet drive/function/e-stop/select
-     events -> `CommandRouter` (`handleLocoNetCommand` etc.), fan-out to Ecos
-     and the other protocols and back (slot updates sent as OPC_LOCO_SPD/
-     DIRF/SND), slots loaded with the loco's real state on selection.
-     **RESUME HERE (end of 2026-10-22): the D1 was last flashed over USB
-     with the `wemos_dev` build (includes P3 + the dev updater) and was still
-     on the bench, NOT yet reseated in the motherboard. Next: reseat it with
-     the UT6 attached, run a no-change `python tools/devflash.py` to prove the
-     network flash, then test P3 against Ecos with a real loco: speed, direction polarity (LocoNet DIRF bit5=1 forward is
-     mapped straight to the bridge's 1=forward - unverified against Ecos),
-     functions F0-F28, e-stop, and a second throttle (MultiMaus/WLANmaus)
-     seeing UT6 changes and vice versa.**
+   - **P3 routing - confirmed on hardware (2026-10-23)**: a Digitrax UT6
+     driving a real loco on Ecos: speed, direction (UT6 forward = Ecos/
+     XpressNet forward, no inversion needed), functions, long address
+     (5452) and track stop/go all reach Ecos, XpressNet and the WLANmaus
+     immediately. The UT6's built-in "direction change ramps speed back up"
+     behaviour is the UT6's own, relayed faithfully. `tools/devflash.py`
+     network flashing proven with the D1 seated (USB can stay unplugged).
+   - **Known limitation, accepted for now: the UT6 does not display changes
+     made elsewhere.** Changes from Ecos/WLANmaus/XpressNet are transmitted
+     to LocoNet correctly (verified in the log: OPC_LOCO_SPD/DIRF/SND frames,
+     and coalesced OPC_SL_RD_DATA slot reads carrying the new values and the
+     UT6's own ID) but the UT6 ignores them - it keeps its own internal speed
+     and its next knob turn continues from that. Probably normal for an
+     encoder throttle (it is not a bridge fault); the Digitrax spec sheet says
+     nothing either way. Defaults: slot-read push ON, per-change byte frames
+     OFF (`LOCONET_PUSH_SLOT_READ` / `LOCONET_PUSH_BYTE_FRAMES`, config.h).
+     Other LocoNet devices (JMRI, other throttle models) may follow them.
+   - **Fixed this session**: (a) a bridge reboot left the UT6 driving a
+     phantom address-0 slot (it releases then re-selects its remembered slot;
+     the release was accepted on an empty slot) - now refused so the UT6 logs
+     on again, confirmed live; (b) a WLANmaus STOP was never confirmed back
+     to the WLANmaus (the router skips the originator), so it kept showing
+     "running" and could not cancel the stop - Z21 now confirms stop/go to all
+     clients including the sender, confirmed live (WLANmaus STOP now toggles
+     STOP/GO).
+   - **Still open**: the UT6 powers on showing "track off" - the bridge does
+     not yet read Ecos's actual power state at start-up or keep a global
+     track-power state (the LocoNet TRK byte is a fixed default); F-keys
+     above F12 and turnout (SW_REQ) handling from the UT6 not yet exercised;
+     an OLED slot page; version bump and merge of `loconet` into `main` once
+     the user is satisfied.
    - Tooling: debug text is a TCP log on port 23 (`tools/netlog.py`) because
      UART0 belongs to LocoNet; any global-constructor logging must not touch
      non-constant-initialized state (caused a boot loop, fixed). Spec:

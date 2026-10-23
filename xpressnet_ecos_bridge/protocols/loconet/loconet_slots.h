@@ -26,6 +26,9 @@
 #include <cstdint>
 #include "loconet_protocol.h"
 
+// Minimum time between pushed slot reads for the same slot.
+#define LN_SLOT_PUSH_INTERVAL_MS 120
+
 // Loco slots are numbered 1..LN_SLOT_COUNT (slot 0 is the dispatch slot and
 // 120-127 are system slots in the spec; we never hand those out).
 #define LN_SLOT_COUNT 20
@@ -126,6 +129,19 @@ public:
     // Track state pushed from another protocol: queues OPC_IDLE (emergency
     // stop) / OPC_GPON and updates the TRK byte.
     void applyExternalEmergencyStop();
+
+    // A throttle shows a change made elsewhere only when it sees a full slot
+    // read (OPC_SL_RD_DATA) of its own slot - the bare speed/direction/
+    // function frames above did not move a Digitrax UT6's display (tested
+    // live 2026-10-23). Slots changed by applyExternal*() are marked dirty and
+    // this queues ONE slot read per dirty slot, at most every
+    // LN_SLOT_PUSH_INTERVAL_MS, so a burst of changes (a knob turned on
+    // another throttle) becomes a single up-to-date read, not a flood.
+    void pushDirtySlots(uint32_t now_ms);
+
+    // Whether applyExternal*() also queues the per-change OPC_LOCO_SPD/DIRF/
+    // SND frames (default true). The slot read above is what a UT6 follows.
+    void setPushByteFrames(bool on) { push_byte_frames = on; }
     void applyExternalResume();
 
     // Reply queue (oldest first).
@@ -156,6 +172,9 @@ private:
     uint8_t reply_head;
     uint8_t reply_count;
     uint32_t dropped_replies;
+    bool push_byte_frames;                      // also queue OPC_LOCO_SPD/DIRF/SND per change
+    uint32_t dirty_slots;                       // bit n set = slot n changed, read not yet pushed
+    uint32_t last_push_ms[LN_SLOT_COUNT + 1];
 
     void queueReply(const LnFrame& f);
     void queueSlotRead(uint8_t slot_number);
