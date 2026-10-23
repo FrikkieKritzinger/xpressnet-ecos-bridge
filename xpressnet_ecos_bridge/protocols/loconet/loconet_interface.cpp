@@ -26,7 +26,11 @@ static bool lookupLocoState(uint16_t address, LnLocoSnapshot* out, void* context
 
 LocoNetInterface::LocoNetInterface()
     : router(nullptr), seen_frame(false), bus_held(false), bus_hold_until_ms(0), last_resync_ms(0), last_frame_ms(0), last_rx_us(0), tx_not_before_ms(0),
-      tx_attempts(0), tx_frames(0), tx_collisions(0), tx_dropped(0) {}
+      tx_attempts(0), tx_frames(0), tx_collisions(0), tx_dropped(0) {
+    for (uint8_t i = 0; i < RECENT_MESSAGE_COUNT; i++) {
+        recent[i][0] = '\0';
+    }
+}
 
 void LocoNetInterface::setCommandRouter(CommandRouter* r) {
     router = r;
@@ -264,6 +268,11 @@ void LocoNetInterface::logFrame(const LnFrame& frame) {
     char text[LN_MAX_FRAME_BYTES * 3 + 24];
     lnFormatFrame(frame, text, sizeof(text));
     DEBUG_LOCONET_PRINTF_TS("LN RX: %s\n", text);
+
+    for (uint8_t i = RECENT_MESSAGE_COUNT - 1; i > 0; i--) {
+        memcpy(recent[i], recent[i - 1], RECENT_MESSAGE_CHARS);
+    }
+    lnDescribeFrame(frame, recent[0], RECENT_MESSAGE_CHARS);
 }
 
 void LocoNetInterface::routeEvent(const LnSlotEvent& event) {
@@ -328,10 +337,9 @@ void LocoNetInterface::sendResumeOperation() {
 }
 
 ComponentStatus LocoNetInterface::getStatus() const {
-    if (seen_frame && (millis() - last_frame_ms) < LOCONET_BUS_TIMEOUT_MS) {
-        return ComponentStatus::CONNECTED;
-    }
-    return ComponentStatus::DISCONNECTED;
+    // LocoNet has no heartbeat; a throttle is "attached" while it holds a slot.
+    return slot_server.slotsInUse() > 0 ? ComponentStatus::CONNECTED
+                                        : ComponentStatus::DISCONNECTED;
 }
 
 unsigned long LocoNetInterface::getLastMessageAgeMs() const {

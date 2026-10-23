@@ -144,6 +144,8 @@ struct SystemStatus {
     uint32_t loconet_frames_ok;
     uint32_t loconet_rx_errors;
     unsigned long loconet_last_frame_age_ms;
+    uint8_t loconet_slots_in_use;
+    char loconet_recent[2][22];   // newest first, plain text
 };
 
 // ============================================================================

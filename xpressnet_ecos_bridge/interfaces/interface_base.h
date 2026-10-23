@@ -193,6 +193,13 @@ public:
      */
     virtual uint32_t getRxFrameCount() const { return 0; }
     virtual uint32_t getRxErrorCount() const { return 0; }
+
+    // LocoNet page: slots currently held by a throttle, and the last received
+    // messages in plain text (index 0 = newest; empty string if none).
+    static const uint8_t RECENT_MESSAGE_COUNT = 2;
+    static const uint8_t RECENT_MESSAGE_CHARS = 22;
+    virtual uint8_t getSlotsInUse() const { return 0; }
+    virtual const char* getRecentMessage(uint8_t) const { return ""; }
 };
 
 // ============================================================================

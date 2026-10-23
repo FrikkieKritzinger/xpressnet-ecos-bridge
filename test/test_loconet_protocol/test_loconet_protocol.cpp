@@ -9,6 +9,7 @@
  * Z21 firmware comments.
  */
 
+#include <initializer_list>
 #include <cstdint>
 #include <cstring>
 #include <unity.h>
@@ -76,6 +77,43 @@ void test_format_frame(void) {
     char out[64];
     lnFormatFrame(f, out, sizeof(out));
     TEST_ASSERT_EQUAL_STRING("BF 00 05 45  OPC_LOCO_ADR", out);
+}
+
+static void describe(const std::initializer_list<uint8_t>& bytes, char* out, size_t n) {
+    LnFrame f;
+    memset(&f, 0, sizeof(f));
+    uint8_t i = 0;
+    for (uint8_t b : bytes) f.data[i++] = b;
+    f.len = i;
+    lnDescribeFrame(f, out, n);
+}
+
+void test_describe_frame_plain_text(void) {
+    char out[32];
+    describe({0x83, 0x7C}, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("Track power ON", out);
+    describe({0xBF, 0x2A, 0x4C, 0x00}, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("Find loco 5452", out);
+    describe({0xBA, 0x03, 0x03, 0x00}, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("S3 select", out);
+    describe({0xA0, 0x03, 0x41, 0x00}, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("S3 speed 64", out);
+    describe({0xA0, 0x03, 0x01, 0x00}, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("S3 E-STOP", out);
+    describe({0xA1, 0x03, 0x31, 0x00}, out, sizeof(out));   // forward, F0, F1
+    TEST_ASSERT_EQUAL_STRING("S3 Fwd F0,1", out);
+    describe({0xA2, 0x03, 0x05, 0x00}, out, sizeof(out));   // F5, F7
+    TEST_ASSERT_EQUAL_STRING("S3 F5,7", out);
+    describe({0xA2, 0x03, 0x00, 0x00}, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("S3 none", out);
+}
+
+void test_describe_frame_fits_one_oled_line(void) {
+    char out[22];
+    describe({0xA1, 0x14, 0x3F, 0x00}, out, sizeof(out));   // everything on
+    TEST_ASSERT_TRUE(strlen(out) <= 21);
+    describe({0xD4, 0x00, 0x00, 0x00}, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("UNKNOWN", out);
 }
 
 void test_format_frame_truncates_safely(void) {
@@ -262,6 +300,8 @@ int main(void) {
     RUN_TEST(test_opcode_names);
     RUN_TEST(test_format_frame);
     RUN_TEST(test_format_frame_truncates_safely);
+    RUN_TEST(test_describe_frame_plain_text);
+    RUN_TEST(test_describe_frame_fits_one_oled_line);
 
     RUN_TEST(test_two_byte_message);
     RUN_TEST(test_busy_nop_is_a_valid_frame);

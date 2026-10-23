@@ -82,6 +82,97 @@ void lnFormatFrame(const LnFrame& frame, char* out, size_t out_size) {
     }
 }
 
+static void appendFunctions(char* out, size_t out_size, size_t& pos, uint8_t bits, uint8_t first_fn, const uint8_t* order) {
+    // order[i] = the bit holding function first_fn + i
+    bool any = false;
+    for (uint8_t i = 0; i < 4 || (first_fn == 0 && i < 5); i++) {
+        if (bits & order[i]) {
+            pos += snprintf(out + pos, out_size - pos, any ? ",%u" : " F%u", (unsigned)(first_fn + i));
+            any = true;
+        }
+    }
+    if (!any) {
+        pos += snprintf(out + pos, out_size - pos, " none");
+    }
+}
+
+void lnDescribeFrame(const LnFrame& frame, char* out, size_t out_size) {
+    if (out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (frame.len < 2) {
+        return;
+    }
+    const uint8_t* d = frame.data;
+    size_t pos = 0;
+    switch (d[0]) {
+        case LN_OPC_GPON:  snprintf(out, out_size, "Track power ON"); break;
+        case LN_OPC_GPOFF: snprintf(out, out_size, "Track power OFF"); break;
+        case LN_OPC_IDLE:  snprintf(out, out_size, "Emergency stop"); break;
+        case LN_OPC_BUSY:  snprintf(out, out_size, "Bus busy"); break;
+        case LN_OPC_LOCO_ADR: {
+            unsigned address = (d[1] << 7) | d[2];
+            snprintf(out, out_size, "Find loco %u", address);
+            break;
+        }
+        case LN_OPC_MOVE_SLOTS:
+            if (d[1] == d[2]) {
+                snprintf(out, out_size, "S%u select", d[1]);
+            } else if (d[2] == 0) {
+                snprintf(out, out_size, "S%u dispatch", d[1]);
+            } else if (d[1] == 0) {
+                snprintf(out, out_size, "Take dispatched S%u", d[2]);
+            } else {
+                snprintf(out, out_size, "S%u move to S%u", d[1], d[2]);
+            }
+            break;
+        case LN_OPC_RQ_SL_DATA: snprintf(out, out_size, "S%u read request", d[1]); break;
+        case LN_OPC_SLOT_STAT1: snprintf(out, out_size, "S%u status change", d[1]); break;
+        case LN_OPC_LOCO_SPD:
+            if (d[2] == 0) {
+                snprintf(out, out_size, "S%u speed 0", d[1]);
+            } else if (d[2] == 1) {
+                snprintf(out, out_size, "S%u E-STOP", d[1]);
+            } else {
+                snprintf(out, out_size, "S%u speed %u", d[1], d[2] - 1);
+            }
+            break;
+        case LN_OPC_LOCO_DIRF: {
+            static const uint8_t order[5] = {0x10, 0x01, 0x02, 0x04, 0x08};
+            pos += snprintf(out, out_size, "S%u %s", d[1], (d[2] & 0x20) ? "Fwd" : "Rev");
+            appendFunctions(out, out_size, pos, d[2], 0, order);
+            break;
+        }
+        case LN_OPC_LOCO_SND: {
+            static const uint8_t order[4] = {0x01, 0x02, 0x04, 0x08};
+            pos += snprintf(out, out_size, "S%u", d[1]);
+            appendFunctions(out, out_size, pos, d[2], 5, order);
+            break;
+        }
+        case LN_OPC_SL_RD_DATA:
+        case LN_OPC_WR_SL_DATA:
+            if (frame.len >= 14) {
+                unsigned address = (d[9] << 7) | d[4];
+                snprintf(out, out_size, "S%u %s %u", d[2],
+                         d[0] == LN_OPC_WR_SL_DATA ? "write" : "data", address);
+            } else {
+                snprintf(out, out_size, "%s", lnOpcodeName(d[0]) + 4);
+            }
+            break;
+        case LN_OPC_IMM_PACKET: snprintf(out, out_size, "Function packet"); break;
+        case LN_OPC_LONG_ACK:   snprintf(out, out_size, "Ack for %02X", d[1] | 0x80); break;
+        case LN_OPC_SW_REQ: {
+            unsigned address = (((d[2] & 0x0F) << 7) | d[1]) + 1;
+            snprintf(out, out_size, "Turnout %u %s", address, (d[2] & 0x20) ? "closed" : "thrown");
+            break;
+        }
+        default:
+            snprintf(out, out_size, "%s", lnOpcodeName(d[0]) + 4);
+            break;
+    }
+}
+
 // ============================================================================
 // FRAME PARSER
 // ============================================================================

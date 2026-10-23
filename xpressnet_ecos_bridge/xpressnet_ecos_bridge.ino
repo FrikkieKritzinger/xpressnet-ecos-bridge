@@ -102,6 +102,7 @@ CommandRouter router;
 TimedTask expiry_check_task(LOCO_EXPIRY_CHECK_INTERVAL);
 TimedTask status_update_task(5000);     // Every 5 seconds
 TimedTask debug_output_task(10000);     // Every 10 seconds (if debug enabled)
+TimedTask heap_log_task(30000);         // Free heap trend in the debug log
 
 // ============================================================================
 // ARDUINO SETUP - Called once at startup
@@ -252,6 +253,8 @@ void setup() {
     #endif
 
     debugPrintf("=== Setup Complete - Ready to operate ===\n\n");
+    debugPrintf("Heap: %u free, largest block %u (boot)\n",
+                ESP.getFreeHeap(), ESP.getMaxFreeBlockSize());
 }
 
 // ============================================================================
@@ -330,6 +333,13 @@ void loop() {
         #endif
     }
     
+    #if ENABLE_DEBUG
+        if (heap_log_task.shouldExecute()) {
+            debugPrintf("Heap: %u free, largest block %u\n",
+                        ESP.getFreeHeap(), ESP.getMaxFreeBlockSize());
+        }
+    #endif
+
     // Debug output (very verbose, only if enabled)
     #if ENABLE_DEBUG && DEBUG_TIMING
         if (debug_output_task.shouldExecute()) {

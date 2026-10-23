@@ -1132,11 +1132,19 @@ SystemStatus CommandRouter::getSystemStatus() const {
     status.loconet_last_frame_age_ms = (loconet != nullptr) ?
                          loconet->getLastMessageAgeMs() :
                          ProtocolInterface::NO_TIMESTAMP;
+    status.loconet_slots_in_use = (loconet != nullptr) ? loconet->getSlotsInUse() : 0;
+    for (uint8_t i = 0; i < 2; i++) {
+        const char* text = (loconet != nullptr) ? loconet->getRecentMessage(i) : "";
+        snprintf(status.loconet_recent[i], sizeof(status.loconet_recent[i]), "%s", text);
+    }
     #else
     status.loconet_status = ComponentStatus::DISCONNECTED;
     status.loconet_frames_ok = 0;
     status.loconet_rx_errors = 0;
     status.loconet_last_frame_age_ms = ProtocolInterface::NO_TIMESTAMP;
+    status.loconet_slots_in_use = 0;
+    status.loconet_recent[0][0] = '\0';
+    status.loconet_recent[1][0] = '\0';
     #endif
 
     // Deferred OLED fields (Phase 5 step 8)

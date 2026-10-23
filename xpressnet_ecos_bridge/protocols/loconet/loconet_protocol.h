@@ -135,6 +135,10 @@ const char* lnOpcodeName(uint8_t opcode);
 // "BF 00 05 FB  OPC_LOCO_ADR" style text for logging. Always NUL-terminates.
 void lnFormatFrame(const LnFrame& frame, char* out, size_t out_size);
 
+// Short plain-text meaning of a frame ("S3 speed 64", "Track power ON"), sized
+// for one OLED line. Unknown opcodes give their name without the OPC_ prefix.
+void lnDescribeFrame(const LnFrame& frame, char* out, size_t out_size);
+
 // Whether to force a bus disconnect now so a throttle re-reads its slot and
 // shows a change another protocol made (a UT6 does not follow such changes on
 // its own, but re-reads its slot after the bus has been held low for about

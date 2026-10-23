@@ -1641,9 +1641,32 @@ real needs come up rather than pre-committing to a fixed scope.
      answered with the empty slot read, so the UT6 just returns to loco-select.
      Reconnecting the UT6 after a bridge restart also avoids any stale slot.
      F10-F12 confirmed working (UT6 -> Ecos).
-   - **Still open**: F13+ and turnout (OPC_SW_REQ) control from the UT6 not
-     yet exercised/implemented (turnouts need a LocoNet <-> accessory router
-     path like the Z21/XpressNet ones); an OLED slot page; a version bump and
+   - **LocoNet OLED page (2026-10-23, flashed, not yet eyeballed by the user)**:
+     connected icon = at least one slot IN_USE (no bus-activity timeout; caveat:
+     slots never expire, so an unplugged UT6 keeps it green until reselect/
+     reboot); lines: `Frames: N` (+ `Err: N` only when errors), `Last Msg`,
+     `Slots: n/20`, then the last two received frames in plain text
+     (`lnDescribeFrame()`, e.g. "S3 speed 64", "Find loco 5452").
+   - **Heap is tight (2026-10-23)**: OLED shows ~8 KB free (warning fires
+     below 10 KB); the 30 s `Heap:` line in the TCP log shows 5.7-7 KB in
+     steady state, 10.8 KB right after boot, largest block ~= free (not
+     fragmented). Suspected main cause: the `wemos_dev` build (dev web server)
+     plus the 4 KB log ring. Next: compare against a plain `wemos` build;
+     candidates to trim are the log ring, then the dev updater. CPU stays at
+     the default 80 MHz (user decision; CLAUDE.md's 160 MHz figure was wrong).
+   - **First wired-XpressNet test alongside LocoNet+Z21+Ecos (2026-10-23,
+     capture p13)**: XNet stayed Connected with no bus errors, but the wired
+     throttle sent only 10 speed frames and ONE function frame (all-off) in 3
+     minutes; the bridge sent it 12 function updates and ~39 "stolen" pushes.
+     Functions to/from the wired throttle were reported as not working;
+     undiagnosed. Suspect: repeated pushes keep the MultiMaus in "stolen"
+     state so it stops sending function keys, plus the known display-sync gap
+     (item 7). Needs a repeat with the other throttles idle and the exact
+     throttle model/keys noted.
+   - **Still open**: turnout (OPC_SW_REQ) control from the UT6 (needs a
+     LocoNet <-> accessory router path like Z21/XpressNet; the page already
+     describes SW_REQ frames); F13+ from the UT6 not exercised; optional slot
+     expiry; the wired-throttle function problem above; a version bump and
      merge of `loconet` into `main` once the user is satisfied.
    - Tooling: debug text is a TCP log on port 23 (`tools/netlog.py`) because
      UART0 belongs to LocoNet; any global-constructor logging must not touch

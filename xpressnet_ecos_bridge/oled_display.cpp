@@ -17,6 +17,7 @@
 #include "definitions.h"
 #include "utils/debug.h"
 #include "utils/memory.h"
+#include "protocols/loconet/loconet_slots.h"
 
 // ============================================================================
 // SCREEN LAYOUT CONSTANTS
@@ -578,8 +579,8 @@ void OledDisplay::drawLocoNetScreen() {
     display.setCursor(0, YELLOW_TITLE_Y);
     display.println(F("LocoNet"));
 
-    // "Connected" means a valid frame was seen recently - LocoNet has no
-    // polling, so an idle bus with no throttle active reads as disconnected.
+    // "Connected" means at least one throttle holds a slot - LocoNet has no
+    // heartbeat to poll.
     drawConnectionIcon(PROTOCOL_ICON_X, ICON_Y, current_status.loconet_status);
 
     // ========== BLUE SECTION ==========
@@ -588,18 +589,29 @@ void OledDisplay::drawLocoNetScreen() {
     display.setCursor(0, BLUE_CONTENT_Y);
     display.print(F("Frames: "));
     display.print(current_status.loconet_frames_ok);
+    if (current_status.loconet_rx_errors > 0) {
+        display.print(F("  Err: "));
+        display.print(current_status.loconet_rx_errors);
+    }
 
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
-    display.print(F("Errors: "));
-    display.print(current_status.loconet_rx_errors);
-
-    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
     display.print(F("Last Msg: "));
     if (current_status.loconet_last_frame_age_ms == ProtocolInterface::NO_TIMESTAMP) {
         display.print(F("N/A"));
     } else {
         display.print(current_status.loconet_last_frame_age_ms / 1000);
         display.print(F("s"));
+    }
+
+    display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * 2);
+    display.print(F("Slots: "));
+    display.print(current_status.loconet_slots_in_use);
+    display.print(F("/"));
+    display.print(LN_SLOT_COUNT);
+
+    for (uint8_t i = 0; i < 2; i++) {
+        display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL * (3 + i));
+        display.print(current_status.loconet_recent[i]);
     }
 }
 

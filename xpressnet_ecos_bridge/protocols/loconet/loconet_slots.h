@@ -159,6 +159,15 @@ public:
     bool isValidSlot(uint8_t slot) const { return slot >= 1 && slot <= LN_SLOT_COUNT; }
     const LnSlot& slot(uint8_t n) const { return slots[n]; }
     uint8_t dispatchSlot() const { return dispatch_slot; }
+    uint8_t slotsInUse() const {
+        uint8_t n = 0;
+        for (uint8_t i = 1; i <= LN_SLOT_COUNT; i++) {
+            if ((slots[i].stat1 & LN_STAT1_BUSY_MASK) == LN_STAT1_IN_USE) {
+                n++;
+            }
+        }
+        return n;
+    }
     uint8_t trackStatus() const { return trk; }
     uint32_t repliesDropped() const { return dropped_replies; }
 

@@ -63,6 +63,10 @@ public:
     unsigned long getLastMessageAgeMs() const override;
     uint32_t getRxFrameCount() const override;
     uint32_t getRxErrorCount() const override;
+    uint8_t getSlotsInUse() const override { return slot_server.slotsInUse(); }
+    const char* getRecentMessage(uint8_t index) const override {
+        return index < RECENT_MESSAGE_COUNT ? recent[index] : "";
+    }
 
 private:
     LnFrameParser parser;
@@ -81,6 +85,7 @@ private:
     uint32_t tx_frames;
     uint32_t tx_collisions;
     uint32_t tx_dropped;
+    char recent[RECENT_MESSAGE_COUNT][RECENT_MESSAGE_CHARS];   // newest first
 
     void logFrame(const LnFrame& frame);
     void routeEvent(const LnSlotEvent& event);
