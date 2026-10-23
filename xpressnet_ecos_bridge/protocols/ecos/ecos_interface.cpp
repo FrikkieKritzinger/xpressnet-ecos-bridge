@@ -298,6 +298,19 @@ void EcosInterface::attemptTcpConnect() {
             DEBUG_ECOS_PRINTF("Ecos: ERROR - failed to build system status subscribe request\n");
         }
 
+        // The subscription above only reports FUTURE changes - Ecos does not
+        // announce its current run state on connect. Ask for it, so the other
+        // protocols (and a LocoNet throttle's track-power indicator) start out
+        // knowing whether the layout is actually in STOP or GO. Ecos boots in
+        // STOP by default. The reply is an ordinary object-1 status block and
+        // takes the same path as an operator pressing STOP/GO.
+        len = ecosBuildGetPropertyCmd(cmd_buffer, sizeof(cmd_buffer),
+                                      ECOS_OBJECT_BASE_SYSTEM, "status");
+        if (len > 0) {
+            wifi_client.write((uint8_t*)cmd_buffer, len);
+            DEBUG_ECOS_PRINTF("Ecos TX: Query system status\n");
+        }
+
         DEBUG_ECOS_PRINTF("Ecos TCP connected!\n");
     } else {
         current_status = ComponentStatus::DISCONNECTED;

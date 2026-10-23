@@ -7,6 +7,16 @@ here. Newest entries first.
 
 ---
 
+**2026-10-23 (later) — track power start-up state, steal prompt, UT6 refresh behaviour**
+
+- **UT6 refresh behaviour pinned down by the user**: selecting a loco (or reconnecting the UT6) pulls the slot and updates the display 100% of the time; changes made elsewhere while it holds the loco are ignored. Combined with the earlier tests (bare A0/A1/A2 frames, then coalesced slot reads, both transmitted correctly) this is the UT6's normal behaviour, not a bridge fault.
+- **Track power**: Ecos boots in STOP and announces nothing on connect, so the bridge never knew its real state until someone pressed STOP/GO. Now `get(1, status)` follows the subscription on every (re)connect (log: `Ecos RX raw: 1 status[GO]`), flowing through the existing stop/resume path to XpressNet, Z21 and LocoNet. LocoNet now gets `OPC_GPOFF`/`OPC_GPON` for stop/go (what the UT6's own power button sends; captured earlier) instead of `OPC_IDLE`, and the slot-read TRK byte starts with power OFF until the real state is known. Confirmed: the UT6's Trk indicator now follows STOP/GO from Ecos and the WLANmaus.
+- **"Steal this loco?" prompt**: two causes, both fixed. (1) A `LOCO_ADR` reply for a slot still marked IN_USE (left over, or re-created by the UT6 itself) shows IN_USE and makes the throttle ask; stealing is free here by design, so such a slot is now offered as COMMON. (2) After a bridge restart the UT6 tries to resume its old slot (`B5 01 13`, `BA 01 01`); my earlier fix answered the select of the now-empty slot with a LONG_ACK refusal, which also triggers the prompt. Now it gets the empty slot read (what it gets when it asks about the slot at power-up) and simply returns to loco-select - confirmed live, no prompt. Drive/function frames for an empty slot are no longer stored.
+- F10-F12 from the UT6 reach Ecos. Turnout (OPC_SW_REQ) control from the UT6 is not implemented yet.
+- 381 native tests passing.
+
+---
+
 **2026-10-23 — LocoNet P3 routing confirmed on hardware; two real bugs fixed; UT6 display limitation documented**
 
 Network flashing (`tools/devflash.py`, `wemos_dev`) proven with the D1 seated; USB is no longer needed.

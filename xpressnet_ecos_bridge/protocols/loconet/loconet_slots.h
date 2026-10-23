@@ -126,8 +126,8 @@ public:
     uint8_t applyExternalDrive(uint16_t address, uint8_t bridge_speed, uint8_t direction, uint32_t now_ms);
     uint8_t applyExternalFunctions(uint16_t address, uint32_t functions, uint32_t now_ms);
 
-    // Track state pushed from another protocol: queues OPC_IDLE (emergency
-    // stop) / OPC_GPON and updates the TRK byte.
+    // Track state pushed from another protocol: queues OPC_GPOFF (stop = track
+    // power off) / OPC_GPON and updates the TRK byte.
     void applyExternalEmergencyStop();
 
     // A throttle shows a change made elsewhere only when it sees a full slot

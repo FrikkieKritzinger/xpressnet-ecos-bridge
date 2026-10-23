@@ -59,7 +59,7 @@ void test_slot_read_layout(void) {
     TEST_ASSERT_EQUAL_UINT8(3, r.data[4]);        // address low
     TEST_ASSERT_EQUAL_UINT8(0, r.data[5]);        // speed 0
     TEST_ASSERT_EQUAL_HEX8(0x20, r.data[6]);      // forward, functions off
-    TEST_ASSERT_EQUAL_HEX8(0x07, r.data[7]);      // TRK: power, running, LocoNet 1.1
+    TEST_ASSERT_EQUAL_HEX8(0x06, r.data[7]);      // TRK: running, LocoNet 1.1, power OFF until Ecos says GO
     TEST_ASSERT_EQUAL_UINT8(0, r.data[9]);        // address high
 }
 
@@ -188,12 +188,50 @@ void test_null_move_succeeds_even_when_already_in_use(void) {
     TEST_ASSERT_EQUAL_HEX8(LN_OPC_SL_RD_DATA, r.data[0]);
 }
 
-void test_null_move_on_a_free_slot_is_refused(void) {
-    send({LN_OPC_MOVE_SLOTS, 0x05, 0x05});
+void test_loco_adr_never_reports_a_slot_as_in_use(void) {
+    // A slot a throttle already holds must not make the next select ask the
+    // user to "steal" it - stealing is free here.
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});
+    send({LN_OPC_MOVE_SLOTS, 0x01, 0x01});          // now IN_USE
+    while (server.hasReply()) popReply();
+
+    send({LN_OPC_LOCO_ADR, 0x00, 0x03});            // select the same loco again
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_SL_RD_DATA, r.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(1, r.data[2]);          // same slot
+    TEST_ASSERT_EQUAL_HEX8(LN_STAT1_COMMON, r.data[3] & LN_STAT1_BUSY_MASK);
+
+    // ...and the throttle's null move still takes it.
+    send({LN_OPC_MOVE_SLOTS, 0x01, 0x01});
+    TEST_ASSERT_EQUAL_HEX8(LN_STAT1_IN_USE, popReply().data[3] & LN_STAT1_BUSY_MASK);
+}
+
+void test_null_move_on_a_free_slot_answers_with_the_empty_slot(void) {
+    // Not a LONG_ACK refusal: that makes a Digitrax throttle ask the user to
+    // "steal" the loco. The empty slot read sends it back to selecting.
+    LnSlotEvent ev = send({LN_OPC_MOVE_SLOTS, 0x05, 0x05});
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, ev.flags);
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_SL_RD_DATA, r.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(5, r.data[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, r.data[3] & LN_STAT1_BUSY_MASK);   // FREE
+    TEST_ASSERT_EQUAL_UINT8(0, r.data[4]);                        // no address
+}
+
+void test_drive_frames_for_an_empty_slot_are_not_stored(void) {
+    send({LN_OPC_LOCO_SPD, 0x01, 0x7E});
+    send({LN_OPC_LOCO_DIRF, 0x01, 0x10});
+    send({LN_OPC_LOCO_SND, 0x01, 0x05});
+    TEST_ASSERT_EQUAL_UINT8(0, server.slot(1).speed);
+    TEST_ASSERT_EQUAL_UINT8(0, server.slot(1).dirf);
+    TEST_ASSERT_EQUAL_UINT8(0, server.slot(1).snd);
+}
+
+void test_moving_a_free_slot_elsewhere_is_still_refused(void) {
+    send({LN_OPC_MOVE_SLOTS, 0x05, 0x07});
     LnFrame r = popReply();
     TEST_ASSERT_EQUAL_HEX8(LN_OPC_LONG_ACK, r.data[0]);
     TEST_ASSERT_EQUAL_HEX8(0x3A, r.data[1]);
-    TEST_ASSERT_EQUAL_HEX8(0x00, r.data[2]);
 }
 
 void test_dispatch_put_marks_the_slot_and_releases_it(void) {
@@ -297,11 +335,12 @@ void test_write_to_programming_slot_is_refused_as_not_implemented(void) {
 // ============================================================================
 
 void test_power_frames_change_the_track_status_byte(void) {
+    TEST_ASSERT_EQUAL_HEX8(0x06, server.trackStatus());   // power off until told otherwise
+    send({LN_OPC_GPON});
     TEST_ASSERT_EQUAL_HEX8(0x07, server.trackStatus());
     send({LN_OPC_GPOFF});
     TEST_ASSERT_EQUAL_HEX8(0x06, server.trackStatus());
     send({LN_OPC_GPON});
-    TEST_ASSERT_EQUAL_HEX8(0x07, server.trackStatus());
     send({LN_OPC_IDLE});
     TEST_ASSERT_EQUAL_HEX8(0x05, server.trackStatus());
     TEST_ASSERT_FALSE(server.hasReply());
@@ -612,15 +651,18 @@ void test_external_change_for_a_loco_no_throttle_holds_does_nothing(void) {
 }
 
 void test_external_emergency_stop_and_resume_queue_the_bus_frames(void) {
-    server.applyExternalEmergencyStop();
-    LnFrame idle = popReply();
-    TEST_ASSERT_EQUAL_HEX8(LN_OPC_IDLE, idle.data[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, server.trackStatus() & LN_TRK_RUNNING);
-
     server.applyExternalResume();
     LnFrame on = popReply();
     TEST_ASSERT_EQUAL_HEX8(LN_OPC_GPON, on.data[0]);
     TEST_ASSERT_EQUAL_HEX8(LN_TRK_POWER | LN_TRK_RUNNING, server.trackStatus() & 0x03);
+
+    // A stop from another protocol is "track power off" (what the UT6's own
+    // power button sends), not LocoNet's emergency-stop broadcast.
+    server.applyExternalEmergencyStop();
+    LnFrame off = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_GPOFF, off.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, server.trackStatus() & LN_TRK_POWER);
+    TEST_ASSERT_EQUAL_UINT8(LN_TRK_RUNNING, server.trackStatus() & LN_TRK_RUNNING);
 }
 
 // Real capture after a bridge reboot: the UT6 still remembered slot 1 and sent
@@ -631,14 +673,13 @@ void test_status_write_to_an_empty_slot_is_ignored(void) {
     TEST_ASSERT_FALSE(server.hasReply());
 }
 
-void test_select_after_reboot_is_refused_so_the_throttle_logs_on_again(void) {
+void test_select_after_reboot_reads_as_empty_so_the_throttle_logs_on_again(void) {
     send({LN_OPC_SLOT_STAT1, 0x01, 0x13});
     LnSlotEvent ev = send({LN_OPC_MOVE_SLOTS, 0x01, 0x01});
     TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, ev.flags);   // no phantom selection
     LnFrame r = popReply();
-    TEST_ASSERT_EQUAL_HEX8(LN_OPC_LONG_ACK, r.data[0]);
-    TEST_ASSERT_EQUAL_HEX8(0x3A, r.data[1]);
-    TEST_ASSERT_EQUAL_HEX8(0x00, r.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_SL_RD_DATA, r.data[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, r.data[3] & LN_STAT1_BUSY_MASK);   // reads as empty
     // ...and a normal log-on then works.
     send({LN_OPC_LOCO_ADR, 0x00, 0x03});
     TEST_ASSERT_EQUAL_UINT8(1, popReply().data[2]);
@@ -707,8 +748,9 @@ void test_byte_frames_can_be_switched_off(void) {
 int main(void) {
     UNITY_BEGIN();
 
+    RUN_TEST(test_loco_adr_never_reports_a_slot_as_in_use);
     RUN_TEST(test_status_write_to_an_empty_slot_is_ignored);
-    RUN_TEST(test_select_after_reboot_is_refused_so_the_throttle_logs_on_again);
+    RUN_TEST(test_select_after_reboot_reads_as_empty_so_the_throttle_logs_on_again);
     RUN_TEST(test_external_change_marks_the_slot_for_a_pushed_slot_read);
     RUN_TEST(test_a_burst_of_changes_becomes_one_up_to_date_slot_read);
     RUN_TEST(test_slot_reads_for_one_slot_are_rate_limited);
@@ -759,7 +801,9 @@ int main(void) {
 
     RUN_TEST(test_null_move_selects_the_slot);
     RUN_TEST(test_null_move_succeeds_even_when_already_in_use);
-    RUN_TEST(test_null_move_on_a_free_slot_is_refused);
+    RUN_TEST(test_null_move_on_a_free_slot_answers_with_the_empty_slot);
+    RUN_TEST(test_moving_a_free_slot_elsewhere_is_still_refused);
+    RUN_TEST(test_drive_frames_for_an_empty_slot_are_not_stored);
     RUN_TEST(test_dispatch_put_marks_the_slot_and_releases_it);
     RUN_TEST(test_dispatch_get_returns_the_dispatched_slot_in_use);
     RUN_TEST(test_dispatch_get_with_nothing_dispatched_fails);

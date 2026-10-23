@@ -1608,30 +1608,35 @@ real needs come up rather than pre-committing to a fixed scope.
      immediately. The UT6's built-in "direction change ramps speed back up"
      behaviour is the UT6's own, relayed faithfully. `tools/devflash.py`
      network flashing proven with the D1 seated (USB can stay unplugged).
-   - **Known limitation, accepted for now: the UT6 does not display changes
-     made elsewhere.** Changes from Ecos/WLANmaus/XpressNet are transmitted
-     to LocoNet correctly (verified in the log: OPC_LOCO_SPD/DIRF/SND frames,
-     and coalesced OPC_SL_RD_DATA slot reads carrying the new values and the
-     UT6's own ID) but the UT6 ignores them - it keeps its own internal speed
-     and its next knob turn continues from that. Probably normal for an
-     encoder throttle (it is not a bridge fault); the Digitrax spec sheet says
-     nothing either way. Defaults: slot-read push ON, per-change byte frames
-     OFF (`LOCONET_PUSH_SLOT_READ` / `LOCONET_PUSH_BYTE_FRAMES`, config.h).
-     Other LocoNet devices (JMRI, other throttle models) may follow them.
-   - **Fixed this session**: (a) a bridge reboot left the UT6 driving a
-     phantom address-0 slot (it releases then re-selects its remembered slot;
-     the release was accepted on an empty slot) - now refused so the UT6 logs
-     on again, confirmed live; (b) a WLANmaus STOP was never confirmed back
-     to the WLANmaus (the router skips the originator), so it kept showing
-     "running" and could not cancel the stop - Z21 now confirms stop/go to all
-     clients including the sender, confirmed live (WLANmaus STOP now toggles
-     STOP/GO).
-   - **Still open**: the UT6 powers on showing "track off" - the bridge does
-     not yet read Ecos's actual power state at start-up or keep a global
-     track-power state (the LocoNet TRK byte is a fixed default); F-keys
-     above F12 and turnout (SW_REQ) handling from the UT6 not yet exercised;
-     an OLED slot page; version bump and merge of `loconet` into `main` once
-     the user is satisfied.
+   - **Known behaviour, accepted: the UT6 refreshes its display only when
+     it (re)selects a loco, not on changes made elsewhere.** On select (or
+     power-cycling the UT6) it pulls the slot and shows the real speed,
+     direction and functions - confirmed 100% repeatable. Changes from Ecos/
+     WLANmaus/XpressNet while it holds the loco are transmitted correctly
+     (OPC_LOCO_SPD/DIRF/SND and a coalesced OPC_SL_RD_DATA, verified in the
+     log) but the UT6 ignores unsolicited ones and its next knob turn continues
+     from its own value. Not a bridge fault; no safe way to force it (a fake
+     "stolen" notice or a bus drop could kick the UT6 off the loco). Defaults:
+     slot-read push ON, per-change byte frames OFF (`LOCONET_PUSH_SLOT_READ` /
+     `LOCONET_PUSH_BYTE_FRAMES`, config.h). **Track power DOES follow**: the
+     UT6's Trk indicator toggles with STOP/GO from Ecos/WLANmaus/XpressNet.
+   - **Fixed and confirmed live (2026-10-23)**: (a) bridge reboot left the UT6
+     on a phantom address-0 slot; (b) WLANmaus STOP never confirmed to the
+     sender, so it could not cancel the stop (Z21 now confirms stop/go to all
+     clients); (c) track power start-up state: the bridge now asks Ecos for its
+     real status on connect (`get(1, status)`; Ecos boots in STOP) and a stop
+     is sent to LocoNet as OPC_GPOFF (track power off - what the UT6 power
+     button sends) not OPC_IDLE; the LocoNet TRK byte starts "power off" until
+     known; (d) the "steal this loco?" prompt: LOCO_ADR replies never report
+     IN_USE (offered as COMMON - stealing is free here), and a select of a slot
+     the bridge no longer has (after a bridge restart under a live UT6) is
+     answered with the empty slot read, so the UT6 just returns to loco-select.
+     Reconnecting the UT6 after a bridge restart also avoids any stale slot.
+     F10-F12 confirmed working (UT6 -> Ecos).
+   - **Still open**: F13+ and turnout (OPC_SW_REQ) control from the UT6 not
+     yet exercised/implemented (turnouts need a LocoNet <-> accessory router
+     path like the Z21/XpressNet ones); an OLED slot page; a version bump and
+     merge of `loconet` into `main` once the user is satisfied.
    - Tooling: debug text is a TCP log on port 23 (`tools/netlog.py`) because
      UART0 belongs to LocoNet; any global-constructor logging must not touch
      non-constant-initialized state (caused a boot loop, fixed). Spec:
@@ -1752,7 +1757,7 @@ real needs come up rather than pre-committing to a fixed scope.
 
 ---
 
-**Last Updated**: 2026-10-22 (LocoNet P1-P2 working on hardware, P3 written; see Phase 7 item 3 - `main` is still v1.4.0). **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-10-23 (LocoNet working on hardware on the `loconet` branch - routing, track power, no steal prompt; see Phase 7 item 3 - `main` is still v1.4.0). **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,

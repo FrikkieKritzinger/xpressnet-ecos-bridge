@@ -6,7 +6,10 @@ LnSlotServer::LnSlotServer() {
     memset(slots, 0, sizeof(slots));
     memset(replies, 0, sizeof(replies));
     dispatch_slot = 0;
-    trk = LN_TRK_POWER | LN_TRK_RUNNING | LN_TRK_LOCONET_1_1;
+    // Power OFF until the real state is known: Ecos starts in STOP and the
+    // bridge learns its actual state when it connects (or an operator presses
+    // GO). Telling a throttle "on" first would be wrong more often than not.
+    trk = LN_TRK_RUNNING | LN_TRK_LOCONET_1_1;
     reply_head = 0;
     reply_count = 0;
     dropped_replies = 0;
@@ -221,10 +224,14 @@ void LnSlotServer::pushDirtySlots(uint32_t now_ms) {
 }
 
 void LnSlotServer::applyExternalEmergencyStop() {
-    trk &= (uint8_t)~LN_TRK_RUNNING;
+    // The other protocols' stop means track power off (Ecos STOP cuts track
+    // power), which on LocoNet is OPC_GPOFF - what a Digitrax throttle's own
+    // power button sends - not OPC_IDLE (a broadcast emergency stop that
+    // leaves power on).
+    trk &= (uint8_t)~LN_TRK_POWER;
     LnFrame f;
     memset(&f, 0, sizeof(f));
-    f.data[0] = LN_OPC_IDLE;
+    f.data[0] = LN_OPC_GPOFF;
     f.len = 2;
     f.data[1] = lnChecksum(f.data, 1);
     queueReply(f);
@@ -345,7 +352,11 @@ LnSlotEvent LnSlotServer::handleFrame(const LnFrame& f, uint32_t now_ms) {
         case LN_OPC_LOCO_SPD:
         case LN_OPC_LOCO_DIRF:
         case LN_OPC_LOCO_SND:
-            if (f.len == 4 && isValidSlot(b[1])) {
+            // Nothing is stored for a slot with no loco in it, so an empty slot
+            // keeps reading as truly empty even while a throttle that has not
+            // noticed yet (e.g. right after a bridge restart) keeps sending.
+            if (f.len == 4 && isValidSlot(b[1]) &&
+                (slots[b[1]].stat1 & LN_STAT1_BUSY_MASK) != LN_STAT1_FREE) {
                 LnSlot& s = slots[b[1]];
                 uint8_t old_speed = s.speed;
                 uint8_t old_dirf = s.dirf;
@@ -512,6 +523,17 @@ void LnSlotServer::handleLocoAdr(const LnFrame& f, uint32_t now_ms) {
         return;
     }
     slots[slot_number].last_use_ms = now_ms;
+
+    // Stealing is free here, so never make a throttle ask for it: a slot still
+    // marked IN_USE (left over from an earlier selection, or re-created by the
+    // throttle itself after a bridge reboot) is offered as COMMON, i.e. free
+    // to take. A throttle that sees IN_USE in this reply stops and asks the
+    // user "steal this loco?" - the very prompt this design avoids (live
+    // 2026-10-23). The throttle's follow-up null move still marks it IN_USE.
+    if ((slots[slot_number].stat1 & LN_STAT1_BUSY_MASK) == LN_STAT1_IN_USE) {
+        slots[slot_number].stat1 = (uint8_t)((slots[slot_number].stat1 & ~LN_STAT1_BUSY_MASK) | LN_STAT1_COMMON);
+    }
+
     refreshFromLookup(slot_number);
     queueSlotRead(slot_number);
 }
@@ -536,8 +558,23 @@ void LnSlotServer::handleMoveSlots(const LnFrame& f, uint32_t now_ms) {
         return;
     }
 
-    if (!isValidSlot(src) || (slots[src].stat1 & LN_STAT1_BUSY_MASK) == LN_STAT1_FREE) {
+    if (!isValidSlot(src)) {
         queueLongAck(LN_LACK_OPC_MOVE_SLOTS, 0x00);
+        return;
+    }
+
+    if ((slots[src].stat1 & LN_STAT1_BUSY_MASK) == LN_STAT1_FREE) {
+        // A throttle selecting a slot this bridge no longer has - typically
+        // right after the bridge restarted under it. Answering with the
+        // spec's "illegal move" LONG_ACK makes a Digitrax throttle ask the
+        // user "steal this loco?" (live 2026-10-23); answering with the
+        // slot's own read, which shows it empty, is what it gets when it
+        // asks about the slot at power-up, and sends it back to selecting.
+        if (src == dst) {
+            queueSlotRead(src);
+        } else {
+            queueLongAck(LN_LACK_OPC_MOVE_SLOTS, 0x00);
+        }
         return;
     }
 
