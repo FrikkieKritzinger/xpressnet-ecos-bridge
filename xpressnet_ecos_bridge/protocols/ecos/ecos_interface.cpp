@@ -728,6 +728,16 @@ void EcosInterface::handleReply(const EcosReply& reply) {
                                            reply.has_speed, reply.has_direction);
             }
             if (reply.has_functions) {
+                // Keep sendFunctionCommand()'s diff baseline equal to what Ecos
+                // really has: after a change made on Ecos itself, a throttle
+                // re-sending its previous value would otherwise diff to
+                // nothing and never reach Ecos (found live 2026-10-26).
+                AddressMapEntry* entry = findAddressMapEntry(dcc_address);
+                if (entry != nullptr && entry->has_last_sent_functions) {
+                    entry->last_sent_functions =
+                        (entry->last_sent_functions & ~reply.functions_mask) |
+                        (reply.functions & reply.functions_mask);
+                }
                 router->handleEcosFunctionCommand(dcc_address, reply.functions, reply.functions_mask);
             }
         }

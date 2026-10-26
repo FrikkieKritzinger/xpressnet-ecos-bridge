@@ -70,6 +70,14 @@ void test_rewind_returns_buffered_history(void) {
     TEST_ASSERT_EQUAL_STRING("hello world", readAll().c_str());
 }
 
+void test_skip_to_newest_gives_only_new_output(void) {
+    ring.write("old history ", 12);
+    ring.skipToNewest();                   // a client reconnecting right away
+    TEST_ASSERT_EQUAL_UINT32(0, ring.pending());
+    ring.write("new", 3);
+    TEST_ASSERT_EQUAL_STRING("new", readAll().c_str());
+}
+
 void test_rewind_after_wrap_starts_at_oldest_retained(void) {
     ring.write("0123456789ABCDEF", 16);
     ring.write("XYZ", 3);
@@ -116,6 +124,7 @@ int main(void) {
     RUN_TEST(test_wraps_around_the_end_of_storage);
     RUN_TEST(test_overrun_drops_oldest_and_counts);
     RUN_TEST(test_rewind_returns_buffered_history);
+    RUN_TEST(test_skip_to_newest_gives_only_new_output);
     RUN_TEST(test_rewind_after_wrap_starts_at_oldest_retained);
     RUN_TEST(test_writes_with_no_reader_keep_only_recent_history);
     RUN_TEST(test_zero_capacity_ring_is_inert);

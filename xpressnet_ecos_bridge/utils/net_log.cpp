@@ -15,6 +15,13 @@ static WiFiServer g_log_server(NET_LOG_PORT);
 static WiFiClient g_log_client;
 static bool g_log_server_started = false;
 static uint32_t g_log_reported_drops = 0;
+static unsigned long g_log_last_active_ms = 0;
+static bool g_log_had_client = false;
+
+// A client that reconnects within this time of the last one gets no history
+// replay. Replaying 4 KB on every reconnect made two competing log clients
+// (each reconnecting every ~2 s) load the bridge enough to disturb XpressNet.
+static const unsigned long LOG_REPLAY_QUIET_MS = 10000;
 
 void debugEmit(const char* text) {
     g_log_ring.write(text, strlen(text));
@@ -42,7 +49,13 @@ void netLogUpdate() {
             g_log_client.stop();
         }
         g_log_client = incoming;
-        g_log_ring.rewindToOldest();
+        if (!g_log_had_client || (millis() - g_log_last_active_ms) > LOG_REPLAY_QUIET_MS) {
+            g_log_ring.rewindToOldest();
+        } else {
+            g_log_ring.skipToNewest();
+        }
+        g_log_had_client = true;
+        g_log_last_active_ms = millis();
         g_log_reported_drops = 0;
     }
 
@@ -53,6 +66,7 @@ void netLogUpdate() {
         g_log_client.stop();
         return;
     }
+    g_log_last_active_ms = millis();
 
     // The log is one-way; discard anything the client types.
     while (g_log_client.available()) {

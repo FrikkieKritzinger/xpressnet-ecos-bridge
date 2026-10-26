@@ -261,7 +261,23 @@ void setup() {
 // ARDUINO LOOP - Main event loop (runs forever)
 // ============================================================================
 
+// Main-loop health for the 30 s Heap log line: XpressNet polling can only be
+// as prompt as this loop is.
+static unsigned long g_loop_count = 0;
+static unsigned long g_loop_max_us = 0;
+static unsigned long g_loop_prev_us = 0;
+
 void loop() {
+    {
+        unsigned long now_us = micros();
+        if (g_loop_prev_us != 0) {
+            unsigned long gap = now_us - g_loop_prev_us;
+            if (gap > g_loop_max_us) g_loop_max_us = gap;
+        }
+        g_loop_prev_us = now_us;
+        g_loop_count++;
+    }
+
     // Setup Mode (Phase 6 step 2) is a completely separate operating mode -
     // no XNet/Ecos/normal display work happens at all while active. A
     // valid /save submission inside setupModeUpdate() reboots on its own.
@@ -337,6 +353,10 @@ void loop() {
         if (heap_log_task.shouldExecute()) {
             debugPrintf("Heap: %u free, largest block %u\n",
                         ESP.getFreeHeap(), ESP.getMaxFreeBlockSize());
+            debugPrintf("Loop: %lu iterations in 30 s, longest gap %lu ms\n",
+                        g_loop_count, g_loop_max_us / 1000);
+            g_loop_count = 0;
+            g_loop_max_us = 0;
         }
     #endif
 

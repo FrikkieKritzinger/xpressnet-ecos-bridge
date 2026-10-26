@@ -41,6 +41,10 @@ public:
     // connected client gets the buffered history) and forgets earlier drops.
     void rewindToOldest();
 
+    // Restarts the reader at the newest byte: a client that reconnects right
+    // after another one gets only new output, not a replay of the history.
+    void skipToNewest() { read_pos = write_pos; dropped_total = 0; }
+
     // Total bytes the reader lost because writers overran it.
     uint32_t dropped() const { return dropped_total; }
 

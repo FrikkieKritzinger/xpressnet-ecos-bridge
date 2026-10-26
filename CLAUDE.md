@@ -1652,8 +1652,12 @@ real needs come up rather than pre-committing to a fixed scope.
      steady state, 10.8 KB right after boot, largest block ~= free (not
      fragmented). Suspected main cause: the `wemos_dev` build (dev web server)
      plus the 4 KB log ring. Next: compare against a plain `wemos` build;
-     candidates to trim are the log ring, then the dev updater. CPU stays at
-     the default 80 MHz (user decision; CLAUDE.md's 160 MHz figure was wrong).
+     candidates to trim are the log ring, then the dev updater. **CPU now runs
+     at 160 MHz** (`board_build.f_cpu` in `env:wemos`, 2026-10-26): the board had
+     silently run at the 80 MHz default, and under multi-protocol load the
+     software-serial XpressNet receive lost frames (MultiMaus err13, slow or
+     missing speed/function updates). At 160 MHz the user confirmed much better
+     responsiveness.
    - **First wired-XpressNet test alongside LocoNet+Z21+Ecos (2026-10-23,
      capture p13)**: XNet stayed Connected with no bus errors, but the wired
      throttle sent only 10 speed frames and ONE function frame (all-off) in 3
