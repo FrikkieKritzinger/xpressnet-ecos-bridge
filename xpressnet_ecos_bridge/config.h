@@ -81,6 +81,12 @@
     // value XpressNetInterface actually uses comes from EEPROM via
     // setBusTimeoutMs(), so it can be retuned per layout without a reflash.
     #define XPRESSNET_BUS_TIMEOUT   120000
+
+    // 1 = after a change from another protocol, also inject the loco's state
+    // onto the bus as if the owning MultiMaus had sent it (the "stolen" display
+    // refresh, Phase 5 step 9). Experiment 2026-10-26: those extra transmissions
+    // coincided with bursts of XpressNet frames dropped for bad checksums.
+    #define XPRESSNET_PUSH_OWNING_SLOT   0
 #endif
 
 // ============================================================================

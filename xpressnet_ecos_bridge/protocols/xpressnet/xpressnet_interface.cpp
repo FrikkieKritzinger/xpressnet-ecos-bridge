@@ -650,6 +650,10 @@ void XpressNetInterface::sendResumeOperation() {
 }
 
 void XpressNetInterface::pushLocoStateToOwningSlot(uint16_t address) {
+#if !XPRESSNET_PUSH_OWNING_SLOT
+    (void)address;
+    return;
+#endif
     if (!isValidDccAddress(address)) {
         return;
     }
