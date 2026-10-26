@@ -108,6 +108,10 @@ bool EcosInterface::begin() {
         // Note: WiFi.begin() is fire-and-forget; actual connection happens asynchronously
         // The setup() banner in the .ino documents this, and the update() loop polls status
         WiFi.mode(WIFI_STA);
+        // Modem sleep (the default) switches the radio off between beacons,
+        // which adds interrupt-latency spikes: software-serial XpressNet
+        // receive at 16 us per bit loses frames to that. Always-on radio.
+        WiFi.setSleepMode(WIFI_NONE_SLEEP);
         WiFi.begin(ssid, password);
 
         DEBUG_ECOS_PRINTF("Ecos LAN initialized (WiFi SSID=%s)\n", ssid);
