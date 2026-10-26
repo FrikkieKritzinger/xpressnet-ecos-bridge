@@ -56,25 +56,34 @@ bool consumeSetupModeRequest() {
 static ESP8266WebServer g_setup_server(SETUP_MODE_WEB_PORT);
 static ESP8266HTTPUpdateServer g_http_updater;
 static EepromConfig* g_setup_config = nullptr;
-static char g_html_buffer[4096];
 static char g_ap_ip_string[16];
 
+// Setup Mode pages are built into a per-request buffer instead of a permanent
+// static array: normal operation never serves a page, and 4 KB of static RAM
+// cost 4 KB of free heap for the whole run (found measuring heap 2026-10-26).
+// Nothing else runs in Setup Mode, so a short-lived malloc is safe here.
+static const size_t HTML_BUFFER_SIZE = 4096;
+
 static void handleRoot() {
-    size_t len = buildConfigPageHtml(g_html_buffer, sizeof(g_html_buffer), *g_setup_config);
+    char* html = (char*)malloc(HTML_BUFFER_SIZE);
+    size_t len = html ? buildConfigPageHtml(html, HTML_BUFFER_SIZE, *g_setup_config) : 0;
     if (len > 0) {
-        g_setup_server.send(200, "text/html", g_html_buffer);
+        g_setup_server.send(200, "text/html", html);
     } else {
         g_setup_server.send(500, "text/plain", "Internal error building the config page.");
     }
+    free(html);
 }
 
 static void handleUpdatePage() {
-    size_t len = buildUpdatePageHtml(g_html_buffer, sizeof(g_html_buffer), FIRMWARE_VERSION, FIRMWARE_BUILD_INFO);
+    char* html = (char*)malloc(HTML_BUFFER_SIZE);
+    size_t len = html ? buildUpdatePageHtml(html, HTML_BUFFER_SIZE, FIRMWARE_VERSION, FIRMWARE_BUILD_INFO) : 0;
     if (len > 0) {
-        g_setup_server.send(200, "text/html", g_html_buffer);
+        g_setup_server.send(200, "text/html", html);
     } else {
         g_setup_server.send(500, "text/plain", "Internal error building the update page.");
     }
+    free(html);
 }
 
 static void handleSave() {
@@ -110,8 +119,10 @@ static void handleSave() {
     *g_setup_config = updated;
     eepromStoreSave(*g_setup_config);
 
-    size_t len = buildSavedConfirmationHtml(g_html_buffer, sizeof(g_html_buffer));
-    g_setup_server.send(200, "text/html", len > 0 ? g_html_buffer : "Saved. Rebooting...");
+    char* html = (char*)malloc(HTML_BUFFER_SIZE);
+    size_t len = html ? buildSavedConfirmationHtml(html, HTML_BUFFER_SIZE) : 0;
+    g_setup_server.send(200, "text/html", len > 0 ? html : "Saved. Rebooting...");
+    free(html);
     g_setup_server.client().flush();
     delay(300);  // let the response reach the browser before rebooting - Setup Mode isn't timing-critical like normal bridging
     ESP.restart();

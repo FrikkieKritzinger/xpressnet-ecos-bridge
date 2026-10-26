@@ -100,6 +100,13 @@ def wait_for_log(host, seconds=60):
 
 
 def main():
+    # The bridge log contains arrows (non-cp1252); see tools/netlog.py.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("host", nargs="?", default="192.168.0.51")
     ap.add_argument("--port", type=int, default=8266)

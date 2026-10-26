@@ -394,7 +394,7 @@
 #endif
 #define DEV_OTA_PORT                8266
 #define NET_LOG_PORT                23
-#define NET_LOG_BUFFER_SIZE         4096  // bytes of history kept for late-connecting clients
+#define NET_LOG_BUFFER_SIZE         2048  // bytes of history kept for late-connecting clients
 
 // Mirror debug output to Serial as well. Off while LocoNet owns UART0: at
 // LOCONET_BAUD (16660) Serial.print() blocks ~7x longer than at 115200 once
