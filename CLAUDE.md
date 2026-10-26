@@ -1597,7 +1597,7 @@ real needs come up rather than pre-committing to a fixed scope.
    sending throttle - all because the software-serial XpressNet receive lost
    frames (details in docs/CHANGELOG.md, 2026-10-26). **Open after the
    release**: low free heap (~6 KB), MultiMaus does not refresh a function
-   changed elsewhere (item 7), LocoNet slot expiry, turnouts from the UT6. `v1.5.1` (same day) added the heap fix: log ring 2 KB, Setup Mode page buffer per request.
+   changed elsewhere (item 7, solved 2026-10-26: see below), LocoNet slot expiry, turnouts from the UT6. `v1.5.1` (same day) added the heap fix: log ring 2 KB, Setup Mode page buffer per request.
    Earlier status (2026-10-22), kept for history: work was on the
    `loconet` branch, main stayed v1.4.0 until LocoNet was confirmed. v2.1 board bring-up passed. Built and tested so
    far:
@@ -1673,6 +1673,14 @@ real needs come up rather than pre-committing to a fixed scope.
      state so it stops sending function keys, plus the known display-sync gap
      (item 7). Needs a repeat with the other throttles idle and the exact
      throttle model/keys noted.
+   - **MultiMaus function display solved (2026-10-26)**: a changed function now
+     mirrors on a MultiMaus display. Sniffing a real Z21 (`env:wemos_sniff`) showed a
+     command station sends only the sending throttle's own message plus a directed
+     `E3 40` "busy" notice; the vendored library's TX queue (`XNetBufferSize` 5, no
+     overflow check) had been overwriting our refresh bytes, which is also why the old
+     push corrupted frames. Now `XNetBufferSize` 12, call byte + message in one entry,
+     refresh sent at a polling window (`XPRESSNET_REFRESH_IN_POLL_WINDOW 1`, mode 2).
+     Details: docs/CHANGELOG.md 2026-10-26 (night).
    - **Still open**: turnout (OPC_SW_REQ) control from the UT6 (needs a
      LocoNet <-> accessory router path like Z21/XpressNet; the page already
      describes SW_REQ frames); F13+ from the UT6 not exercised; optional slot

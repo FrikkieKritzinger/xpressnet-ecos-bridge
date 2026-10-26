@@ -194,6 +194,26 @@ void XpressNetInterface::update() {
     // Pumps the library's SoftwareSerial read/parse state machine; fires
     // notifyXNet* callbacks synchronously for any complete message found.
     xnet.update();
+
+#if XPRESSNET_REFRESH_IN_POLL_WINDOW && XPRESSNET_TRACE_TX
+    // Print the bytes actually sent for the last refresh (from here, not from the
+    // bus code): this is how a refresh is compared with a real command station's.
+    if (last_traced_refresh != xnet.statRefreshSent) {
+        last_traced_refresh = xnet.statRefreshSent;
+        uint32_t start = xnet.TxTraceMark;
+        uint32_t end = xnet.TxTraceHead;
+        if (end - start > 80) end = start + 80;
+        char line[96 * 4];
+        size_t pos = 0;
+        uint32_t t0 = xnet.TxTraceMicros[start & (xnet.XNetTxTraceSize - 1)];
+        for (uint32_t i = start; i < end && pos + 12 < sizeof(line); i++) {
+            uint16_t b = xnet.TxTrace[i & (xnet.XNetTxTraceSize - 1)];
+            pos += snprintf(line + pos, sizeof(line) - pos, "%s%02X ", (b & 0x100) ? "*" : "", b & 0xFF);
+        }
+        DEBUG_XNET_PRINTF("XpressNet TX trace (* = call byte, %lu us): %s\n",
+                          (unsigned long)(xnet.TxTraceMicros[(end - 1) & (xnet.XNetTxTraceSize - 1)] - t0), line);
+    }
+#endif
 }
 
 // ============================================================================
@@ -358,6 +378,7 @@ void XpressNetInterface::onGiveLocoInfo(uint8_t user_ops, uint16_t address) {
     // sending new drive commands looked like it had gone silent, and status
     // flipped to DISCONNECTED after BUS_TIMEOUT even though it never left.
     markBusActivity();
+    xnet.RegisterLocoSlot(user_ops, address);  // so a later refresh can reach this device
 
     uint8_t speed_byte;
     uint32_t functions;
@@ -382,6 +403,7 @@ void XpressNetInterface::onGiveLocoMM(uint8_t user_ops, uint16_t address) {
     // See onGiveLocoInfo() - a real parsed request from a device, same as a
     // drive/function command for bus-activity purposes.
     markBusActivity();
+    xnet.RegisterLocoSlot(user_ops, address);  // so a later refresh can reach this device
 
     uint8_t speed_byte;
     uint32_t functions;

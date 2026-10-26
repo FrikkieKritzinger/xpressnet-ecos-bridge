@@ -306,6 +306,7 @@ private:
     // round-trip testing is done. 0 = LED currently off/idle.
     static const unsigned long ACTIVITY_LED_MS = 40;
     unsigned long led_off_at_ms;
+    uint32_t last_traced_refresh = 0;
 
     // Library instance - owns the half-duplex SoftwareSerial and XpressNet framing
     XpressNetMasterClass xnet;

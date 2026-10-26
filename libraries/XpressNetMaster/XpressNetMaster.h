@@ -90,7 +90,7 @@ next transmission window between 400 microseconds and 500 milliseconds after the
 #endif
 
 //XpressNet Buffer length (send and receive):	
-#define XNetBufferSize 5	//max Data Pakets (max: 4 Bit = 16!)
+#define XNetBufferSize 12	//max Data Pakets (max: 4 Bit = 16!). Was 5: XNetsend() never checks for a full queue, so a burst of more than 5 messages overwrote unsent ones (found 2026-10-26)
 
 //XpressNet Mode (Master/Slave)
 #define XNetSlaveCycle 0xFF	//max (255) cycles to Stay in SLAVE MODE when no CallByte is received
@@ -161,6 +161,15 @@ class XpressNetMasterClass
 {
   // user-accessible "public" interface
   public:
+    //Remember which loco a device (call-byte slot) works with, without telling anyone it is busy.
+    void RegisterLocoSlot(uint8_t UserOps, uint16_t Adr) { if (Adr != 0) SlotLokUse[UserOps & 0x1F] = Adr; }
+    //Ring of the last bytes handed to the serial port (bit 8 = the 9th/call-byte bit), for
+    //diagnostics only: read it from the main loop, never print from the bus code.
+    static const uint16_t XNetTxTraceSize = 64;
+    uint16_t TxTrace[XNetTxTraceSize];
+    uint32_t TxTraceMicros[XNetTxTraceSize];
+    uint32_t TxTraceHead = 0;
+    uint32_t TxTraceMark = 0;	//where the last queued refresh began
     uint8_t RefreshMode = 0;	//0 = directed MultiMaus info (E7), 1 = overheard-style messages
     uint8_t RefreshStepsFlags = 0x00;	//OR-ed into the steps byte of a queued refresh: 0x08 = busy ("stolen")
     void QueueLocoRefresh(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4, uint8_t F5to8, uint8_t F9to12, uint8_t F13to20);

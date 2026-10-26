@@ -981,20 +981,20 @@ void XpressNetMasterClass::QueueLocoRefresh(uint16_t Adr, uint8_t Steps, uint8_t
 //overhears this applies it to its display, functions included (two-MultiMaus test on this
 //bridge, 2026-10-26). Sent as if from the unused slot XNetExternalControllerSlot.
 void XpressNetMasterClass::sendOverheardLocoState(const PendingRefreshEntry &e) {
-	uint8_t callbyte[] = { callByteParity(XNetExternalControllerSlot | 0x40) };
+	//Each call byte and its message go into ONE queue entry (call byte first, as in the
+	//directed replies), so a wrapped queue can never separate them.
+	uint8_t call = callByteParity(XNetExternalControllerSlot | 0x40);
 	const uint8_t idents[3] = { 0x20, 0x21, 0x22 };
 	const uint8_t groups[3] = { (uint8_t)(e.f0 & 0x1F), (uint8_t)(e.f1 & 0x0F), e.f2 };
 	for (uint8_t g = 0; g < 3; g++) {
-		XNetsend(callbyte, 1);
-		uint8_t msg[] = { 0x00, 0xE4, idents[g], 0x00, 0x00, groups[g], 0x00 };
+		uint8_t msg[] = { call, 0xE4, idents[g], 0x00, 0x00, groups[g], 0x00 };
 		if (e.adr > 99) msg[3] = (e.adr >> 8) | 0xC0;
 		else msg[3] = e.adr >> 8;
 		msg[4] = e.adr & 0xFF;
 		getXOR(msg, 7);
 		XNetsend(msg, 7);
 	}
-	XNetsend(callbyte, 1);
-	uint8_t speed_msg[] = { 0x00, 0xE4, 0x13, 0x00, 0x00, e.speed, 0x00 };	//128 steps
+	uint8_t speed_msg[] = { call, 0xE4, 0x13, 0x00, 0x00, e.speed, 0x00 };	//128 steps
 	if (e.adr > 99) speed_msg[3] = (e.adr >> 8) | 0xC0;
 	else speed_msg[3] = e.adr >> 8;
 	speed_msg[4] = e.adr & 0xFF;
@@ -1006,6 +1006,7 @@ void XpressNetMasterClass::flushPendingRefresh(void) {
 	for (uint8_t i = 0; i < XNetPendingRefreshCount; i++) {
 		if (!PendingRefresh[i].used)
 			continue;
+		TxTraceMark = TxTraceHead;
 		if ((uint32_t)(millis() - PendingRefresh[i].last_sent_ms) < 100 && PendingRefresh[i].last_sent_ms != 0)
 			continue;	//at most one refresh per loco per 100 ms
 		bool held = false;
@@ -1020,8 +1021,16 @@ void XpressNetMasterClass::flushPendingRefresh(void) {
 		//Overheard-style messages need no registered slot: any throttle on the bus hears them.
 		//(A MultiMaus that only SELECTED the loco has no slot yet - only drive/function
 		//commands register one - so requiring one meant nothing was ever sent.)
-		if (RefreshMode == 1) {
+		if (RefreshMode == 1 || RefreshMode == 2) {
 			sendOverheardLocoState(PendingRefresh[i]);
+			//Mode 2 = what a real Z21 puts on the bus (sniffed 2026-10-26): the throttle's own
+			//message, then a directed "loco busy" (E3 40) to each device holding the loco.
+			if (RefreshMode == 2) {
+				for (byte s = 1; s < 32; s++) {
+					if (SlotLokUse[s] == PendingRefresh[i].adr)
+						SetLocoBusy(callByteParity(s | 0x60), PendingRefresh[i].adr);
+				}
+			}
 			statRefreshSent++;
 		}
 		else if (held)
@@ -1467,6 +1476,9 @@ void XpressNetMasterClass::XNetSendData(void) {
 		
 		XNetSwSerial.enableTx(true);
 
+		TxTrace[TxTraceHead & (XNetTxTraceSize - 1)] = data9;	//no printing here - bus timing
+		TxTraceMicros[TxTraceHead & (XNetTxTraceSize - 1)] = micros();
+		TxTraceHead++;
 		if (data9 & 0x100) //is there a 9th bit?
 			XNetSwSerial.write(data9 & 0xFF, PARITY_MARK); //parity bit set
 		else XNetSwSerial.write(data9 & 0xFF);

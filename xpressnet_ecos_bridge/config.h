@@ -91,15 +91,21 @@
     // 1 = after a change from another protocol, send the throttle(s) holding the
     // loco its full info (MultiMaus format, busy flag = "stolen") at the start of
     // a polling window, the way a real Z21 does. Replaces the push above.
-    #define XPRESSNET_REFRESH_IN_POLL_WINDOW   0
+    #define XPRESSNET_REFRESH_IN_POLL_WINDOW   1   // ON since 2026-10-26: functions now mirror on a MultiMaus
     // Steps-byte flag on that refresh: 0x08 = busy (the MultiMaus shows "stolen"),
     // 0x00 = a plain info reply. Experiment 2026-10-26: with the busy flag the
     // MultiMaus flashed stolen but did not apply a changed function.
     #define XPRESSNET_REFRESH_FLAGS   0x00
+    // 2 = what a real Z21 puts on the bus (sniffed): mode 1, then a directed
+    // loco-busy notice (E3 40) to each device holding the loco.
     // 0 = directed MultiMaus info reply; 1 = the messages a throttle in another slot
     // would put on the bus (inquiry call byte + its own unmarked messages), which a
     // MultiMaus overhears and applies, functions included.
-    #define XPRESSNET_REFRESH_MODE    1
+    #define XPRESSNET_REFRESH_MODE    2
+
+    // 1 = print the bytes of every refresh as actually handed to the serial port
+    // (compare with a real command station's, see utils/xnet_sniffer). Debug only.
+    #define XPRESSNET_TRACE_TX        0
 
     // 1 = answer a throttle's function frame with the loco's current info, in
     // the throttle's own polling window (a command-station confirmation).
