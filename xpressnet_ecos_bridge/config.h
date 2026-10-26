@@ -270,6 +270,11 @@
     #define LOCONET_RESYNC_QUIET_MS    2000
     #define LOCONET_PUSH_BYTE_FRAMES   0   // also OPC_LOCO_SPD/DIRF/SND for every change
 
+    // 1 = a turnout changed elsewhere is also put on the bus as the OPC_SW_REQ pair a
+    // LocoNet throttle sends (so a UT6 can follow it), in addition to the state report.
+    // NOTE: a real LocoNet accessory decoder on this bus would act on it.
+    #define LOCONET_TURNOUT_SEND_SW_REQ 0
+
     // A throttle that is unplugged never says so. A slot it holds (IN_USE) and has
     // not spoken about for this long drops to COMMON, so the OLED slot count and
     // the connected icon follow reality; it returns to IN_USE the moment the

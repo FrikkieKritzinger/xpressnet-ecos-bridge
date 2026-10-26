@@ -696,6 +696,28 @@ void CommandRouter::handleAccessoryCommand(uint16_t address, bool diverging, Loc
         #endif
     }
 
+    // Tell the other throttle-facing protocols directly, without waiting for Ecos's
+    // confirmation to come back: a LocoNet throttle shows a turnout it did not throw
+    // itself only if the bus carries a state report for it, and a MultiMaus or WLANmaus
+    // is pushed the new position (Ecos's own echo later repeats this harmlessly).
+    const bool from_throttle = (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN ||
+                                source == LocoSource::LOCONET);
+    #if ENABLE_XPRESSNET
+    if (from_throttle && xpressnet != nullptr && source != LocoSource::XPRESSNET) {
+        xpressnet->sendAccessoryCommand(address, diverging);
+    }
+    #endif
+    #if ENABLE_Z21_LAN
+    if (from_throttle && z21 != nullptr && source != LocoSource::Z21_LAN) {
+        z21->sendAccessoryCommand(address, diverging);
+    }
+    #endif
+    #if ENABLE_LOCONET
+    if (from_throttle && loconet != nullptr && source != LocoSource::LOCONET) {
+        loconet->sendAccessoryCommand(address, diverging);
+    }
+    #endif
+
     total_commands_count++;
 }
 
@@ -733,6 +755,12 @@ void CommandRouter::handleEcosAccessoryCommand(uint16_t address, bool diverging)
     #if ENABLE_Z21_LAN
     if (z21 != nullptr) {
         z21->sendAccessoryCommand(address, diverging);
+    }
+    #endif
+
+    #if ENABLE_LOCONET
+    if (loconet != nullptr) {
+        loconet->sendAccessoryCommand(address, diverging);
     }
     #endif
 

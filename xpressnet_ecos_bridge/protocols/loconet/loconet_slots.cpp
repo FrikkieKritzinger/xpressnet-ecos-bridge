@@ -15,6 +15,8 @@ LnSlotServer::LnSlotServer() {
     dropped_replies = 0;
     lookup = nullptr;
     lookup_context = nullptr;
+    turnout_lookup = nullptr;
+    turnout_lookup_context = nullptr;
     pending_select_address = 0;
     dirty_slots = 0;
     expired_mask = 0;
@@ -247,6 +249,38 @@ void LnSlotServer::applyExternalEmergencyStop() {
     queueReply(f);
 }
 
+// <B1><SN1><SN2><CHK>, SN2 = 0 0 C T A10..A7: C = "closed" output line on, T = "thrown"
+// output line on (spec "OPC_SW_REP", output-level form; JMRI decodes it the same way).
+void LnSlotServer::applyExternalTurnout(uint16_t address, bool diverging) {
+    if (address == 0) {
+        return;
+    }
+    uint16_t wire = (uint16_t)(address - 1);
+    LnFrame f;
+    memset(&f, 0, sizeof(f));
+    f.data[0] = LN_OPC_SW_REP;
+    f.data[1] = (uint8_t)(wire & 0x7F);
+    f.data[2] = (uint8_t)(((wire >> 7) & 0x0F) | (diverging ? 0x10 : 0x20));
+    f.data[3] = lnChecksum(f.data, 3);
+    f.len = 4;
+    queueReply(f);
+
+    if (send_sw_req) {
+        // <B0><SW1><SW2>: DIR = closed, ON = output on; then the same with ON off.
+        uint8_t sw2 = (uint8_t)(((wire >> 7) & 0x0F) | (diverging ? 0x00 : 0x20));
+        for (uint8_t on = 1; on != 0xFF; on = (on == 1) ? 0 : 0xFF) {
+            LnFrame r;
+            memset(&r, 0, sizeof(r));
+            r.data[0] = LN_OPC_SW_REQ;
+            r.data[1] = (uint8_t)(wire & 0x7F);
+            r.data[2] = (uint8_t)(sw2 | (on ? 0x10 : 0x00));
+            r.data[3] = lnChecksum(r.data, 3);
+            r.len = 4;
+            queueReply(r);
+        }
+    }
+}
+
 void LnSlotServer::applyExternalResume() {
     trk |= LN_TRK_POWER | LN_TRK_RUNNING;
     LnFrame f;
@@ -378,6 +412,17 @@ LnSlotEvent LnSlotServer::handleFrame(const LnFrame& f, uint32_t now_ms) {
                 s.last_use_ms = now_ms;
                 noteThrottleActivity(b[1], now_ms, true);
                 reportChange(b[1], old_speed, old_dirf, old_snd, ev);
+            }
+            break;
+
+        case LN_OPC_SW_STATE:
+            // "REQ state of switch": answer with the output report for it, if known.
+            if (f.len == 4 && turnout_lookup != nullptr) {
+                uint16_t address = (uint16_t)((((b[2] & 0x0F) << 7) | (b[1] & 0x7F)) + 1);
+                bool diverging = false;
+                if (turnout_lookup(address, &diverging, turnout_lookup_context)) {
+                    applyExternalTurnout(address, diverging);
+                }
             }
             break;
 

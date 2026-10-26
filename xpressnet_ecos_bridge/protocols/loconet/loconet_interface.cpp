@@ -32,9 +32,15 @@ LocoNetInterface::LocoNetInterface()
     }
 }
 
+static bool lookupTurnoutState(uint16_t address, bool* diverging, void* context) {
+    CommandRouter* router = static_cast<CommandRouter*>(context);
+    return router != nullptr && router->getKnownAccessoryState(address, *diverging);
+}
+
 void LocoNetInterface::setCommandRouter(CommandRouter* r) {
     router = r;
     slot_server.setLocoLookup(lookupLocoState, r);
+    slot_server.setTurnoutLookup(lookupTurnoutState, r);
 }
 
 void LocoNetInterface::initHardware() {
@@ -50,6 +56,7 @@ bool LocoNetInterface::begin() {
     parser.reset();
     seen_frame = false;
     slot_server.setPushByteFrames(LOCONET_PUSH_BYTE_FRAMES != 0);
+    slot_server.setSendSwReq(LOCONET_TURNOUT_SEND_SW_REQ != 0);
 
     // Transmit-only SoftwareSerial, inverted (the BC547 pulls the bus low
     // when the pin is high). The receive side is the hardware UART.
@@ -342,6 +349,10 @@ void LocoNetInterface::forceBusDisconnect(uint32_t duration_ms) {
     bus_hold_until_ms = millis() + duration_ms;
     DEBUG_LOCONET_PRINTF("LocoNet: holding the bus low for %lu ms (forced disconnect)\n",
                          (unsigned long)duration_ms);
+}
+
+void LocoNetInterface::sendAccessoryCommand(uint16_t address, bool diverging) {
+    slot_server.applyExternalTurnout(address, diverging);
 }
 
 void LocoNetInterface::sendEmergencyStop() {

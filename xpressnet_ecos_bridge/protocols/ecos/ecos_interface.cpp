@@ -496,6 +496,14 @@ void EcosInterface::sendNextAccessorySubscribeStep() {
             DEBUG_ECOS_PRINTF("Ecos TX: Subscribed to accessory %u (Ecos ID %u)\n",
                               accessory_address_map[i].dcc_address, accessory_address_map[i].ecos_id);
         }
+        // request(view) only reports FUTURE changes. Ask for the current position too, so the
+        // bridge can answer a throttle's state query (a UT6 asks when you select a turnout)
+        // for a turnout nobody has moved since the restart.
+        len = ecosBuildGetPropertyCmd(cmd_buffer, sizeof(cmd_buffer),
+                                      accessory_address_map[i].ecos_id, "state");
+        if (len > 0) {
+            wifi_client.write((uint8_t*)cmd_buffer, len);
+        }
         accessory_address_map[i].subscribed = true;
         return;  // One per call - see header comment for why this stays paced
     }

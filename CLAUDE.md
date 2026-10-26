@@ -1681,7 +1681,15 @@ real needs come up rather than pre-committing to a fixed scope.
      push corrupted frames. Now `XNetBufferSize` 12, call byte + message in one entry,
      refresh sent at a polling window (`XPRESSNET_REFRESH_IN_POLL_WINDOW 1`, mode 2).
      Details: docs/CHANGELOG.md 2026-10-26 (night).
-   - **Still open**: turnout (OPC_SW_REQ) control from the UT6 (needs a
+   - **LocoNet turnouts (2026-10-26)**: UT6 turnout throws reach Ecos and every other
+     interface (and a change anywhere reaches the UT6 bus as an OPC_SW_REP state report,
+     with OPC_SW_STATE queries answered from the known-turnout cache, seeded from Ecos).
+     **Parked - flagged for later**: a UT6 does not redraw a turnout's position from
+     anything the bus carries (state report or a throttle-style command); it only shows
+     it after its F key toggles. It resends its command regardless, Ecos reapplies it,
+     nothing breaks. Revisit only if it starts to matter.
+   - **Previously open item, now obsolete**: "turnout (OPC_SW_REQ) control from the UT6" is done.
+   - **Still open (older text)**: turnout (OPC_SW_REQ) control from the UT6 (needs a
      LocoNet <-> accessory router path like Z21/XpressNet; the page already
      describes SW_REQ frames); F13+ from the UT6 not exercised; optional slot
      expiry; the wired-throttle function problem above; a version bump and

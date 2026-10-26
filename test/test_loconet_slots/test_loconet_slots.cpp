@@ -220,6 +220,42 @@ void test_sw_req_on_edge_is_a_turnout_command(void) {
     TEST_ASSERT_EQUAL_UINT8(1, ev.diverging);
 }
 
+static bool turnoutLookupStub(uint16_t address, bool* diverging, void*) {
+    if (address == 2) { *diverging = true; return true; }
+    if (address == 1) { *diverging = false; return true; }
+    return false;
+}
+
+void test_external_turnout_is_reported_as_an_output_state(void) {
+    // Turnout 1 closed: B1 SN1=00 SN2=0x20 (C line on). Turnout 2 thrown: SN1=01, SN2=0x10.
+    server.applyExternalTurnout(1, false);
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_SW_REP, r.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, r.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x20, r.data[2]);
+    TEST_ASSERT_TRUE(lnChecksumValid(r.data, r.len));
+
+    server.applyExternalTurnout(2, true);
+    r = popReply();
+    TEST_ASSERT_EQUAL_HEX8(0x01, r.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x10, r.data[2]);
+}
+
+void test_sw_state_query_is_answered_from_the_known_state(void) {
+    server.setTurnoutLookup(turnoutLookupStub, nullptr);
+    send({LN_OPC_SW_STATE, 0x01, 0x10});          // UT6 asks about turnout 2 (wire address 1)
+    LnFrame r = popReply();
+    TEST_ASSERT_EQUAL_HEX8(LN_OPC_SW_REP, r.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, r.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x10, r.data[2]);       // thrown
+}
+
+void test_sw_state_query_for_an_unknown_turnout_gets_no_answer(void) {
+    server.setTurnoutLookup(turnoutLookupStub, nullptr);
+    send({LN_OPC_SW_STATE, 0x09, 0x10});
+    TEST_ASSERT_FALSE(server.hasReply());
+}
+
 void test_sw_req_release_edge_is_ignored(void) {
     TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, send({LN_OPC_SW_REQ, 0x00, 0x20}).flags);
     TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, send({LN_OPC_SW_REQ, 0x00, 0x00}).flags);
@@ -894,6 +930,9 @@ int main(void) {
     RUN_TEST(test_null_move_selects_the_slot);
     RUN_TEST(test_sw_req_on_edge_is_a_turnout_command);
     RUN_TEST(test_sw_req_release_edge_is_ignored);
+    RUN_TEST(test_external_turnout_is_reported_as_an_output_state);
+    RUN_TEST(test_sw_state_query_is_answered_from_the_known_state);
+    RUN_TEST(test_sw_state_query_for_an_unknown_turnout_gets_no_answer);
     RUN_TEST(test_sw_req_address_uses_all_eleven_bits);
     RUN_TEST(test_idle_slot_expires_to_common_and_is_not_counted);
     RUN_TEST(test_throttle_activity_after_expiry_brings_the_slot_back);

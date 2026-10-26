@@ -48,6 +48,7 @@ public:
     // and queue the frames that make a throttle's display follow.
     void sendSpeedCommand(uint16_t address, uint8_t speed, uint8_t direction) override;
     void sendFunctionCommand(uint16_t address, uint32_t functions) override;
+    void sendAccessoryCommand(uint16_t address, bool diverging) override;
     void sendEmergencyStop() override;
     void sendResumeOperation() override;
 

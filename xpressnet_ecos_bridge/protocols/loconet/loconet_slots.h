@@ -69,6 +69,10 @@ struct LnLocoSnapshot {
     uint32_t functions;
 };
 
+// Turnout state the bridge knows (1-based number, as a throttle shows it): returns false
+// if nothing is known. Supplied by LocoNetInterface from the router's accessory cache.
+typedef bool (*LnTurnoutLookup)(uint16_t address, bool* diverging, void* context);
+
 // Looks up (and, if the loco is new to the bridge, starts tracking) a loco.
 // Returns false if nothing is known. Supplied by LocoNetInterface.
 typedef bool (*LnLocoLookup)(uint16_t address, LnLocoSnapshot* out, void* context);
@@ -121,6 +125,17 @@ public:
 
     // Optional: where to get a loco's real current state.
     void setLocoLookup(LnLocoLookup fn, void* context) { lookup = fn; lookup_context = context; }
+    void setTurnoutLookup(LnTurnoutLookup fn, void* context) { turnout_lookup = fn; turnout_lookup_context = context; }
+
+    // A turnout changed somewhere else (Ecos, XpressNet, Z21): report its output state on
+    // the bus the way a DS54 decoder does (OPC_SW_REP, closed/thrown output line), so a
+    // throttle showing that turnout can follow. The address is the 1-based turnout number.
+    void applyExternalTurnout(uint16_t address, bool diverging);
+
+    // Also send the OPC_SW_REQ pair (output on, then off) a throttle sends, as if another
+    // LocoNet throttle had thrown the turnout (experiment 2026-10-26: a UT6 ignores the
+    // state report but may follow another throttle's command).
+    void setSendSwReq(bool on) { send_sw_req = on; }
 
     // A change that came from another protocol: update every slot holding
     // this address and queue the LocoNet frames that make a throttle's display
@@ -191,6 +206,9 @@ private:
     uint8_t trk;
     LnLocoLookup lookup;
     void* lookup_context;
+    bool send_sw_req = false;
+    LnTurnoutLookup turnout_lookup;
+    void* turnout_lookup_context;
     uint16_t pending_select_address;   // set while handling a frame that takes a slot
     LnFrame replies[MAX_REPLIES];
     uint8_t reply_head;
