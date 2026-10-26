@@ -308,6 +308,7 @@ void XpressNetInterface::onLocoDrive128(uint16_t address, uint8_t speed_byte) {
 
     DEBUG_XNET_PRINTF("XpressNet RX: Speed - Addr=%u Speed=%u Dir=%u\n", address, speed, direction);
     router->handleXpressNetCommand(address, speed, direction);
+    noteRefreshKnown(address);
 }
 
 void XpressNetInterface::onLocoDriveStepped(uint16_t address, uint8_t speed_byte, uint8_t max_steps) {
@@ -350,6 +351,7 @@ void XpressNetInterface::onLocoDriveStepped(uint16_t address, uint8_t speed_byte
     DEBUG_XNET_PRINTF("XpressNet RX: Speed (%u-step) - Addr=%u RawSpeed=%u Speed=%u Dir=%u\n",
                        max_steps, address, raw_speed, speed, direction);
     router->handleXpressNetCommand(address, speed, direction);
+    noteRefreshKnown(address);
 }
 
 void XpressNetInterface::resolveLocoStateForReply(uint16_t address, uint8_t& speed_byte, uint32_t& functions) {
@@ -378,6 +380,9 @@ void XpressNetInterface::onGiveLocoInfo(uint8_t user_ops, uint16_t address) {
     // sending new drive commands looked like it had gone silent, and status
     // flipped to DISCONNECTED after BUS_TIMEOUT even though it never left.
     markBusActivity();
+    if (router) {
+        router->trackLocoForThrottle(address, LocoSource::XPRESSNET);  // subscribe on selection, not on the first command
+    }
     xnet.RegisterLocoSlot(user_ops, address);  // so a later refresh can reach this device
 
     uint8_t speed_byte;
@@ -403,6 +408,9 @@ void XpressNetInterface::onGiveLocoMM(uint8_t user_ops, uint16_t address) {
     // See onGiveLocoInfo() - a real parsed request from a device, same as a
     // drive/function command for bus-activity purposes.
     markBusActivity();
+    if (router) {
+        router->trackLocoForThrottle(address, LocoSource::XPRESSNET);  // subscribe on selection, not on the first command
+    }
     xnet.RegisterLocoSlot(user_ops, address);  // so a later refresh can reach this device
 
     uint8_t speed_byte;
@@ -425,6 +433,9 @@ void XpressNetInterface::onGiveLocoFunc(uint8_t user_ops, uint16_t address) {
 
     // See onGiveLocoInfo() - a real parsed request from a device on the bus.
     markBusActivity();
+    if (router) {
+        router->trackLocoForThrottle(address, LocoSource::XPRESSNET);  // subscribe on selection, not on the first command
+    }
 
     uint8_t speed_byte;
     uint32_t functions;
@@ -517,6 +528,7 @@ void XpressNetInterface::onLocoFunctionGroup(uint16_t address, uint8_t group, ui
 
     DEBUG_XNET_PRINTF("XpressNet RX: Function group %u - Addr=%u Fn=0x%08lx\n", group, address, (unsigned long)functions);
     router->handleXpressNetFunctionCommand(address, functions);
+    noteRefreshKnown(address);
 
 #if XPRESSNET_CONFIRM_FUNCTION_REPLY
     // Tell the throttle that sent this the loco's state now, in its own
@@ -686,6 +698,16 @@ void XpressNetInterface::sendEmergencyStop() {
 void XpressNetInterface::sendResumeOperation() {
     xnet.setPower(csNormal);
     DEBUG_XNET_PRINTF("XpressNet TX: Resume operation broadcast (Ecos-originated)\n");
+}
+
+// A throttle just changed this loco, so the throttle's own display already shows the
+// new state: remember it as the baseline the next refresh is compared against.
+void XpressNetInterface::noteRefreshKnown(uint16_t address) {
+    uint8_t speed_byte;
+    uint32_t functions;
+    resolveLocoStateForReply(address, speed_byte, functions);
+    xnet.SetRefreshKnown(address, speed_byte, buildFunctionGroupByte(functions, 1),
+                         buildFunctionGroupByte(functions, 2), buildFunctionGroupByte(functions, 3));
 }
 
 void XpressNetInterface::pushLocoStateToOwningSlot(uint16_t address) {

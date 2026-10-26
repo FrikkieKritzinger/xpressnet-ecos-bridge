@@ -742,13 +742,16 @@ void EcosInterface::handleReply(const EcosReply& reply) {
                 // really has: after a change made on Ecos itself, a throttle
                 // re-sending its previous value would otherwise diff to
                 // nothing and never reach Ecos (found live 2026-10-26).
+                // Functions Ecos reports inverted (ECOS_INVERTED_FUNCTIONS) are
+                // flipped back to the bridge's own meaning (1 = on) here.
+                uint32_t functions = reply.functions ^ (ECOS_INVERTED_FUNCTIONS & reply.functions_mask);
                 AddressMapEntry* entry = findAddressMapEntry(dcc_address);
                 if (entry != nullptr && entry->has_last_sent_functions) {
                     entry->last_sent_functions =
                         (entry->last_sent_functions & ~reply.functions_mask) |
-                        (reply.functions & reply.functions_mask);
+                        (functions & reply.functions_mask);
                 }
-                router->handleEcosFunctionCommand(dcc_address, reply.functions, reply.functions_mask);
+                router->handleEcosFunctionCommand(dcc_address, functions, reply.functions_mask);
             }
         }
         return;
@@ -864,7 +867,7 @@ void EcosInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
         char cmd_buffer[80];
         for (uint8_t fn = 0; fn < 32; fn++) {
             if (!(changed & (1UL << fn))) continue;
-            uint8_t state = (functions >> fn) & 1;
+            uint8_t state = ((functions >> fn) & 1) ^ ((ECOS_INVERTED_FUNCTIONS >> fn) & 1);
             uint16_t len = ecosBuildSetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), obj_id, fn, state);
             if (len > 0) {
                 wifi_client.write((uint8_t*)cmd_buffer, len);
@@ -921,7 +924,7 @@ void EcosInterface::sendNextFunctionStep() {
     }
 
     uint8_t fn = pending_function_step;
-    uint8_t state = (pending_function_bitmap >> fn) & 1;
+    uint8_t state = ((pending_function_bitmap >> fn) & 1) ^ ((ECOS_INVERTED_FUNCTIONS >> fn) & 1);
     char cmd_buffer[80];
     uint16_t len = ecosBuildSetFunctionCmd(cmd_buffer, sizeof(cmd_buffer), pending_function_object_id, fn, state);
     if (len > 0) {

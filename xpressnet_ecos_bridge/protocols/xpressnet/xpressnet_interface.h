@@ -307,6 +307,7 @@ private:
     static const unsigned long ACTIVITY_LED_MS = 40;
     unsigned long led_off_at_ms;
     uint32_t last_traced_refresh = 0;
+    void noteRefreshKnown(uint16_t address);
 
     // Library instance - owns the half-duplex SoftwareSerial and XpressNet framing
     XpressNetMasterClass xnet;

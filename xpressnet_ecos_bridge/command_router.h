@@ -105,14 +105,16 @@ public:
      */
     void handleLocoNetCommand(uint16_t address, uint8_t speed, uint8_t direction);
     void handleLocoNetFunctionCommand(uint16_t address, uint32_t functions);
+    #endif
 
     /**
-     * A LocoNet throttle has selected this loco: make sure the bridge knows
-     * it and is subscribed to Ecos for it, so the loco's real state flows
-     * back and reaches the throttle's display. No command is sent.
+     * A throttle has selected this loco: make sure the bridge knows it and is
+     * subscribed to Ecos for it, so the loco's real state flows back and reaches
+     * the throttle's display. No command is sent. (An XpressNet throttle that has
+     * only selected a loco has sent no command yet; without this, Ecos's first
+     * changes were lost until it did - found live 2026-10-26.)
      */
-    void trackLocoForThrottle(uint16_t address);
-    #endif
+    void trackLocoForThrottle(uint16_t address, LocoSource source = LocoSource::LOCONET);
 
     /**
      * Handle incoming command from Ecos
@@ -256,6 +258,15 @@ private:
     };
     
     EchoPreventionState echo_state = {0, 0, 0, LocoSource::UNKNOWN};
+    uint32_t ecos_function_bits_changed = 0;   // set only while an Ecos function event is being broadcast
+    uint32_t ecos_function_values = 0;         // the loco's function bitmap after that event
+    uint32_t echo_sent_on = 0;                 // bits a throttle turned on / off for echo_bits_address
+    uint32_t echo_sent_off = 0;                // within the attribution window
+    uint16_t echo_bits_address = 0;
+    unsigned long echo_bits_time = 0;
+    void noteThrottleFunctionChange(uint16_t address, uint32_t prior, uint32_t current);
+    uint32_t functionsKnownFor(uint16_t address);
+    bool isEchoOfRecentCommand(uint16_t address, LocoSource destination) const;
 
     // Diagnostic counters (for display/status - see getSystemStatus())
     uint32_t total_commands_count = 0;

@@ -159,6 +159,12 @@
     // low single-digit ms, so 5s of heartbeat-cadence margin is still very
     // generous against false-positives from WiFi jitter, just far less
     // patient about a genuinely dead connection.
+    // Functions Ecos handles inverted: the real loco follows Ecos's own screen, while
+    // the wire value (func[n,1]) is the opposite of what the throttles show. The user
+    // observed F8-F11 inverted on every loco (2026-10-26; also Phase 6). Bit n = Fn;
+    // 0 disables. Flipped on the way to and from Ecos, in EcosInterface only.
+    #define ECOS_INVERTED_FUNCTIONS     0x00000F00UL   // F8-F11
+
     #define ECOS_HEARTBEAT_INTERVAL     5000            // Heartbeat query every X ms
     // Must exceed ECOS_HEARTBEAT_INTERVAL with margin for the round trip, or the
     // "no data" watchdog trips before the heartbeat ever gets a reply back.

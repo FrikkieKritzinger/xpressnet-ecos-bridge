@@ -164,6 +164,7 @@ void CommandRouter::handleXpressNetCommand(uint16_t address, uint8_t speed, uint
 // ============================================================================
 
 void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t functions) {
+    uint32_t prior_functions = functionsKnownFor(address);
     /*
      * Process function state command from XpressNet
      * 
@@ -233,6 +234,7 @@ void CommandRouter::handleXpressNetFunctionCommand(uint16_t address, uint32_t fu
     // Update echo prevention
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 1;  // FUNCTION command type
+    noteThrottleFunctionChange(address, prior_functions, new_state.functions);
     echo_state.last_timestamp_ms = now_ms();
     echo_state.last_source = LocoSource::XPRESSNET;
 }
@@ -307,6 +309,7 @@ void CommandRouter::handleZ21Command(uint16_t address, uint8_t speed, uint8_t di
 }
 
 void CommandRouter::handleZ21FunctionCommand(uint16_t address, uint32_t functions) {
+    uint32_t prior_functions = functionsKnownFor(address);
     DEBUG_PRINTF("Z21: Loco %u Functions 0x%08lx\n", address, (unsigned long)functions);
 
     if (!isValidDccAddress(address)) {
@@ -347,6 +350,7 @@ void CommandRouter::handleZ21FunctionCommand(uint16_t address, uint32_t function
 
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 1;  // FUNCTION command type
+    noteThrottleFunctionChange(address, prior_functions, new_state.functions);
     echo_state.last_timestamp_ms = now_ms();
     echo_state.last_source = LocoSource::Z21_LAN;
 }
@@ -414,6 +418,7 @@ void CommandRouter::handleLocoNetCommand(uint16_t address, uint8_t speed, uint8_
 }
 
 void CommandRouter::handleLocoNetFunctionCommand(uint16_t address, uint32_t functions) {
+    uint32_t prior_functions = functionsKnownFor(address);
     DEBUG_PRINTF("LocoNet: Loco %u Functions 0x%08lx\n", address, (unsigned long)functions);
 
     if (!isValidDccAddress(address)) {
@@ -453,11 +458,14 @@ void CommandRouter::handleLocoNetFunctionCommand(uint16_t address, uint32_t func
 
     echo_state.last_loco_address = address;
     echo_state.last_command_type = 1;  // FUNCTION command type
+    noteThrottleFunctionChange(address, prior_functions, new_state.functions);
     echo_state.last_timestamp_ms = now_ms();
     echo_state.last_source = LocoSource::LOCONET;
 }
 
-void CommandRouter::trackLocoForThrottle(uint16_t address) {
+#endif  // ENABLE_LOCONET
+
+void CommandRouter::trackLocoForThrottle(uint16_t address, LocoSource source) {
     if (!isValidDccAddress(address)) {
         return;
     }
@@ -477,15 +485,14 @@ void CommandRouter::trackLocoForThrottle(uint16_t address) {
     new_state.speed = 0;
     new_state.direction = 1;
     new_state.functions = 0;
-    new_state.last_source = LocoSource::LOCONET;
+    new_state.last_source = source;
     new_state.subscribed_to_ecos = true;
     if (!state_engine.addOrUpdateLoco(address, new_state)) {
         return;
     }
-    DEBUG_STATE_PRINTF("LocoNet throttle selected new loco %u: requesting Ecos subscription\n", address);
+    DEBUG_STATE_PRINTF("A throttle selected new loco %u: requesting Ecos subscription\n", address);
     requestEcosSubscription(address);
 }
-#endif  // ENABLE_LOCONET
 
 // ============================================================================
 // HANDLE ECOS COMMANDS
@@ -642,8 +649,11 @@ void CommandRouter::handleEcosFunctionCommand(uint16_t address, uint32_t functio
         return;
     }
 
+    ecos_function_bits_changed = new_state.functions ^ existing_functions;
+    ecos_function_values = new_state.functions;
     // Broadcast to XpressNet
     broadcastCommand(address, new_state, LocoSource::ECOS);
+    ecos_function_bits_changed = 0;
 
     total_commands_count++;
     last_command.address = address;
@@ -903,6 +913,45 @@ void CommandRouter::update() {
 // PRIVATE HELPER FUNCTIONS
 // ============================================================================
 
+// Remembers, for the attribution window, which function bits a throttle turned on and which
+// it turned off for this loco, so a late Ecos confirmation of one of those can be told
+// apart from a different change made on Ecos (see isEchoOfRecentCommand()).
+void CommandRouter::noteThrottleFunctionChange(uint16_t address, uint32_t prior, uint32_t current) {
+    unsigned long now = now_ms();
+    if (address != echo_bits_address || now - echo_bits_time > ECOS_ECHO_ATTRIBUTION_WINDOW_MS) {
+        echo_sent_on = 0;
+        echo_sent_off = 0;
+    }
+    echo_bits_address = address;
+    echo_bits_time = now;
+    uint32_t changed = prior ^ current;
+    echo_sent_on |= changed & current;
+    echo_sent_off |= changed & ~current;
+}
+
+uint32_t CommandRouter::functionsKnownFor(uint16_t address) {
+    LocoState prior;
+    return state_engine.getLoco(address, prior) ? prior.functions : 0;
+}
+
+// An Ecos update for a loco a throttle just commanded is that command's echo - but only
+// if it concerns what the throttle changed. A different function (or speed/direction
+// against a function command, and the reverse) toggled on Ecos a moment later is a real
+// change and must reach the throttle (found live 2026-10-26: any Ecos change within 4 s of
+// a MultiMaus press was dropped).
+bool CommandRouter::isEchoOfRecentCommand(uint16_t address, LocoSource destination) const {
+    if (!wasRecentSource(address, destination)) {
+        return false;
+    }
+    if (ecos_function_bits_changed != 0) {
+        // Echo only if Ecos reports a bit at the value the throttle itself just set it to.
+        uint32_t set_on = ecos_function_bits_changed & ecos_function_values & echo_sent_on;
+        uint32_t set_off = ecos_function_bits_changed & ~ecos_function_values & echo_sent_off;
+        return (set_on | set_off) != 0;
+    }
+    return echo_state.last_command_type == 0;
+}
+
 bool CommandRouter::wasRecentSource(uint16_t address, LocoSource source) const {
     // Real bug found live 2026-08-28: ECHO_PREVENTION_WINDOW (500ms) is far
     // shorter than Ecos's real confirmation round trip has shown itself to
@@ -1025,7 +1074,7 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
         // wasRecentSource() checks per destination instead, so the
         // non-originating protocol still gets forwarded to.
         #if ENABLE_XPRESSNET
-        if (xpressnet != nullptr && !wasRecentSource(address, LocoSource::XPRESSNET)) {
+        if (xpressnet != nullptr && !isEchoOfRecentCommand(address, LocoSource::XPRESSNET)) {
             DEBUG_PRINTF("Broadcasting Ecos command to XpressNet\n");
             xpressnet->sendSpeedCommand(address, state.speed, state.direction);
             if (functions_changed) {
@@ -1039,7 +1088,7 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
         }
         #endif
         #if ENABLE_Z21_LAN
-        if (z21 != nullptr && !wasRecentSource(address, LocoSource::Z21_LAN)) {
+        if (z21 != nullptr && !isEchoOfRecentCommand(address, LocoSource::Z21_LAN)) {
             DEBUG_PRINTF("Broadcasting Ecos command to Z21\n");
             z21->sendSpeedCommand(address, state.speed, state.direction);
             if (functions_changed) {
@@ -1048,7 +1097,7 @@ void CommandRouter::broadcastCommand(uint16_t address, const LocoState& state, L
         }
         #endif
         #if ENABLE_LOCONET
-        if (loconet != nullptr && !wasRecentSource(address, LocoSource::LOCONET)) {
+        if (loconet != nullptr && !isEchoOfRecentCommand(address, LocoSource::LOCONET)) {
             DEBUG_PRINTF("Broadcasting Ecos command to LocoNet\n");
             loconet->sendSpeedCommand(address, state.speed, state.direction);
             if (functions_changed) {

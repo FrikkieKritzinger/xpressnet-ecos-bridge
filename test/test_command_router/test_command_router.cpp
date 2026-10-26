@@ -412,6 +412,49 @@ void test_router_echo_prevention_opposite_source_suppressed(void) {
     TEST_ASSERT_EQUAL_INT(0, xnet_mock.getSpeedCommandCount());  // Should be suppressed
 }
 
+void test_router_different_function_from_ecos_inside_the_window_is_forwarded(void) {
+    // A MultiMaus changes F1; a moment later someone changes F9 on Ecos. That is a
+    // real change, not the echo of F1, and must reach the MultiMaus (found live 2026-10-26:
+    // everything from Ecos within the attribution window was dropped).
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleXpressNetFunctionCommand(100, 0x2);              // F1 on, from XPRESSNET
+    router.handleEcosFunctionCommand(100, 0x200, 0x200);          // F9 on, from Ecos, same instant
+
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getFunctionCommandCount());
+    TEST_ASSERT_EQUAL_HEX32(0x202, xnet_mock.getLastFunctionCommand().functions);
+}
+
+void test_router_opposite_value_for_the_same_function_from_ecos_is_forwarded(void) {
+    // The MultiMaus turns F9 on and, a second later, F9 is turned OFF on Ecos: the same
+    // function but not the value the throttle sent, so it is a real change.
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleXpressNetFunctionCommand(100, 0x200);            // F9 on
+    router.handleEcosFunctionCommand(100, 0x0, 0x200);            // Ecos: F9 off
+
+    TEST_ASSERT_EQUAL_INT(1, xnet_mock.getFunctionCommandCount());
+    TEST_ASSERT_EQUAL_HEX32(0x0, xnet_mock.getLastFunctionCommand().functions);
+}
+
+void test_router_ecos_echo_of_the_same_function_is_still_suppressed(void) {
+    // The throttle turns F1 on then off; Ecos's late confirmation of the first press
+    // (F1 on) arrives after the state is already off. Same bit, so it is an echo.
+    CommandRouter router;
+    MockProtocolInterface xnet_mock;
+    router.setXpressNetInterface(&xnet_mock);
+
+    router.handleXpressNetFunctionCommand(100, 0x2);              // F1 on
+    router.handleXpressNetFunctionCommand(100, 0x0);              // F1 off
+    router.handleEcosFunctionCommand(100, 0x2, 0x2);              // Ecos: F1 on (stale confirmation)
+
+    TEST_ASSERT_EQUAL_INT(0, xnet_mock.getFunctionCommandCount());
+}
+
 void test_router_same_source_repeat_is_not_echo(void) {
     // Two commands from the SAME source are never treated as an echo,
     // even back-to-back for the same loco.
@@ -1157,6 +1200,9 @@ int main(void) {
     RUN_TEST(test_router_echo_prevention_opposite_source_suppressed);
     RUN_TEST(test_router_xpressnet_command_not_suppressed_right_after_ecos_command);
     RUN_TEST(test_router_same_source_repeat_is_not_echo);
+    RUN_TEST(test_router_different_function_from_ecos_inside_the_window_is_forwarded);
+    RUN_TEST(test_router_opposite_value_for_the_same_function_from_ecos_is_forwarded);
+    RUN_TEST(test_router_ecos_echo_of_the_same_function_is_still_suppressed);
     RUN_TEST(test_router_echo_prevention_window_expires);
 
     RUN_TEST(test_router_adds_loco_to_state_engine);

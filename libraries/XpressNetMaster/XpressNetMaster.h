@@ -170,6 +170,14 @@ class XpressNetMasterClass
     uint32_t TxTraceMicros[XNetTxTraceSize];
     uint32_t TxTraceHead = 0;
     uint32_t TxTraceMark = 0;	//where the last queued refresh began
+    //A throttle changed this loco itself: what the refresh bookkeeping remembers is stale.
+    void SetRefreshKnown(uint16_t Adr, uint8_t Speed, uint8_t F0to4, uint8_t F5to8, uint8_t F9to12) {
+        int8_t k = -1;
+        for (uint8_t i = 0; i < 6; i++) if (RefreshKnown[i].valid && RefreshKnown[i].adr == Adr) { k = i; break; }
+        if (k < 0) { k = RefreshKnownNext; RefreshKnownNext = (RefreshKnownNext + 1) % 6; }
+        RefreshKnown[k].adr = Adr; RefreshKnown[k].speed = Speed; RefreshKnown[k].f0 = F0to4;
+        RefreshKnown[k].f1 = F5to8; RefreshKnown[k].f2 = F9to12; RefreshKnown[k].valid = true;
+    }
     uint8_t RefreshMode = 0;	//0 = directed MultiMaus info (E7), 1 = overheard-style messages
     uint8_t RefreshStepsFlags = 0x00;	//OR-ed into the steps byte of a queued refresh: 0x08 = busy ("stolen")
     void QueueLocoRefresh(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4, uint8_t F5to8, uint8_t F9to12, uint8_t F13to20);
@@ -288,7 +296,10 @@ class XpressNetMasterClass
 		//Functions:
 	void unknown(void);		//unbekannte Anfrage
 	void getNextXNetAdr(void);
-	struct PendingRefreshEntry { uint16_t adr; uint8_t steps, speed, f0, f1, f2, f3; bool used; uint32_t last_sent_ms; };
+	struct PendingRefreshEntry { uint16_t adr; uint8_t steps, speed, f0, f1, f2, f3; bool used; uint32_t last_sent_ms; uint8_t dirty; };
+	struct RefreshKnownEntry { uint16_t adr; uint8_t speed, f0, f1, f2; bool valid; };
+	RefreshKnownEntry RefreshKnown[6] = {};
+	uint8_t RefreshKnownNext = 0;
 	void flushPendingRefresh(void);
 	void sendOverheardLocoState(const PendingRefreshEntry &e);
 	static const uint8_t XNetPendingRefreshCount = 4;

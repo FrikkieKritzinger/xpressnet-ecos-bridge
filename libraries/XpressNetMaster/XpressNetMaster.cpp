@@ -955,6 +955,37 @@ void XpressNetMasterClass::SetLocoInfoMM(uint8_t UserOps, uint8_t Steps, uint8_t
 //at an arbitrary moment and corrupted the bus (2026-10-26). The busy flag makes the
 //MultiMaus show "stolen" and apply the full state, as a real Z21 does.
 void XpressNetMasterClass::QueueLocoRefresh(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4, uint8_t F5to8, uint8_t F9to12, uint8_t F13to20) {
+	//What changed since the last refresh of this loco decides which messages go out (a real
+	//Z21 sends only the changed group, then the busy notice). bit0 = F0-F4, bit1 = F5-F8,
+	//bit2 = F9-F12, bit3 = speed/direction. An unknown loco refreshes everything.
+	uint8_t dirty = 0x0F;
+	int8_t known = -1;
+	for (uint8_t k = 0; k < 6; k++) {
+		if (RefreshKnown[k].valid && RefreshKnown[k].adr == Adr) {
+			known = k;
+			break;
+		}
+	}
+	if (known >= 0) {
+		dirty = 0;
+		if (RefreshKnown[known].f0 != F0to4) dirty |= 0x01;
+		if (RefreshKnown[known].f1 != F5to8) dirty |= 0x02;
+		if (RefreshKnown[known].f2 != F9to12) dirty |= 0x04;
+		if (RefreshKnown[known].speed != Speed) dirty |= 0x08;
+	}
+	else {
+		known = RefreshKnownNext;
+		RefreshKnownNext = (RefreshKnownNext + 1) % 6;
+	}
+	RefreshKnown[known].adr = Adr;
+	RefreshKnown[known].speed = Speed;
+	RefreshKnown[known].f0 = F0to4;
+	RefreshKnown[known].f1 = F5to8;
+	RefreshKnown[known].f2 = F9to12;
+	RefreshKnown[known].valid = true;
+	if (dirty == 0)
+		return;	//nothing a throttle could show changed
+
 	int8_t free_index = -1;
 	for (uint8_t i = 0; i < XNetPendingRefreshCount; i++) {
 		if (PendingRefresh[i].used && PendingRefresh[i].adr == Adr) {
@@ -973,6 +1004,7 @@ void XpressNetMasterClass::QueueLocoRefresh(uint16_t Adr, uint8_t Steps, uint8_t
 	PendingRefresh[free_index].f1 = F5to8;
 	PendingRefresh[free_index].f2 = F9to12;
 	PendingRefresh[free_index].f3 = F13to20;
+	PendingRefresh[free_index].dirty = (PendingRefresh[free_index].used ? PendingRefresh[free_index].dirty : 0) | dirty;
 	PendingRefresh[free_index].used = true;
 }
 
@@ -987,6 +1019,8 @@ void XpressNetMasterClass::sendOverheardLocoState(const PendingRefreshEntry &e) 
 	const uint8_t idents[3] = { 0x20, 0x21, 0x22 };
 	const uint8_t groups[3] = { (uint8_t)(e.f0 & 0x1F), (uint8_t)(e.f1 & 0x0F), e.f2 };
 	for (uint8_t g = 0; g < 3; g++) {
+		if (!(e.dirty & (1 << g)))
+			continue;
 		uint8_t msg[] = { call, 0xE4, idents[g], 0x00, 0x00, groups[g], 0x00 };
 		if (e.adr > 99) msg[3] = (e.adr >> 8) | 0xC0;
 		else msg[3] = e.adr >> 8;
@@ -994,6 +1028,8 @@ void XpressNetMasterClass::sendOverheardLocoState(const PendingRefreshEntry &e) 
 		getXOR(msg, 7);
 		XNetsend(msg, 7);
 	}
+	if (!(e.dirty & 0x08))
+		return;
 	uint8_t speed_msg[] = { call, 0xE4, 0x13, 0x00, 0x00, e.speed, 0x00 };	//128 steps
 	if (e.adr > 99) speed_msg[3] = (e.adr >> 8) | 0xC0;
 	else speed_msg[3] = e.adr >> 8;
@@ -1026,9 +1062,25 @@ void XpressNetMasterClass::flushPendingRefresh(void) {
 			//Mode 2 = what a real Z21 puts on the bus (sniffed 2026-10-26): the throttle's own
 			//message, then a directed "loco busy" (E3 40) to each device holding the loco.
 			if (RefreshMode == 2) {
+				bool notified = false;
 				for (byte s = 1; s < 32; s++) {
-					if (SlotLokUse[s] == PendingRefresh[i].adr)
+					if (SlotLokUse[s] == PendingRefresh[i].adr) {
 						SetLocoBusy(callByteParity(s | 0x60), PendingRefresh[i].adr);
+						notified = true;
+					}
+				}
+				//No device is registered for this loco (a throttle that has only SELECTED it
+				//since a restart has told us nothing yet): tell the devices known to be on the
+				//bus instead, at most a few so the transmit queue cannot overflow. A throttle
+				//showing another loco ignores a busy notice for this one.
+				if (!notified) {
+					byte sent = 0;
+					for (byte s = 1; s < 32 && sent < 3; s++) {
+						if (s != XNetExternalControllerSlot && SlotLokUse[s] != 0xFFFF) {
+							SetLocoBusy(callByteParity(s | 0x60), PendingRefresh[i].adr);
+							sent++;
+						}
+					}
 				}
 			}
 			statRefreshSent++;
