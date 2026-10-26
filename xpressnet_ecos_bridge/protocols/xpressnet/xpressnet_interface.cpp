@@ -146,6 +146,7 @@ bool XpressNetInterface::begin() {
         // loop) if the SoftwareSerial pin configuration is invalid - there is
         // no recoverable failure path for that case.
         xnet.setup(Loco128, XPRESSNET_DATA_PIN, XPRESSNET_CONTROL_PIN);
+        xnet.RefreshStepsFlags = XPRESSNET_REFRESH_FLAGS;
 
         // Broadcast track-power-on ("Alles An") - without this, throttles may
         // show themselves as active (they hear a valid master) while still
@@ -665,6 +666,23 @@ void XpressNetInterface::sendResumeOperation() {
 }
 
 void XpressNetInterface::pushLocoStateToOwningSlot(uint16_t address) {
+#if XPRESSNET_REFRESH_IN_POLL_WINDOW
+    // A real Z21 refreshes the other MultiMaus at once and flashes "stolen"
+    // (user's reference test 2026-10-26). The loco info, busy flag set, is
+    // queued here and sent by the library at the start of a polling window.
+    if (isValidDccAddress(address)) {
+        uint8_t speed_byte;
+        uint32_t functions;
+        resolveLocoStateForReply(address, speed_byte, functions);
+        xnet.QueueLocoRefresh(address, Loco128, speed_byte,
+                              buildFunctionGroupByte(functions, 1),
+                              buildFunctionGroupByte(functions, 2),
+                              buildFunctionGroupByte(functions, 3),
+                              buildFunctionGroupByte(functions, 0x04));
+        DEBUG_XNET_PRINTF("XpressNet TX: Queued loco refresh for the next polling window - Addr=%u\n", address);
+    }
+    return;
+#endif
 #if !XPRESSNET_PUSH_OWNING_SLOT
     (void)address;
     return;

@@ -196,6 +196,7 @@ bool XpressNetMasterClass::update(void)
 				XNetSendData();	//start sending an answer
 		
 				//Start next Transmission Window direct after receive!
+				flushPendingRefresh();	//queued loco refreshes go out between windows (this project)
 				getNextXNetAdr();	//Send next CallByte
 				XNetSendData();	//start sending out by interrupt
 				XSendCount = micros(); //save time last Data on Bus!
@@ -207,6 +208,7 @@ bool XpressNetMasterClass::update(void)
 	if (XNetSlaveMode == 0x00) {		//MASTER MODE
 		if (  (micros() - XSendCount) > XNetTransmissionWindow) {
 			XNetRXclear(XNetRXBuffer.put);	//alte Nachricht l�schen
+			flushPendingRefresh();	//queued loco refreshes go out between windows (this project)
 			getNextXNetAdr();	//Send next CallByte
 			XNetSendData();	//start sending out by interrupt
 			XSendCount = micros(); //save time last Data on Bus!
@@ -944,6 +946,51 @@ void XpressNetMasterClass::SetLocoInfoMM(uint8_t UserOps, uint8_t Steps, uint8_t
 	LocoInfo[4] |= F0;
 	getXOR(LocoInfo, 10);
 	XNetsend(LocoInfo, 10);
+}
+
+//--------------------------------------------------------------------------------------------
+//Queue a loco-info refresh (MultiMaus format, busy flag) for every XpressNet device
+//that holds this loco. It is sent by flushPendingRefresh() at the start of a polling
+//window, when the bus is idle - unlike PushExternalLocoUpdate(), which injected frames
+//at an arbitrary moment and corrupted the bus (2026-10-26). The busy flag makes the
+//MultiMaus show "stolen" and apply the full state, as a real Z21 does.
+void XpressNetMasterClass::QueueLocoRefresh(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4, uint8_t F5to8, uint8_t F9to12, uint8_t F13to20) {
+	int8_t free_index = -1;
+	for (uint8_t i = 0; i < XNetPendingRefreshCount; i++) {
+		if (PendingRefresh[i].used && PendingRefresh[i].adr == Adr) {
+			free_index = i;	//same loco: newest state wins
+			break;
+		}
+		if (!PendingRefresh[i].used && free_index < 0)
+			free_index = i;
+	}
+	if (free_index < 0)
+		return;	//queue full: drop, the next change re-queues it
+	PendingRefresh[free_index].adr = Adr;
+	PendingRefresh[free_index].steps = Steps;
+	PendingRefresh[free_index].speed = Speed;
+	PendingRefresh[free_index].f0 = F0to4;
+	PendingRefresh[free_index].f1 = F5to8;
+	PendingRefresh[free_index].f2 = F9to12;
+	PendingRefresh[free_index].f3 = F13to20;
+	PendingRefresh[free_index].used = true;
+}
+
+void XpressNetMasterClass::flushPendingRefresh(void) {
+	for (uint8_t i = 0; i < XNetPendingRefreshCount; i++) {
+		if (!PendingRefresh[i].used)
+			continue;
+		if ((uint32_t)(millis() - PendingRefresh[i].last_sent_ms) < 100 && PendingRefresh[i].last_sent_ms != 0)
+			continue;	//at most one refresh per loco per 100 ms
+		for (byte s = 1; s < 32; s++) {
+			if (SlotLokUse[s] == PendingRefresh[i].adr) {
+				SetLocoInfoMM(callByteParity(s | 0x60), PendingRefresh[i].steps | RefreshStepsFlags, PendingRefresh[i].speed,
+							  PendingRefresh[i].f0, PendingRefresh[i].f1, PendingRefresh[i].f2, PendingRefresh[i].f3);
+			}
+		}
+		PendingRefresh[i].used = false;
+		PendingRefresh[i].last_sent_ms = millis();
+	}
 }
 
 //--------------------------------------------------------------------------------------------

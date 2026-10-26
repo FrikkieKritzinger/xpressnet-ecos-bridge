@@ -161,6 +161,8 @@ class XpressNetMasterClass
 {
   // user-accessible "public" interface
   public:
+    uint8_t RefreshStepsFlags = 0x00;	//OR-ed into the steps byte of a queued refresh: 0x08 = busy ("stolen")
+    void QueueLocoRefresh(uint16_t Adr, uint8_t Steps, uint8_t Speed, uint8_t F0to4, uint8_t F5to8, uint8_t F9to12, uint8_t F13to20);
     uint8_t getDirectedOps(void) const { return DirectedOps; }	//call byte of the device being answered (valid inside notify callbacks)
     uint32_t statRxOk = 0;	//messages that passed the XOR check (this project's diagnostics)
     uint32_t statRxBad = 0;	//messages dropped for a bad XOR
@@ -274,7 +276,11 @@ class XpressNetMasterClass
 
 		//Functions:
 	void unknown(void);		//unbekannte Anfrage
-	void getNextXNetAdr(void);	//N�CHSTE Adr of XNet Device
+	void getNextXNetAdr(void);
+	void flushPendingRefresh(void);
+	struct PendingRefreshEntry { uint16_t adr; uint8_t steps, speed, f0, f1, f2, f3; bool used; uint32_t last_sent_ms; };
+	static const uint8_t XNetPendingRefreshCount = 4;
+	PendingRefreshEntry PendingRefresh[4] = {};	//N�CHSTE Adr of XNet Device
 	bool XNetCheckXOR(void);	//Checks the XOR
 	void XNetAnalyseReceived(void);		//work on received data
 	
