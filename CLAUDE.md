@@ -628,7 +628,7 @@ Utilities          → Timing (non-blocking timers), Debug, Memory helpers
 - **XpressNet** (`protocols/xpressnet/`): Master device on RS485, accepts throttle commands
 - **Ecos** (`protocols/ecos/`): TCP client over WiFi, text-based object protocol
 - **Z21 LAN** (`protocols/z21lan/`): UDP server on port 21105 emulating a Z21 (WLANmaus); packet codec in `z21_protocol.*`, socket/session table in `z21lan_interface.*`
-- **LocoNet** (`protocols/loconet/`): stub header only, `ENABLE_LOCONET` = 0 (Phase 7 item 3)
+- **LocoNet** (`protocols/loconet/`): slot server for Digitrax throttles (UT6), receive on UART0 + SoftwareSerial TX, `ENABLE_LOCONET` = 1 (Phase 7 item 3; slot ownership stays internal, never gates the router)
 
 ### Configuration
 Single source of truth: **`config.h`**
@@ -1589,11 +1589,17 @@ real needs come up rather than pre-committing to a fixed scope.
      directions, which the user is satisfied with for now - this is
      deferred as its own low-priority follow-up (Phase 7, new item 6
      below), not blocking anything else.
-3. ⬜ **LocoNet support** - parallel to XpressNet, carried over from
-   Phase 6 step 5. **Status as of 2026-10-22 (end of day) - work is on the
-   local-and-pushed `loconet` branch, NOT merged to `main`** (main stays the
-   proven v1.4.0; version still 1.4.0, bump decided with the user once
-   LocoNet is confirmed). v2.1 board bring-up passed. Built and tested so
+3. ✅ **LocoNet support - merged into `main` and released as `v1.5.0`
+   (2026-10-26)**, confirmed on hardware with a Digitrax UT6 alongside
+   XpressNet, Z21 and Ecos. Today's release also changed the platform: CPU
+   160 MHz, Wi-Fi modem sleep off, XpressNet "stolen" push off
+   (`XPRESSNET_PUSH_OWNING_SLOT 0`), function confirmation reply to the
+   sending throttle - all because the software-serial XpressNet receive lost
+   frames (details in docs/CHANGELOG.md, 2026-10-26). **Open after the
+   release**: low free heap (~6 KB), MultiMaus does not refresh a function
+   changed elsewhere (item 7), LocoNet slot expiry, turnouts from the UT6.
+   Earlier status (2026-10-22), kept for history: work was on the
+   `loconet` branch, main stayed v1.4.0 until LocoNet was confirmed. v2.1 board bring-up passed. Built and tested so
    far:
    - **P1 passive RX - confirmed on hardware**: hardware UART0 at 16660
      baud (non-inverted) decodes real frames from a Digitrax UT6.
@@ -1792,7 +1798,7 @@ real needs come up rather than pre-committing to a fixed scope.
 
 ---
 
-**Last Updated**: 2026-10-23 (LocoNet working on hardware on the `loconet` branch - routing, track power, no steal prompt; see Phase 7 item 3 - `main` is still v1.4.0). **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-10-26 (**v1.5.0**: LocoNet merged into `main`, 160 MHz, Wi-Fi sleep off, XpressNet push off - see Phase 7 item 3). **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,
