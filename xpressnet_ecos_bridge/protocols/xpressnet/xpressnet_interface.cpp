@@ -493,6 +493,21 @@ void XpressNetInterface::onLocoFunctionGroup(uint16_t address, uint8_t group, ui
 
     DEBUG_XNET_PRINTF("XpressNet RX: Function group %u - Addr=%u Fn=0x%08lx\n", group, address, (unsigned long)functions);
     router->handleXpressNetFunctionCommand(address, functions);
+
+#if XPRESSNET_CONFIRM_FUNCTION_REPLY
+    // Tell the throttle that sent this the loco's state now, in its own
+    // polling window, like a command station confirming the change. A
+    // MultiMaus that sees no confirmation resends the same function frame
+    // 1-2 s later (seen in captures p36).
+    uint8_t speed_byte;
+    uint32_t confirmed_functions;
+    resolveLocoStateForReply(address, speed_byte, confirmed_functions);
+    xnet.SetLocoInfoMM(xnet.getDirectedOps(), Loco128, speed_byte,
+                       buildFunctionGroupByte(confirmed_functions, 1),
+                       buildFunctionGroupByte(confirmed_functions, 2),
+                       buildFunctionGroupByte(confirmed_functions, 3),
+                       buildFunctionGroupByte(confirmed_functions, 0x04));
+#endif
 }
 
 void XpressNetInterface::onTurnoutCommand(uint16_t address, uint8_t data) {

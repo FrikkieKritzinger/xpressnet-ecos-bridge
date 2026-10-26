@@ -87,6 +87,10 @@
     // refresh, Phase 5 step 9). Experiment 2026-10-26: those extra transmissions
     // coincided with bursts of XpressNet frames dropped for bad checksums.
     #define XPRESSNET_PUSH_OWNING_SLOT   0
+
+    // 1 = answer a throttle's function frame with the loco's current info, in
+    // the throttle's own polling window (a command-station confirmation).
+    #define XPRESSNET_CONFIRM_FUNCTION_REPLY   1
 #endif
 
 // ============================================================================

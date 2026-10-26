@@ -161,6 +161,7 @@ class XpressNetMasterClass
 {
   // user-accessible "public" interface
   public:
+    uint8_t getDirectedOps(void) const { return DirectedOps; }	//call byte of the device being answered (valid inside notify callbacks)
     uint32_t statRxOk = 0;	//messages that passed the XOR check (this project's diagnostics)
     uint32_t statRxBad = 0;	//messages dropped for a bad XOR
     XpressNetMasterClass(void);	//Constuctor
