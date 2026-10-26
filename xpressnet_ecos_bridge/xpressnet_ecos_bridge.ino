@@ -355,6 +355,11 @@ void loop() {
                         ESP.getFreeHeap(), ESP.getMaxFreeBlockSize());
             debugPrintf("Loop: %lu iterations in 30 s, longest gap %lu ms\n",
                         g_loop_count, g_loop_max_us / 1000);
+            #if ENABLE_XPRESSNET
+                debugPrintf("XNet bus: %lu frames ok, %lu dropped (bad checksum)\n",
+                            (unsigned long)xnet_interface.getBusRxOk(),
+                            (unsigned long)xnet_interface.getBusRxBad());
+            #endif
             g_loop_count = 0;
             g_loop_max_us = 0;
         }

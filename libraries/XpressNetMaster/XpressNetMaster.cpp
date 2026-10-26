@@ -176,12 +176,16 @@ bool XpressNetMasterClass::update(void)
 			#endif
 			//XNetDataReady = false;
 			if (XNetCheckXOR())	{ //Checks the XOR
+				statRxOk++;
 				#if defined (XNetDEBUGTime)
 				XNetSerial.println(" OK");
 				#endif
 				XNetAnalyseReceived();	//Auswerten der empfangenen Daten
 			}
-						
+			else {
+				statRxBad++;
+			}
+
 			XNetRXclear(XNetRXBuffer.get);	//alte Nachricht l�schen
 			
 			XNetRXBuffer.get++;

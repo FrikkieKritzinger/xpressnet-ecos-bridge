@@ -267,6 +267,16 @@ private:
     uint16_t baseline_query_object_id;  // 0 = no baseline query in progress
     uint8_t baseline_query_step;        // 0=speed, 1=dir, 2..33=func[0..31]
 
+    // After every (re)connect, re-subscribe the locos the bridge already knows.
+    // A throttle that talks to the bridge before Ecos is connected (right after
+    // a reboot) creates the loco and marks it subscribed, but subscribeToLoco()
+    // silently does nothing while disconnected - so Ecos never sent that loco's
+    // events to us (found live 2026-10-26).
+    bool resubscribe_pending = false;
+    uint8_t resubscribe_index = 0;
+    unsigned long resubscribe_deadline_ms = 0;
+    void sendNextResubscribeStep();
+
     /**
      * If a baseline query is in progress, send its next single get() step
      * and advance. No-op if none is pending. Called once per update().

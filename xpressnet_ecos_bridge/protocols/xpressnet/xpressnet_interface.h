@@ -111,6 +111,8 @@ public:
      * message has been received yet this boot.
      */
     unsigned long getLastMessageAgeMs() const override;
+    uint32_t getBusRxOk() const { return xnet.statRxOk; }
+    uint32_t getBusRxBad() const { return xnet.statRxBad; }
 
     /**
      * Get current connection status

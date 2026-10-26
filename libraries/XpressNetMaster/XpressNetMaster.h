@@ -161,6 +161,8 @@ class XpressNetMasterClass
 {
   // user-accessible "public" interface
   public:
+    uint32_t statRxOk = 0;	//messages that passed the XOR check (this project's diagnostics)
+    uint32_t statRxBad = 0;	//messages dropped for a bad XOR
     XpressNetMasterClass(void);	//Constuctor
 	#if defined(ESP8266) || defined(ESP32)
 	void setup(uint8_t FStufen, uint8_t XNetPort, uint8_t XControl, bool XnModeAuto = true);  //Initialisierung Serial

@@ -174,6 +174,8 @@ void EcosInterface::update() {
     // set() per call - see sendNextFunctionStep()'s header comment.
     sendNextFunctionStep();
 
+    sendNextResubscribeStep();
+
     // Phase 7: Subscribe to any newly-discovered accessory, one request()
     // per call - see sendNextAccessorySubscribeStep()'s header comment.
     sendNextAccessorySubscribeStep();
@@ -310,6 +312,10 @@ void EcosInterface::attemptTcpConnect() {
             wifi_client.write((uint8_t*)cmd_buffer, len);
             DEBUG_ECOS_PRINTF("Ecos TX: Query system status\n");
         }
+
+        resubscribe_pending = true;
+        resubscribe_index = 0;
+        resubscribe_deadline_ms = millis() + 20000;
 
         DEBUG_ECOS_PRINTF("Ecos TCP connected!\n");
     } else {
@@ -878,6 +884,31 @@ void EcosInterface::sendFunctionCommand(uint16_t address, uint32_t functions) {
     }
 
     DEBUG_ECOS_PRINTF("Ecos TX: Functions loco %u = 0x%08x (first send, queued, paced)\n", address, functions);
+}
+
+void EcosInterface::sendNextResubscribeStep() {
+    if (!resubscribe_pending || router == nullptr || current_status != ComponentStatus::CONNECTED) {
+        return;
+    }
+    if ((long)(millis() - resubscribe_deadline_ms) >= 0) {
+        resubscribe_pending = false;
+        return;
+    }
+    // One loco at a time: subscribeToLoco() starts a baseline sweep that only
+    // one loco can use at once, and the address map must already know the loco.
+    if (baseline_query_object_id != 0 || address_map_count == 0) {
+        return;
+    }
+    const LocoState* loco = router->getStateEngine().getLocoByIndex(resubscribe_index);
+    if (loco == nullptr) {
+        resubscribe_pending = false;
+        return;
+    }
+    if (findEcosObjectId(loco->dcc_address) == 0) {
+        return;  // address map not complete yet - try again until the deadline
+    }
+    subscribeToLoco(loco->dcc_address);
+    resubscribe_index++;
 }
 
 void EcosInterface::sendNextFunctionStep() {
