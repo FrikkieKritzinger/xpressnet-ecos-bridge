@@ -108,10 +108,14 @@ def main():
             pass
 
     ap = argparse.ArgumentParser()
+    ap.add_argument("--env", default=None, help="PlatformIO environment (default wemos_dev; wemos_sniff for the XpressNet sniffer)")
     ap.add_argument("host", nargs="?", default="192.168.0.51")
     ap.add_argument("--port", type=int, default=8266)
     ap.add_argument("--no-build", action="store_true")
     args = ap.parse_args()
+    global ENV
+    if args.env:
+        ENV = args.env
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if not args.no_build:

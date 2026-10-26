@@ -96,6 +96,10 @@
     // 0x00 = a plain info reply. Experiment 2026-10-26: with the busy flag the
     // MultiMaus flashed stolen but did not apply a changed function.
     #define XPRESSNET_REFRESH_FLAGS   0x00
+    // 0 = directed MultiMaus info reply; 1 = the messages a throttle in another slot
+    // would put on the bus (inquiry call byte + its own unmarked messages), which a
+    // MultiMaus overhears and applies, functions included.
+    #define XPRESSNET_REFRESH_MODE    1
 
     // 1 = answer a throttle's function frame with the loco's current info, in
     // the throttle's own polling window (a command-station confirmation).
@@ -348,6 +352,12 @@
 #define SETUP_BUTTON_PIN            13      // D7/GPIO13 - dedicated pushbutton to GND (new wiring required)
 #define SETUP_BUTTON_HOLD_MS        3000    // Hold duration to trigger setup mode
 #define WIFI_FALLBACK_TIMEOUT_MS    300000  // 5 min continuous WiFi disconnection -> auto setup mode
+// Receive-only XpressNet sniffer (build env wemos_sniff): listens on a bus that
+// something else runs and logs every message; never transmits. Off normally.
+#ifndef ENABLE_XNET_SNIFFER
+    #define ENABLE_XNET_SNIFFER 0
+#endif
+
 #define SETUP_MODE_AP_SSID          "XNetBridge-Setup"
 #define SETUP_MODE_AP_PASSWORD      ""      // Open network - matches this project's no-auth posture elsewhere; the button/timeout triggers already require physical presence or an already-broken connection
 #define SETUP_MODE_WEB_PORT         80

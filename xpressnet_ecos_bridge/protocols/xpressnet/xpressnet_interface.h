@@ -113,6 +113,7 @@ public:
     unsigned long getLastMessageAgeMs() const override;
     uint32_t getBusRxOk() const { return xnet.statRxOk; }
     uint32_t getBusRxBad() const { return xnet.statRxBad; }
+    uint32_t getRefreshSent() const { return xnet.statRefreshSent; }
 
     /**
      * Get current connection status

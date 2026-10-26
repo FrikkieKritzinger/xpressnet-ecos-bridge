@@ -147,6 +147,7 @@ bool XpressNetInterface::begin() {
         // no recoverable failure path for that case.
         xnet.setup(Loco128, XPRESSNET_DATA_PIN, XPRESSNET_CONTROL_PIN);
         xnet.RefreshStepsFlags = XPRESSNET_REFRESH_FLAGS;
+        xnet.RefreshMode = XPRESSNET_REFRESH_MODE;
 
         // Broadcast track-power-on ("Alles An") - without this, throttles may
         // show themselves as active (they hear a valid master) while still

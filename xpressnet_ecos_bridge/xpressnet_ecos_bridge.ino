@@ -24,6 +24,7 @@
 #include "eeprom_config.h"
 #include "eeprom_store.h"
 #include "setup_mode.h"
+#include "utils/xnet_sniffer.h"
 
 // Protocol interfaces - conditionally included based on config.h
 #if ENABLE_XPRESSNET
@@ -202,7 +203,9 @@ void setup() {
 
     // Initialize protocols (order doesn't matter)
 
-    #if ENABLE_XPRESSNET
+    #if ENABLE_XNET_SNIFFER
+        xnetSnifferBegin();
+    #elif ENABLE_XPRESSNET
         debugPrintf("Initializing XpressNet interface...\n");
         xnet_interface.setBusTimeoutMs(g_config.xnet_bus_timeout_ms);
         if (!xnet_interface.begin()) {
@@ -292,7 +295,9 @@ void loop() {
     // ========================================================================
     // These must run every iteration to avoid missing messages
 
-    #if ENABLE_XPRESSNET
+    #if ENABLE_XNET_SNIFFER
+        xnetSnifferUpdate();
+    #elif ENABLE_XPRESSNET
         // XpressNet is most timing-sensitive - update first
         // Message receive window is ~20-50ms, must not miss
         xnet_interface.update();
@@ -356,9 +361,10 @@ void loop() {
             debugPrintf("Loop: %lu iterations in 30 s, longest gap %lu ms\n",
                         g_loop_count, g_loop_max_us / 1000);
             #if ENABLE_XPRESSNET
-                debugPrintf("XNet bus: %lu frames ok, %lu dropped (bad checksum)\n",
+                debugPrintf("XNet bus: %lu frames ok, %lu dropped (bad checksum), %lu refreshes sent\n",
                             (unsigned long)xnet_interface.getBusRxOk(),
-                            (unsigned long)xnet_interface.getBusRxBad());
+                            (unsigned long)xnet_interface.getBusRxBad(),
+                            (unsigned long)xnet_interface.getRefreshSent());
             #endif
             g_loop_count = 0;
             g_loop_max_us = 0;
