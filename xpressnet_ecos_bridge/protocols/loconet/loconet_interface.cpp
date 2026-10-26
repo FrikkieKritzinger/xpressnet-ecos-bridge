@@ -295,6 +295,10 @@ void LocoNetInterface::routeEvent(const LnSlotEvent& event) {
     // A selection never sends a command - it only makes sure the bridge is
     // tracking the loco (and subscribed to Ecos), so its real state flows back
     // to the throttle.
+    if (event.flags & LN_EV_TURNOUT) {
+        router->handleAccessoryCommand(event.address, event.diverging != 0, LocoSource::LOCONET);
+    }
+
     if (event.flags & LN_EV_SELECT) {
         router->trackLocoForThrottle(event.address);
     }

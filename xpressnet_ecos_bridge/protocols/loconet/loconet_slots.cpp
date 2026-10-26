@@ -381,6 +381,18 @@ LnSlotEvent LnSlotServer::handleFrame(const LnFrame& f, uint32_t now_ms) {
             }
             break;
 
+        case LN_OPC_SW_REQ:
+            // <B0><SW1><SW2>: SW2 = 0 0 DIR ON A10..A7. A press sends ON=1 and then
+            // ON=0 (real UT6 capture 2026-10-26: 30,20 closed and 10,00 thrown);
+            // only the ON edge is a command, like XpressNet's activate edge.
+            // The wire address is the turnout number minus 1.
+            if (f.len == 4 && (b[2] & 0x10) != 0) {
+                ev.flags |= LN_EV_TURNOUT;
+                ev.address = (uint16_t)((((b[2] & 0x0F) << 7) | (b[1] & 0x7F)) + 1);
+                ev.diverging = (b[2] & 0x20) ? 0 : 1;
+            }
+            break;
+
         case LN_OPC_WR_SL_DATA:
             if (f.len == 14 && isValidSlot(b[2])) {
                 // Report what this write changed, but ONLY once the throttle

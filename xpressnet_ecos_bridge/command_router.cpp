@@ -678,7 +678,7 @@ void CommandRouter::handleAccessoryCommand(uint16_t address, bool diverging, Loc
     // only ever called for a throttle-originated command (source is always
     // XPRESSNET or Z21_LAN), never for the Ecos-sourced direction, which
     // goes through handleEcosAccessoryCommand() below instead.
-    if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN) {
+    if (source == LocoSource::XPRESSNET || source == LocoSource::Z21_LAN || source == LocoSource::LOCONET) {
         #if ENABLE_ECOS_LAN
         if (ecos != nullptr) {
             ecos->sendAccessoryCommand(address, diverging);

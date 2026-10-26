@@ -208,6 +208,29 @@ void test_loco_adr_never_reports_a_slot_as_in_use(void) {
 
 static void selectLoco3();
 
+void test_sw_req_on_edge_is_a_turnout_command(void) {
+    // Real UT6 capture 2026-10-26: turnout 1 closed = B0 00 30 then B0 00 20.
+    LnSlotEvent ev = send({LN_OPC_SW_REQ, 0x00, 0x30});
+    TEST_ASSERT_TRUE((ev.flags & LN_EV_TURNOUT) != 0);
+    TEST_ASSERT_EQUAL_UINT16(1, ev.address);
+    TEST_ASSERT_EQUAL_UINT8(0, ev.diverging);
+
+    ev = send({LN_OPC_SW_REQ, 0x00, 0x10});     // thrown
+    TEST_ASSERT_TRUE((ev.flags & LN_EV_TURNOUT) != 0);
+    TEST_ASSERT_EQUAL_UINT8(1, ev.diverging);
+}
+
+void test_sw_req_release_edge_is_ignored(void) {
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, send({LN_OPC_SW_REQ, 0x00, 0x20}).flags);
+    TEST_ASSERT_EQUAL_HEX8(LN_EV_NONE, send({LN_OPC_SW_REQ, 0x00, 0x00}).flags);
+}
+
+void test_sw_req_address_uses_all_eleven_bits(void) {
+    // Wire address 0x2A5 (= 677) is turnout 678: A6..A0 = 0x25, A10..A7 = 0x5.
+    LnSlotEvent ev = send({LN_OPC_SW_REQ, 0x25, 0x35});
+    TEST_ASSERT_EQUAL_UINT16(0x2A5 + 1, ev.address);
+}
+
 void test_idle_slot_expires_to_common_and_is_not_counted(void) {
     selectLoco3();
     TEST_ASSERT_EQUAL_UINT8(1, server.slotsInUse());
@@ -869,6 +892,9 @@ int main(void) {
     RUN_TEST(test_rq_sl_data_for_system_slot_is_ignored);
 
     RUN_TEST(test_null_move_selects_the_slot);
+    RUN_TEST(test_sw_req_on_edge_is_a_turnout_command);
+    RUN_TEST(test_sw_req_release_edge_is_ignored);
+    RUN_TEST(test_sw_req_address_uses_all_eleven_bits);
     RUN_TEST(test_idle_slot_expires_to_common_and_is_not_counted);
     RUN_TEST(test_throttle_activity_after_expiry_brings_the_slot_back);
     RUN_TEST(test_changes_from_other_protocols_do_not_keep_a_slot_alive);

@@ -190,6 +190,18 @@ void test_router_accessory_command_forwards_to_ecos(void) {
     TEST_ASSERT_TRUE(ecos_mock.getLastAccessoryCommand().diverging);
 }
 
+void test_router_accessory_command_from_loconet_forwards_to_ecos(void) {
+    CommandRouter router;
+    MockProtocolInterface ecos_mock;
+    router.setEcosInterface(&ecos_mock);
+
+    router.handleAccessoryCommand(12, true, LocoSource::LOCONET);
+
+    TEST_ASSERT_EQUAL_INT(1, ecos_mock.getAccessoryCommandCount());
+    TEST_ASSERT_EQUAL_UINT16(12, ecos_mock.getLastAccessoryCommand().address);
+    TEST_ASSERT_TRUE(ecos_mock.getLastAccessoryCommand().diverging);
+}
+
 void test_router_accessory_command_straight_forwards_correctly(void) {
     CommandRouter router;
     MockProtocolInterface ecos_mock;
@@ -1125,6 +1137,7 @@ int main(void) {
     RUN_TEST(test_router_ecos_function_command_partial_update_can_clear_a_bit);
 
     RUN_TEST(test_router_accessory_command_forwards_to_ecos);
+    RUN_TEST(test_router_accessory_command_from_loconet_forwards_to_ecos);
     RUN_TEST(test_router_accessory_command_straight_forwards_correctly);
     RUN_TEST(test_router_accessory_command_from_ecos_does_not_forward_anywhere);
     RUN_TEST(test_router_accessory_command_rejects_invalid_address);

@@ -81,6 +81,7 @@ typedef bool (*LnLocoLookup)(uint16_t address, LnLocoSnapshot* out, void* contex
 #define LN_EV_POWER_OFF   0x08
 #define LN_EV_ESTOP       0x10
 #define LN_EV_SELECT      0x20   // a throttle took this slot (IN_USE): address valid
+#define LN_EV_TURNOUT     0x40   // a throttle threw a turnout: address (1-based) and diverging valid
 
 struct LnSlotEvent {
     uint8_t flags;
@@ -89,6 +90,7 @@ struct LnSlotEvent {
     uint8_t direction;     // 1 = forward
     uint32_t func_mask;    // which function bits this frame defines
     uint32_t func_bits;    // their new values (only bits inside func_mask)
+    uint8_t diverging;     // LN_EV_TURNOUT: 1 = thrown/diverging, 0 = closed/straight
 };
 
 // Slot speed byte <-> bridge speed. LocoNet: 0 = stop, 1 = emergency stop,
