@@ -1806,7 +1806,7 @@ real needs come up rather than pre-committing to a fixed scope.
 
 ---
 
-**Last Updated**: 2026-10-26 (**v1.5.2**: LocoNet merged into `main`, 160 MHz, Wi-Fi sleep off, free heap ~13 KB, LocoNet slot expiry and UT6 turnouts, MultiMaus function display fixed via the library TX-queue fix - see Phase 7 item 3). **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-10-26 (**v1.5.3**: MultiMaus function mirroring reliable at any timing, F8-F11 inversion, subscribe on selection; **v1.5.2**: LocoNet merged into `main`, 160 MHz, Wi-Fi sleep off, free heap ~13 KB, LocoNet slot expiry and UT6 turnouts, MultiMaus function display fixed via the library TX-queue fix - see Phase 7 item 3). **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,
