@@ -206,6 +206,41 @@ void test_loco_adr_never_reports_a_slot_as_in_use(void) {
     TEST_ASSERT_EQUAL_HEX8(LN_STAT1_IN_USE, popReply().data[3] & LN_STAT1_BUSY_MASK);
 }
 
+static void selectLoco3();
+
+void test_idle_slot_expires_to_common_and_is_not_counted(void) {
+    selectLoco3();
+    TEST_ASSERT_EQUAL_UINT8(1, server.slotsInUse());
+    TEST_ASSERT_EQUAL_UINT8(0, server.expireIdleSlots(now_ms + 9999, 10000));   // not idle long enough
+    TEST_ASSERT_EQUAL_UINT8(1, server.expireIdleSlots(now_ms + 10000, 10000));
+    TEST_ASSERT_EQUAL_UINT8(0, server.slotsInUse());
+    TEST_ASSERT_EQUAL_HEX8(LN_STAT1_COMMON, server.slot(1).stat1 & LN_STAT1_BUSY_MASK);
+}
+
+void test_throttle_activity_after_expiry_brings_the_slot_back(void) {
+    selectLoco3();
+    server.expireIdleSlots(now_ms + 20000, 10000);
+    TEST_ASSERT_EQUAL_UINT8(0, server.slotsInUse());
+    now_ms += 21000;
+    LnSlotEvent ev = send({LN_OPC_LOCO_SPD, 0x01, 0x40});   // the throttle is still there
+    TEST_ASSERT_TRUE((ev.flags & LN_EV_DRIVE) != 0);          // and its command still routes
+    TEST_ASSERT_EQUAL_UINT8(1, server.slotsInUse());
+}
+
+void test_changes_from_other_protocols_do_not_keep_a_slot_alive(void) {
+    selectLoco3();
+    now_ms += 9000;
+    server.applyExternalDrive(3, 50, 1, now_ms);              // refreshes last_use, not last_heard
+    TEST_ASSERT_EQUAL_UINT8(1, server.expireIdleSlots(now_ms + 1500, 10000));
+}
+
+void test_a_throttle_frame_resets_the_idle_clock(void) {
+    selectLoco3();
+    now_ms += 9000;
+    send({LN_OPC_LOCO_SPD, 0x01, 0x20});
+    TEST_ASSERT_EQUAL_UINT8(0, server.expireIdleSlots(now_ms + 5000, 10000));
+}
+
 void test_null_move_on_a_free_slot_answers_with_the_empty_slot(void) {
     // Not a LONG_ACK refusal: that makes a Digitrax throttle ask the user to
     // "steal" the loco. The empty slot read sends it back to selecting.
@@ -834,6 +869,10 @@ int main(void) {
     RUN_TEST(test_rq_sl_data_for_system_slot_is_ignored);
 
     RUN_TEST(test_null_move_selects_the_slot);
+    RUN_TEST(test_idle_slot_expires_to_common_and_is_not_counted);
+    RUN_TEST(test_throttle_activity_after_expiry_brings_the_slot_back);
+    RUN_TEST(test_changes_from_other_protocols_do_not_keep_a_slot_alive);
+    RUN_TEST(test_a_throttle_frame_resets_the_idle_clock);
     RUN_TEST(test_null_move_succeeds_even_when_already_in_use);
     RUN_TEST(test_null_move_on_a_free_slot_answers_with_the_empty_slot);
     RUN_TEST(test_moving_a_free_slot_elsewhere_is_still_refused);

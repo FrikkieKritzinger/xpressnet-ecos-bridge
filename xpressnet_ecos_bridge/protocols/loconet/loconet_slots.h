@@ -105,7 +105,8 @@ struct LnSlot {
     uint8_t ss2;
     uint8_t id1;
     uint8_t id2;
-    uint32_t last_use_ms;
+    uint32_t last_use_ms;    // any use, including changes pushed from other protocols
+    uint32_t last_heard_ms;  // last frame from a throttle about this slot
 };
 
 class LnSlotServer {
@@ -158,6 +159,12 @@ public:
     // Slot access. Valid slot numbers are 1..LN_SLOT_COUNT.
     bool isValidSlot(uint8_t slot) const { return slot >= 1 && slot <= LN_SLOT_COUNT; }
     const LnSlot& slot(uint8_t n) const { return slots[n]; }
+    // A throttle that unplugs never says so. Slots a throttle holds (IN_USE) that
+    // it has not spoken about for idle_ms drop to COMMON, as a real command
+    // station purges idle slots; if the throttle speaks again the slot returns to
+    // IN_USE. Returns how many expired.
+    uint8_t expireIdleSlots(uint32_t now_ms, uint32_t idle_ms);
+
     uint8_t dispatchSlot() const { return dispatch_slot; }
     uint8_t slotsInUse() const {
         uint8_t n = 0;
@@ -189,6 +196,7 @@ private:
     uint32_t dropped_replies;
     bool push_byte_frames;                      // also queue OPC_LOCO_SPD/DIRF/SND per change
     bool resync_needed;                         // a held slot changed from elsewhere
+    uint32_t expired_mask;                      // bit n set = slot n was expired by expireIdleSlots()
     uint32_t dirty_slots;                       // bit n set = slot n changed, read not yet pushed
     uint32_t last_push_ms[LN_SLOT_COUNT + 1];
 
@@ -196,6 +204,7 @@ private:
     void queueSlotRead(uint8_t slot_number);
     void markSlotChanged(uint8_t slot_number);
     void queueLongAck(uint8_t opcode_without_msb, uint8_t code);
+    void noteThrottleActivity(uint8_t slot_number, uint32_t now_ms, bool reactivate);
 
     uint8_t findSlotByAddress(uint16_t address) const;
     uint8_t allocateSlot(uint16_t address, uint32_t now_ms);

@@ -17,6 +17,7 @@ LnSlotServer::LnSlotServer() {
     lookup_context = nullptr;
     pending_select_address = 0;
     dirty_slots = 0;
+    expired_mask = 0;
     resync_needed = false;
     push_byte_frames = true;
     memset(last_push_ms, 0, sizeof(last_push_ms));
@@ -352,6 +353,7 @@ LnSlotEvent LnSlotServer::handleFrame(const LnFrame& f, uint32_t now_ms) {
                 bool was_in_use = (slots[b[1]].stat1 & LN_STAT1_BUSY_MASK) == LN_STAT1_IN_USE;
                 slots[b[1]].stat1 = b[2];
                 slots[b[1]].last_use_ms = now_ms;
+                noteThrottleActivity(b[1], now_ms, false);
                 if (!was_in_use && (b[2] & LN_STAT1_BUSY_MASK) == LN_STAT1_IN_USE) {
                     pending_select_address = slots[b[1]].address;
                 }
@@ -374,6 +376,7 @@ LnSlotEvent LnSlotServer::handleFrame(const LnFrame& f, uint32_t now_ms) {
                 if (b[0] == LN_OPC_LOCO_DIRF) s.dirf = b[2] & 0x7F;
                 if (b[0] == LN_OPC_LOCO_SND) s.snd = b[2] & 0x7F;
                 s.last_use_ms = now_ms;
+                noteThrottleActivity(b[1], now_ms, true);
                 reportChange(b[1], old_speed, old_dirf, old_snd, ev);
             }
             break;
@@ -436,6 +439,35 @@ LnSlotEvent LnSlotServer::handleFrame(const LnFrame& f, uint32_t now_ms) {
 // Describes how a slot differs from its previous values. Only real
 // differences are reported, so a throttle repeating the same value (they
 // re-send periodically) generates no traffic elsewhere.
+void LnSlotServer::noteThrottleActivity(uint8_t slot_number, uint32_t now_ms, bool reactivate) {
+    LnSlot& s = slots[slot_number];
+    s.last_heard_ms = now_ms;
+    uint32_t bit = 1UL << slot_number;
+    if ((expired_mask & bit) != 0) {
+        expired_mask &= ~bit;
+        // A throttle that speaks about an expired slot is still there.
+        if (reactivate && (s.stat1 & LN_STAT1_BUSY_MASK) != LN_STAT1_FREE) {
+            s.stat1 = (uint8_t)((s.stat1 & ~LN_STAT1_BUSY_MASK) | LN_STAT1_IN_USE);
+        }
+    }
+}
+
+uint8_t LnSlotServer::expireIdleSlots(uint32_t now_ms, uint32_t idle_ms) {
+    uint8_t expired = 0;
+    for (uint8_t i = 1; i <= LN_SLOT_COUNT; i++) {
+        LnSlot& s = slots[i];
+        if ((s.stat1 & LN_STAT1_BUSY_MASK) != LN_STAT1_IN_USE) {
+            continue;
+        }
+        if ((uint32_t)(now_ms - s.last_heard_ms) >= idle_ms) {
+            s.stat1 = (uint8_t)((s.stat1 & ~LN_STAT1_BUSY_MASK) | LN_STAT1_COMMON);
+            expired_mask |= (1UL << i);
+            expired++;
+        }
+    }
+    return expired;
+}
+
 void LnSlotServer::reportChange(uint8_t slot_number, uint8_t old_speed, uint8_t old_dirf,
                                 uint8_t old_snd, LnSlotEvent& ev) const {
     const LnSlot& s = slots[slot_number];
@@ -532,6 +564,7 @@ void LnSlotServer::handleLocoAdr(const LnFrame& f, uint32_t now_ms) {
         return;
     }
     slots[slot_number].last_use_ms = now_ms;
+    noteThrottleActivity(slot_number, now_ms, false);
 
     // Stealing is free here, so never make a throttle ask for it: a slot still
     // marked IN_USE (left over from an earlier selection, or re-created by the
@@ -557,6 +590,7 @@ void LnSlotServer::handleMoveSlots(const LnFrame& f, uint32_t now_ms) {
             uint8_t s = dispatch_slot;
             slots[s].stat1 = (uint8_t)((slots[s].stat1 & ~LN_STAT1_BUSY_MASK) | LN_STAT1_IN_USE);
             slots[s].last_use_ms = now_ms;
+            noteThrottleActivity(s, now_ms, true);
             dispatch_slot = 0;
             pending_select_address = slots[s].address;
             refreshFromLookup(s);
@@ -592,6 +626,7 @@ void LnSlotServer::handleMoveSlots(const LnFrame& f, uint32_t now_ms) {
         // holds IN_USE: stealing is free in this bridge by design.
         slots[src].stat1 = (uint8_t)((slots[src].stat1 & ~LN_STAT1_BUSY_MASK) | LN_STAT1_IN_USE);
         slots[src].last_use_ms = now_ms;
+        noteThrottleActivity(src, now_ms, true);
         if (dispatch_slot == src) {
             dispatch_slot = 0;
         }
@@ -607,6 +642,7 @@ void LnSlotServer::handleMoveSlots(const LnFrame& f, uint32_t now_ms) {
         dispatch_slot = src;
         slots[src].stat1 = (uint8_t)((slots[src].stat1 & ~LN_STAT1_BUSY_MASK) | LN_STAT1_COMMON);
         slots[src].last_use_ms = now_ms;
+        noteThrottleActivity(src, now_ms, false);
         queueSlotRead(src);
         return;
     }
@@ -638,5 +674,6 @@ void LnSlotServer::handleWriteSlotData(const LnFrame& f, uint32_t now_ms) {
     s.id1 = b[11] & 0x7F;
     s.id2 = b[12] & 0x7F;
     s.last_use_ms = now_ms;
+    noteThrottleActivity(slot_number, now_ms, false);
     queueLongAck(LN_LACK_OPC_WR_SL_DATA, 0x7F);
 }

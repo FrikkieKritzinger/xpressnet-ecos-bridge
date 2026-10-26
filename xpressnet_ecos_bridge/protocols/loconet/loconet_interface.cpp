@@ -128,6 +128,18 @@ void LocoNetInterface::update() {
 
     parser.tick(now);
 
+#if LOCONET_SLOT_IDLE_EXPIRY_MS > 0
+    static unsigned long last_expiry_check_ms = 0;
+    if (now - last_expiry_check_ms >= 1000) {
+        last_expiry_check_ms = now;
+        uint8_t expired = slot_server.expireIdleSlots(now, LOCONET_SLOT_IDLE_EXPIRY_MS);
+        if (expired > 0) {
+            DEBUG_LOCONET_PRINTF("LocoNet: %u idle slot(s) expired (no throttle activity for %lu s)\n",
+                                 expired, (unsigned long)(LOCONET_SLOT_IDLE_EXPIRY_MS / 1000));
+        }
+    }
+#endif
+
 #if LOCONET_PUSH_SLOT_READ
     slot_server.pushDirtySlots(now);
 #endif

@@ -244,6 +244,13 @@
     #define LOCONET_RESYNC_HOLD_MS     250    // margin above the ~200 ms the UT6 needs
     #define LOCONET_RESYNC_QUIET_MS    2000
     #define LOCONET_PUSH_BYTE_FRAMES   0   // also OPC_LOCO_SPD/DIRF/SND for every change
+
+    // A throttle that is unplugged never says so. A slot it holds (IN_USE) and has
+    // not spoken about for this long drops to COMMON, so the OLED slot count and
+    // the connected icon follow reality; it returns to IN_USE the moment the
+    // throttle speaks again. An idle but attached UT6 is silent, so keep this
+    // long. 0 disables.
+    #define LOCONET_SLOT_IDLE_EXPIRY_MS 600000
 #endif
 
 // ============================================================================
