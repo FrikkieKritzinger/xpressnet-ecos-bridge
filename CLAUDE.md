@@ -1597,7 +1597,7 @@ real needs come up rather than pre-committing to a fixed scope.
    sending throttle - all because the software-serial XpressNet receive lost
    frames (details in docs/CHANGELOG.md, 2026-10-26). **Open after the
    release**: low free heap (~6 KB), MultiMaus does not refresh a function
-   changed elsewhere (item 7), LocoNet slot expiry, turnouts from the UT6.
+   changed elsewhere (item 7), LocoNet slot expiry, turnouts from the UT6. `v1.5.1` (same day) added the heap fix: log ring 2 KB, Setup Mode page buffer per request.
    Earlier status (2026-10-22), kept for history: work was on the
    `loconet` branch, main stayed v1.4.0 until LocoNet was confirmed. v2.1 board bring-up passed. Built and tested so
    far:
@@ -1798,7 +1798,7 @@ real needs come up rather than pre-committing to a fixed scope.
 
 ---
 
-**Last Updated**: 2026-10-26 (**v1.5.0**: LocoNet merged into `main`, 160 MHz, Wi-Fi sleep off, XpressNet push off - see Phase 7 item 3). **Phase 4.6 is complete** - every checklist item
+**Last Updated**: 2026-10-26 (**v1.5.1**: LocoNet merged into `main`, 160 MHz, Wi-Fi sleep off, XpressNet push off, free heap 6-7 KB -> ~13 KB - see Phase 7 item 3). **Phase 4.6 is complete** - every checklist item
 confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
 all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
 everything deferred or stubbed in the existing XpressNet+Ecos feature set,
