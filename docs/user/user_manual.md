@@ -32,7 +32,7 @@ OmniConnect works on one simple rule: **a change made on any one of these is mir
 ## 1.2 What you need
 
 - an OmniConnect unit with a **15 V DC** power supply (it needs at least 13.6 V; the unit tolerates up to 24 V, but 15 V is recommended)
-- an ESU ECoS connected to your home network
+- an ESU ECoS, connected to your router by Ethernet cable
 - a Wi-Fi network (2.4 GHz) - OmniConnect uses it to reach the ECoS and to serve Z21 throttles
 - your throttles
 - for setup, a phone or computer with Wi-Fi and a web browser
@@ -81,7 +81,7 @@ Throw a turnout on any throttle or on the ECoS and every other throttle that can
 | Power | The 15 V DC power supply (minimum 13.6 V). Connect it last, after the throttles. |
 | XpressNet | The socket marked **Xnet**. A MultiMaus or other XpressNet throttle plugs in here. OmniConnect also powers them. |
 | LocoNet | The socket marked **LNet-T**. A Digitrax throttle such as the UT6 plugs in here. |
-| ECoS | Over your home network, using Wi-Fi. No cable. |
+| ECoS | The ECoS connects to your router by Ethernet cable. OmniConnect reaches it over your home network by Wi-Fi, so there is no cable between OmniConnect and the ECoS. |
 | Z21 throttles and apps | Over your home network, using Wi-Fi. No cable. |
 
 ![Connection diagram](images/connections.png){w=13}
