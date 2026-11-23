@@ -25,7 +25,7 @@ OmniConnect joins your XpressNet throttles (such as the Roco MultiMaus), Z21 LAN
 
 ![How everything connects](images/connections.png){w=9.5}
 
-> **Important** The Xnet and LNet-T sockets are for **throttles only**. They cannot power or drive a **booster** or a track; connect no booster to either socket. The track signal always comes from the ECoS.
+> **Important** The Xnet and LNet-T sockets are for **throttles only**. They carry no DCC signal, so they cannot drive a **booster** or a track; connect no booster to either socket. The track signal always comes from the ECoS.
 
 > **Note** Wiring details for builders are in the OmniConnect Assembly and Connection Guide.
 

@@ -146,7 +146,7 @@ The display's I2C address is normally 0x3C. The firmware uses it automatically.
 
 The socket is labelled **Xnet** on the enclosure lid.
 
-> **Important** J1 and J2 are **throttle sockets only**. They do not support boosters: the bus signals are not suitable for driving a booster, and the track signal always comes from the ECoS. Do not connect a booster, a command station or any track-power equipment to either socket.
+> **Important** J1 and J2 are **throttle sockets only**. They do not support boosters: the sockets do not carry the DCC signal a booster needs, and the track signal always comes from the ECoS. Do not connect a booster, a command station or any track-power equipment to either socket.
 
 The sockets are standard RJ12. With the clip facing down and the socket facing you, pin 1 is on the left.
 
