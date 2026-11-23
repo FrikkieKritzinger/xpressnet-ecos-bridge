@@ -89,3 +89,6 @@ hardware/enclosure/*.cxdlpv4
 hardware/fp-info-cache
 hardware/*-backup
 hardware/_autosave-*
+
+# Office lock files
+~$*
