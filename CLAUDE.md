@@ -1782,6 +1782,8 @@ last code change 2026-11-23). Full dated narrative for everything below is in
 - The D1 on the bench runs the matching `wemos_dev` build (network flashing with
   `python tools/devflash.py`; never publish a .bin from that environment).
 
+**Documentation**: user docs in `docs/user/` (Quick Start, User Manual, Assembly and Connection Guide; Markdown sources, `python tools/build_docs.py` builds the .docx). Hardware design files in `hardware/` (KiCad v2.1). Enclosure base STL still to be added by the user; a layout-panel XpressNet socket project is planned separately.
+
 **Open / candidates** (nothing blocking)
 1. Measure free heap on the plain `wemos` build (needs a USB flash with the D1 out of
    its socket) and confirm the production build behaves like the dev one.

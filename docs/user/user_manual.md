@@ -79,7 +79,7 @@ Throw a turnout on any throttle or on the ECoS and every other throttle that can
 | Connection | How |
 |---|---|
 | Power | The 15 V DC power supply (minimum 13.6 V). Connect it last, after the throttles. |
-| XpressNet | The XpressNet socket(s). MultiMaus and other XpressNet throttles plug in here. OmniConnect also powers them. |
+| XpressNet | The XpressNet socket. A MultiMaus or other XpressNet throttle plugs in here. OmniConnect also powers them. |
 | LocoNet | The LocoNet socket. A Digitrax throttle such as the UT6 plugs in here. |
 | ECoS | Over your home network, using Wi-Fi. No cable. |
 | Z21 throttles and apps | Over your home network, using Wi-Fi. No cable. |

@@ -1,3 +1,9 @@
+## 2026-11-23 - Assembly guide and hardware files
+
+- `hardware/` added: KiCad v2.1 project, BOM, PCBWay gerbers, enclosure lid STL (KiCad history, backups and slicer files git-ignored).
+- `docs/user/assembly_guide.md` (+ built .docx) written for builders. Confirmed with the user: 15 V / 2 A supply (13.6 V min, 24 V max), 5.5x2.1 mm centre-positive; Mean Well N7812 (not an LM7812; the KiCad BOM/schematic still say LM7812); 128x64 I2C OLED; Setup held 3 s in firmware while the silkscreen says 5 s (deliberate, left as is); one XpressNet and one LocoNet-T socket only; D1 diode removed; enclosure EIE AP-E1-SQUARE-BK with a printed lid (base STL to follow).
+- Quick Start / User Manual corrected to a single XpressNet socket.
+
 ## 2026-11-23 - v1.5.5: OmniConnect naming, user documentation
 
 - OLED page 1 title is now "OmniConnect"; its Heap line was removed and "Locos" moved into the first blue line. Page 2 has only a "Device Status" heading. Setup and update web pages say "OmniConnect"; the setup Wi-Fi network is now `OmniConnect-Setup` (was `XNetBridge-Setup`).

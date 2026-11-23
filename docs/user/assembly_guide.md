@@ -22,10 +22,10 @@ OmniConnect is a motherboard that carries four plug-in modules and a handful of 
 | **Wemos D1 Mini** (ESP8266) | The processor: Wi-Fi, all protocols, display |
 | **MAX485 module** | Talks to the XpressNet cable (RS485) |
 | **Wemos DC power shield** | The power socket; makes the 5 V and 3.3 V supplies |
-| **LM7812** regulator | Makes the 12 V for XpressNet and LocoNet throttles |
+| **Mean Well N7812** regulator | A switching regulator that makes the 12 V for XpressNet and LocoNet throttles |
 | **LM311** comparator | Reads the LocoNet signal safely |
 | **BC547 transistors** (3) | Drive the LocoNet line and its power |
-| **0.96" OLED 128x64, I2C** | The status display |
+| **OLED 128x64, I2C** | The status display |
 | Resistors, test points, pushbutton, RJ12 sockets | Everything else |
 
 # 2. Before you start
@@ -47,8 +47,8 @@ The list below follows the design's parts list. Part values are those in the des
 | U3 | 1 | Wemos DC power shield | Plugs into a socket. Gives the power input socket |
 | U6 | 1 | MAX485 module, 5 V logic, TTL to RS485 | Plugs into a socket |
 | U4 | 1 | LM311, DIP-8 | In an 8-pin DIP socket |
-| U2 | 1 | LM7812, TO-220 | Soldered to the board |
-| U5 | 1 | OLED 0.96" 128x64 I2C (SSD1306), 4-pin | Connects to J3 |
+| U2 | 1 | Mean Well N7812 switching regulator (pin-compatible with the LM7812) | Soldered to the board |
+| U5 | 1 | OLED 128x64 I2C (SSD1306), 4-pin; the common yellow/blue type, or plain white or blue | Connects to J3 |
 | Q1, Q2, Q3 | 3 | BC547 | TO-92 |
 | R1, R2 | 2 | 2.2 k | RS485 bias, long-lead type |
 | R4 | 1 | 47 k | |
@@ -98,7 +98,7 @@ The board is single-sided in function and has silkscreen labels on the component
 |---|---|
 | Resistors R1 to R12 | D1 Mini (U1) |
 | Transistors Q1, Q2, Q3 | MAX485 module (U6) |
-| LM7812 (U2) | DC power shield (U3) |
+| Mean Well N7812 (U2) | DC power shield (U3) |
 | RJ12 sockets J1, J2 | LM311 (U4), in a DIP-8 socket |
 | Header J3, header J4 | |
 | Pushbutton SW1 | |
@@ -112,14 +112,14 @@ Work from the smallest parts up to the tallest. Check each step off before movin
 
 ## 4.1 Step by step
 
-1. **Resistors.** Fit R1 to R12 using the table in 2.2. Bend the leads, push them through, solder and trim. Some resistors lie flat and some stand upright; follow the outlines printed on the board.
+1. **Resistors.** Fit R1 to R12 using the table in 2.2, as shown by the silkscreen on the board. Many are fitted vertically to save space, and a few lie horizontally. Bend the leads, push them through, solder and trim. Some resistors lie flat and some stand upright; follow the outlines printed on the board.
 2. **Test points.** Solder the eight test points. They are used in chapter 6.
-3. **DIP socket for U4.** Fit the 8-pin socket. The notch must match the notch printed on the board. **Do not insert the LM311 yet.**
+3. **DIP socket for U4.** Fit the 8-pin socket. The notch must match the notch printed on the board; pin 1 is towards the D1 Mini (bottom left of the socket when the board's RJ12 sockets face you). **Do not insert the LM311 yet.**
 4. **Transistors Q1, Q2, Q3.** Fit the three BC547 with the flat face matching the silkscreen outline. Do not let them touch each other.
 5. **Pin headers J3 and J4.** J3 is the 4-pin right-angle header for the display; J4 is the 2-pin header with a jumper.
 6. **Pushbutton SW1.**
 7. **Sockets for the three modules.** Fit the pin sockets for the D1 Mini (U1), the MAX485 module (U6) and the DC power shield (U3). Solder one pin at each end first, check the socket sits flat and straight, then solder the rest.
-8. **LM7812 (U2).** Bend the three leads at a right angle to match the holes, with the metal tab facing the way the silkscreen outline shows. Solder it flat to the board. If you power several throttles and the regulator becomes too hot to touch, add a small clip-on heat sink.
+8. **Mean Well N7812 (U2).** This is a switching regulator that is pin-compatible with the common LM7812 but far more efficient, so it needs no heat sink and no cooling. Fit it in the outline printed on the board, matching the pin positions, and solder it.
 9. **RJ12 sockets J1 and J2.** Fit and solder both. They sit on the edge of the board, and J1 (XpressNet) and J2 (LocoNet) need good mechanical strength, since cables are plugged into them repeatedly. Solder the shield and the mounting tabs too.
 10. **Check.** Inspect every joint with a magnifying glass or phone camera for bridges. Check there is no solder between neighbouring pins, especially on the RJ12 sockets and the DIP socket.
 
@@ -127,7 +127,7 @@ Work from the smallest parts up to the tallest. Check each step off before movin
 
 ## 4.2 The display
 
-The 0.96" OLED has four wires: GND, VCC, SCL, SDA. Connect it to J3, matching the board's silkscreen:
+The OLED has four wires: GND, VCC, SCL, SDA. Connect it to J3, matching the board's silkscreen:
 
 | J3 pin | Silkscreen | Goes to |
 |---|---|---|
@@ -180,7 +180,7 @@ If you ever need OmniConnect to join a LocoNet that already has its own master, 
 
 The button, marked **SETUP**, is on the top left corner of the board when you face the unit with the XpressNet socket at the front left and the LocoNet-T socket at the front right. Hold it for **3 seconds** while the unit is running to enter Setup Mode.
 
-> **Note** Some boards have "Hold 5 Seconds" printed beside the button. The firmware reacts after **3 seconds**; the extra time does no harm.
+> **Note** The board is marked "Hold 5 Seconds" beside the button, to make it clear that the button must be **held**, not tapped. The firmware reacts after **3 seconds**, so holding it a little longer does no harm.
 
 ## 5.5 Wemos D1 Mini connections
 
@@ -221,11 +221,11 @@ Do this **before** the D1 Mini, the MAX485 module, the power shield or the LM311
 
 | Test point | Expected | If wrong |
 |---|---|---|
-| 12V | 11.5 V to 12.5 V | Switch off. Check the LM7812's orientation and U3's socket. |
+| 12V | 11.5 V to 12.5 V | Switch off. Check the N7812's orientation and U3's socket. |
 | 5V | 4.8 V to 5.2 V | Switch off. Check the shield's fitment. |
 | 3.3V | 3.2 V to 3.4 V | Switch off. Check the shield's fitment. |
 
-4. Switch off, wait for the voltages to fall to zero, then fit the **LM311** (notch matching the socket), the **MAX485 module** and the **D1 Mini**. Make sure each is the right way round: match each module's pin labels to the silkscreen on the board, and the D1 Mini's USB connector to the outline printed for it.
+4. Switch off, wait for the voltages to fall to zero, then fit the **LM311** (notch matching the socket, pin 1 towards the D1 Mini), the **MAX485 module** and the **D1 Mini**. Make sure each is the right way round: match each module's pin labels to the silkscreen on the board, and the D1 Mini's USB connector to the outline printed for it.
 5. Switch on and measure the three supplies again. They must not drop.
 6. The OLED should show the OmniConnect logo for about 10 seconds. A blank display means the firmware is not loaded yet (chapter 8) or the display connection is wrong (chapter 4.2).
 7. With nothing connected to J1 or J2, measure on the XpressNet socket (J1): pin 5 to pin 2 should be about **12 V**. Do the same on J2: pin 1 to pin 2 about **12 V**.
@@ -272,7 +272,7 @@ Connect in this order:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| No 12 V at the test point | LM7812 wrong way round, or a bad joint, or supply under 13.6 V | Check orientation and joints; measure the supply plug. |
+| No 12 V at the test point | N7812 wrong way round, or a bad joint, or supply under 13.6 V | Check orientation and joints; measure the supply plug. |
 | 12 V correct but 5 V and 3.3 V missing | Power shield not seated, or its socket joints are bad | Reseat the shield; reflow its socket pins. |
 | 5 V low once the modules are fitted | A short, or a wrongly fitted module | Remove the modules one by one to find the one that pulls it down. |
 | Display blank | No firmware, or the wires to J3 are wrong | Check 4.2 and the firmware. |
@@ -286,7 +286,7 @@ Connect in this order:
 
 | Net | Connected to |
 |---|---|
-| +12 V | LM7812 output, J1 pin 5, J2 pin 1, test point 12V |
+| +12 V | N7812 output, J1 pin 5, J2 pin 1, test point 12V |
 | +5 V | Power shield, MAX485 VCC, LM311 pin 8, R2, R10 |
 | +3.3 V | Power shield, D1 Mini, J3 pin 2 |
 | GND | Everything |
