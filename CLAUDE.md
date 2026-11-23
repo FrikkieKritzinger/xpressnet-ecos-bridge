@@ -1765,6 +1765,22 @@ real needs come up rather than pre-committing to a fixed scope.
 
 ---
 
+## Phase 8 (candidate, not started): configurable command-station role
+
+Raised 2026-11-23 by the user; explicitly NOT to be started before the user documentation is signed off.
+
+Idea: let Xnet and LNet-T each be configured as **master** (today) or **slave**, so OmniConnect can act as a pure LocoNet / XpressNet / Z21 translator with the command station on any interface (or on the ECoS). Today the ECoS is the one command station and source of truth, and OmniConnect is master on both throttle buses.
+
+Assessment (same day):
+- **Z21 LAN client mode** (connect to a real Z21 as a client; the interface is server-only today): easiest, strong fit, no hardware change.
+- **LocoNet slave mode** (throttle-side on a real master's bus): good fit; remove J4 so we stop powering the data line.
+- **XpressNet slave mode**: hardest and least capable (only sees what the station sends to our address; the vendored library is master-only). Last, or never.
+- **Hardware**: J1 pin 5 and J2 pin 1 carry our 12 V. In slave mode that must be isolated (LocoNet pin 1 is rail sync). Needs a solder jumper / cut link on the next board revision, or a custom cable like the sniffer one.
+- **Software**: `CommandRouter` assumes the ECoS is the truth (address map, subscription lifecycle, echo handling). It needs an abstract command-station role, rethought echo handling, operation with no ECoS at all, and a per-socket EEPROM setting (version bump).
+- Suggested order: Z21 client spike, then LocoNet slave, XpressNet slave last.
+
+---
+
 **Last Updated**: 2026-11-23 (documentation refresh - the firmware itself is `v1.5.5`,
 last code change 2026-11-23). Full dated narrative for everything below is in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
