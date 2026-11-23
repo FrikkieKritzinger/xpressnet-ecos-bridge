@@ -152,9 +152,10 @@ Gahtow's Z21 wiring pattern, no OLED yet). Full story of the rewrite and the
 - Native unit test suite: 93/93 passing (grew from 91 sometime after the
   XpressNetMaster rewrite - not independently investigated, no regressions).
 - ESP8266 (`env:wemos`) firmware build re-verified after the library integration.
-- Design premise: forward any XpressNet command to Ecos (and LocoNet/Z21 once
-  live); forward any Ecos update for a subscribed loco (or E-stop) to all
-  XpressNet/LocoNet/Z21 devices. Only Ecos is a required, known device.
+- Design premise (confirmed by the user 2026-10-26): a change on any interface is
+  mirrored to Ecos AND every other interface (XpressNet, Z21, LocoNet); an Ecos
+  update for a subscribed loco (or E-stop) goes to all of them. Ecos is the DCC
+  interface and the source of truth. Only Ecos is a required, known device.
 
 ### Environment Setup Reference (for a fresh session/machine)
 
@@ -604,7 +605,7 @@ why this reordering turned out to be the right call.
 ### Layered Design
 ```
 Application Layer  → State Engine (loco state), Command Router (bridging)
-Protocol Layer     → XpressNet, Ecos, LocoNet (future), Z21 (future)
+Protocol Layer     → XpressNet, Ecos, Z21 LAN, LocoNet (all live)
 Display Layer      → OLED driver (128x64 SSD1306 I2C)
 Utilities          → Timing (non-blocking timers), Debug, Memory helpers
 ```
@@ -619,10 +620,11 @@ Utilities          → Timing (non-blocking timers), Debug, Memory helpers
 
 **Command Router** (`command_router.h/cpp`)
 - Central hub routing commands between protocols
-- Attributes Ecos confirmations to the throttle protocol that caused them (`wasRecentSource()`, 4s window) so a protocol never gets its own command echoed back
+- Echo prevention: `wasRecentSource()` (4 s window) says which throttle protocol last commanded a loco; `isEchoOfRecentCommand()` then drops an Ecos update for THAT protocol only if it carries a value the throttle itself just set (function bits it turned on/off are remembered per loco in `noteThrottleFunctionChange()`); a different change from Ecos inside the window is forwarded
 - Handles unknown loco subscription requests to Ecos
 - Fans every throttle command out immediately to Ecos and all other throttle-facing protocols; Ecos-originated changes fan out to all throttle protocols
-- Caches best-known accessory positions to answer throttle state queries
+- Caches best-known accessory positions to answer throttle state queries (XpressNet poll, Z21 `GET_TURNOUT_INFO`, LocoNet `OPC_SW_STATE`); a throttle's turnout change is forwarded to Ecos and every other interface directly
+- `trackLocoForThrottle()`: a throttle that merely SELECTS a loco subscribes the bridge to it on Ecos, so the first Ecos changes are not lost
 
 **Protocol Interfaces** (inherit from `ProtocolInterface`)
 - **XpressNet** (`protocols/xpressnet/`): Master device on RS485, accepts throttle commands
@@ -652,7 +654,7 @@ All disabled features = zero compiled code overhead.
 - **Phase 3.2 (Ecos LAN Protocol)**: ✅ Complete (commit `4c3e0d6`, 2026-07-22). Full
   TCP text-protocol implementation - see Protocol Details below and
   `docs/02_PHASE_3_2_ECOS_DESIGN.md`.
-- **Phase 3.3 (LocoNet)**: moved to Phase 7 item 3 - hardware built, firmware not started.
+- **Phase 3.3 (LocoNet)**: done as Phase 7 item 3 (released `v1.5.0`, refined through `v1.5.4`, 2026-10-26).
 - **Phase 3.4 (Z21 LAN)**: done as Phase 6 step 4 (confirmed live 2026-08-28).
 - **Phase 4.1-4.5 (Testing Infrastructure)**: ✅ Complete. Native build (MinGW-w64 +
   PlatformIO) established, Unity framework integrated, 111/111 tests passing at
@@ -671,7 +673,7 @@ All disabled features = zero compiled code overhead.
   blocked on hardware the user doesn't have yet and moves to Phase 7
   instead of holding this phase open; the open/TBD slot (step 6) carries
   forward as Phase 7's own open slot. See the dedicated section below.
-- **Phase 7 (TBD)**: 🔧 In progress - see the dedicated section below.
+- **Phase 7 (TBD)**: 🔧 In progress - items 1-4 and 7 done (Z21 turnouts, turnout v2, LocoNet, "stolen" refresh, function display sync), 5-6 open/low priority; see the dedicated section below.
 
 ---
 
@@ -705,6 +707,7 @@ All disabled features = zero compiled code overhead.
 - Fixed-size arrays (MAX_LOCOS = 50, MAX_XNET_MESSAGE_LENGTH = 32)
 - Stack-allocated objects (structs like `LocoState`, `XNetCommand`)
 - Total heap usage: ~2KB (mostly WiFi stack on ESP8266)
+- Free heap on the `wemos_dev` build is ~13 KB (the OLED warns below 10 KB); the 30 s `Heap:` log line tracks it. Static RAM matters: the debug log ring is 2 KB (`NET_LOG_BUFFER_SIZE`), and Setup Mode builds its pages in a per-request buffer instead of a permanent array
 
 ### Error Handling
 - Validate inputs at system boundaries (user config, serial data, network packets)
@@ -728,8 +731,8 @@ All disabled features = zero compiled code overhead.
 2026-09-23 whether to branch onto an ESP32-based "D1 Mini" board (dual-core,
 which the user has since ordered a few of) instead of or alongside the
 ESP8266 build. Decided explicitly: **not now, and not as a permanently
-co-maintained fork** - finish the remaining ESP8266 roadmap (LocoNet, the
-deferred items) and get it stable first; treat ESP32 as this project's "v3",
+co-maintained fork** - finish the remaining ESP8266 roadmap (LocoNet is now done, 2026-10-26;
+only deferred items remain) and get it stable first; treat ESP32 as this project's "v3",
 a deliberate future migration to evaluate once the ESP8266 version is done,
 not a parallel branch to maintain indefinitely alongside it.
 
@@ -791,12 +794,16 @@ Cosmetic only, not a bug worth fixing.
 Pin: D7 (GPIO13) to GND, INPUT_PULLUP - hold 3s while running to enter Setup Mode
 ```
 
-### LocoNet (planned - hardware on motherboard PCB, firmware not started)
+### LocoNet (live since 2026-10-23, motherboard PCB v2.1)
 ```
-TX: D3 (GPIO0)   RX: GPIO3 (hardware UART0 RX, shared with USB programming)
+TX: D3 (GPIO0) through a BC547, INVERTED (GPIO high = bus low)
+RX: GPIO3 (hardware UART0 RX) - 16660 baud 8N1, not inverted
 ```
-Per Gahtow's D1 Mini design (internal pull-ups). USB-serial upload and serial debug
-stop working while LocoNet is active - flash with the D1 pulled from its socket, or OTA.
+Per Gahtow's D1 Mini design (internal pull-ups). UART0 belongs to LocoNet, so USB-serial
+upload and serial debug do not work while the D1 is seated: flash with the D1 pulled, or
+over the network (`wemos_dev` + `tools/devflash.py`, below), and read debug text from the
+TCP log on port 23 (`tools/netlog.py`). The board's LocoNet master jumper (12 V) must be
+fitted or a throttle never transmits. The UT6 powers from the LocoNet socket.
 
 ### Serial Monitor (Debug)
 ```
@@ -868,6 +875,58 @@ protocol that originated the command, within `ECOS_ECHO_ATTRIBUTION_WINDOW_MS`
 design was replaced in Phase 6 step 4.
 **Scope**: locomotives and accessories (Phase 5 step 10 / Phase 7 steps 1-2).
 Full design: `docs/02_PHASE_3_2_ECOS_DESIGN.md`.
+**Function inversion**: Ecos handles F8-F11 inverted (the real loco follows Ecos's screen,
+while the wire value is the opposite of what the throttles show), so
+`ECOS_INVERTED_FUNCTIONS` (config.h, default `0x0F00`) flips those bits on the way to and
+from Ecos, inside `EcosInterface` only.
+**Accessories**: `set(11, switch[...])` to throw; each accessory object is subscribed
+with `request(view)` plus `get(id, state)` so the bridge knows every position from the
+start (a throttle's state query can be answered for a turnout nobody has moved).
+
+### XpressNet reliability (2026-10-26, the lessons behind v1.5.x)
+
+Several overlapping causes made XpressNet frames get lost or corrupted; each is fixed:
+- **CPU clock**: the board silently ran at 80 MHz; `board_build.f_cpu = 160000000L`
+  (in `env:wemos`) gives the software-serial receive (16 us per bit) enough margin.
+- **Wi-Fi modem sleep** adds interrupt-latency spikes that corrupt one-shot frames (a
+  function press); `WiFi.setSleepMode(WIFI_NONE_SLEEP)` is set before `WiFi.begin()`.
+  The unit is mains powered and the user prefers responsiveness over power saving.
+- **The vendored library's TX queue** held 5 messages with no overflow check, so any burst
+  of more than five overwrote unsent ones (scrambling the bus). Now `XNetBufferSize` 12,
+  and a call byte plus its message are sent as ONE queue entry. Never queue a call byte
+  and a message separately.
+- **Refreshing a MultiMaus display** for a change made elsewhere: a MultiMaus applies
+  another throttle's message it OVERHEARS, plus a directed `E3 40` "loco busy" notice
+  (learned by sniffing a real Z21 with `env:wemos_sniff`). `QueueLocoRefresh()` /
+  `flushPendingRefresh()` in the library send, at the start of a polling window and at
+  most once per 100 ms per loco: the changed group's `E4 20/21/22` message (and speed)
+  after an inquiry call byte of the unused slot 30, then `E3 40` to each slot holding
+  the loco (or up to 3 known devices if none is registered). Switches:
+  `XPRESSNET_REFRESH_IN_POLL_WINDOW 1`, `XPRESSNET_REFRESH_MODE 2`. The old out-of-window
+  injection (`XPRESSNET_PUSH_OWNING_SLOT`) stays OFF: it corrupted frames.
+- **Confirmation reply**: a function frame from a throttle is answered with the loco's
+  info in that throttle's own window (`XPRESSNET_CONFIRM_FUNCTION_REPLY 1`).
+- A MultiMaus has no speed display or motorised knob, so speed never mirrors onto it.
+  The master declares 128 speed steps (a real Z21 declares 28, hence `E4 12` vs our `E4 13`).
+- Diagnostics (never print inside the bus code): the 30 s log line reports `XNet bus: N
+  frames ok, M dropped (bad checksum), K refreshes sent` and the main-loop rate;
+  `XPRESSNET_TRACE_TX 1` prints the bytes actually transmitted for each refresh.
+
+### Build environments & tools
+
+- `env:wemos` - production firmware (no dev updater). Flash over USB with the D1 pulled
+  out, or through Setup Mode's `/update` page. Never publish a .bin from `wemos_dev`.
+- `env:wemos_dev` - the same plus a network updater (HTTP on port 8266, NO authentication)
+  and the TCP debug log; flash with `python tools/devflash.py` while the D1 stays seated.
+  Always develop with this environment (flashing plain `wemos` over the network removes
+  the updater).
+- `env:wemos_sniff` - receive-only XpressNet sniffer (`python tools/devflash.py --env
+  wemos_sniff`): XpressNet itself is NOT run; it logs every message of a bus something
+  else runs. Wire ONLY the data pair and ground to that bus, never the 12 V pin.
+- `env:native` - host unit tests (`python -m platformio test -e native`, 408 tests).
+- `tools/netlog.py [--seconds N --out FILE]` reads the TCP debug log. **Run exactly one
+  client**: a second client replays the buffered history (the log now skips the replay
+  for a client that reconnects within 10 s) and the extra load disturbs XpressNet.
 
 ---
 
@@ -909,8 +968,11 @@ XpressNet framing and parsing belong to the vendored XpressNetMaster library, so
 
 ### Debugging
 
-1. Open Serial Monitor (115200 baud)
-2. Watch startup messages and protocol activity
+1. Read the log: `python tools/netlog.py` (TCP log, port 23) on the network builds - the
+   serial port is unavailable while LocoNet owns UART0 - or the Serial Monitor (115200
+   baud) when LocoNet is off
+2. Watch startup messages and protocol activity; the 30 s lines show heap, loop rate and
+   XpressNet frame counters
 3. Adjust `config.h` debug flags:
    - `DEBUG_XPRESSNET=1`: XpressNet messages
    - `DEBUG_ECOS=1`: Ecos messages
@@ -968,7 +1030,9 @@ xpressnet_ecos_bridge/
 │   │   └── ecos_protocol.h/.cpp        Outgoing command builders
 │   │
 │   ├── loconet/
-│   │   └── loconet_interface.h         Stub (Phase 7 item 3)
+│   │   ├── loconet_interface.h/.cpp    UART0 RX + SoftwareSerial TX, collision handling, routing, resync, slot expiry
+│   │   ├── loconet_protocol.h/.cpp     Framing, checksum, opcode names, plain-text frame descriptions (native-tested)
+│   │   └── loconet_slots.h/.cpp        Slot server, turnout reports, expiry (native-tested)
 │   │
 │   └── z21lan/
 │       ├── z21lan_interface.h/.cpp     WiFiUDP socket + client session table
@@ -984,7 +1048,11 @@ xpressnet_ecos_bridge/
 │   ├── timing.h                        Non-blocking TimedTask class
 │   ├── now_ms.h                        Time source (mockable in tests)
 │   ├── debug.h                         DEBUG_PRINTF macro
-│   └── memory.h                        ESP8266 memory utilities
+│   ├── memory.h                        ESP8266 memory utilities
+│   ├── log_ring.h/.cpp                 Byte ring behind the TCP debug log (native-tested)
+│   ├── net_log.h/.cpp                  TCP debug log on port 23 (Arduino only)
+│   ├── dev_ota.h/.cpp                  Network updater, `wemos_dev` only (NO authentication)
+│   └── xnet_sniffer.h/.cpp             Receive-only XpressNet sniffer, `wemos_sniff` only
 │
 ├── test_support/                       Native-build stubs only (excluded from firmware)
 │
@@ -1000,7 +1068,11 @@ xpressnet_ecos_bridge/
 │
 ├── test/                               Native unit tests (Unity), mocks, fixtures - see test/README.md
 ├── libraries/                          External libs (PlatformIO lib_extra_dirs)
-│   └── XpressNetMaster/                 Gahtow's real XpressNet master library
+│   └── XpressNetMaster/                 Gahtow's XpressNet master library, PATCHED here (TX queue 12,
+│                                        refresh queue, bus counters) - keep our changes when updating it
+├── tools/
+│   ├── devflash.py                      Build + flash over the network (--env wemos_dev|wemos_sniff)
+│   └── netlog.py                        Read the TCP debug log (one client at a time)
 └── README.md                           User-facing overview
 ```
 
@@ -1589,164 +1661,51 @@ real needs come up rather than pre-committing to a fixed scope.
      directions, which the user is satisfied with for now - this is
      deferred as its own low-priority follow-up (Phase 7, new item 6
      below), not blocking anything else.
-3. ✅ **LocoNet support - merged into `main` and released as `v1.5.0`
-   (2026-10-26)**, confirmed on hardware with a Digitrax UT6 alongside
-   XpressNet, Z21 and Ecos. Today's release also changed the platform: CPU
-   160 MHz, Wi-Fi modem sleep off, XpressNet "stolen" push off
-   (`XPRESSNET_PUSH_OWNING_SLOT 0`), function confirmation reply to the
-   sending throttle - all because the software-serial XpressNet receive lost
-   frames (details in docs/CHANGELOG.md, 2026-10-26). **Open after the
-   release**: low free heap (~6 KB), MultiMaus does not refresh a function
-   changed elsewhere (item 7, solved 2026-10-26: see below), LocoNet slot expiry, turnouts from the UT6. `v1.5.1` (same day) added the heap fix: log ring 2 KB, Setup Mode page buffer per request.
-   Earlier status (2026-10-22), kept for history: work was on the
-   `loconet` branch, main stayed v1.4.0 until LocoNet was confirmed. v2.1 board bring-up passed. Built and tested so
-   far:
-   - **P1 passive RX - confirmed on hardware**: hardware UART0 at 16660
-     baud (non-inverted) decodes real frames from a Digitrax UT6.
-   - **P2 slot server + transmit - confirmed on hardware**: the UT6
-     selects locos (LOCO_ADR/MOVE_SLOTS/WR_SL_DATA), shows LN and Trk icons,
-     and its speed/direction/function frames are received; replies go out
-     9 ms after a request with no collisions. Flashed and running.
-   - **P3 routing - confirmed on hardware (2026-10-23)**: a Digitrax UT6
-     driving a real loco on Ecos: speed, direction (UT6 forward = Ecos/
-     XpressNet forward, no inversion needed), functions, long address
-     (5452) and track stop/go all reach Ecos, XpressNet and the WLANmaus
-     immediately. The UT6's built-in "direction change ramps speed back up"
-     behaviour is the UT6's own, relayed faithfully. `tools/devflash.py`
-     network flashing proven with the D1 seated (USB can stay unplugged).
-   - **UT6 display refresh: solved with a forced bus disconnect (2026-10-23).**
-     A UT6 ignores unsolicited changes to its slot (bare OPC_LOCO_SPD/DIRF/SND
-     and unsolicited OPC_SL_RD_DATA were transmitted correctly and ignored; an
-     experiment imitating a second throttle taking its slot got no "stolen"
-     notice - it just re-sent its own direction/function state; the frames carry
-     only a slot number, no origin). What works: hold the data line low for
-     ~200 ms (tested: 150 ms did nothing; 200, 250, 400 ms all worked). The UT6
-     treats it as a bus disconnect, re-reads its slot (`BB`), adopts the real
-     speed/direction/functions, keeps the loco, one screen flash.
-     `LnSlotServer::resyncNeeded()` flags a change to a slot a throttle holds;
-     `LocoNetInterface` then drops the bus (`forceBusDisconnect()`, non-blocking)
-     when `lnResyncDue()` says so: at most every `LOCONET_RESYNC_INTERVAL_MS`
-     (5 s, user's choice - 20 s and 10 s felt sluggish), only after
-     `LOCONET_RESYNC_QUIET_MS` (2 s) of bus quiet so it never interrupts the
-     knob, hold `LOCONET_RESYNC_HOLD_MS` (250 ms). Confirmed three-way: Ecos ->
-     UT6 + WLANmaus, WLANmaus -> UT6 + Ecos, UT6 -> Ecos + WLANmaus, no
-     collisions or framing errors. Set the interval to 0 to disable. The UT6
-     shows speed as 0-99 (a percentage of 126 steps), not the Ecos step number.
-     Track power needs no resync - it follows STOP/GO directly (GPON/GPOFF).
-     Dev trigger for experiments: `GET :8266/action?name=disconnect[:<ms>]`.
-   - **Fixed and confirmed live (2026-10-23)**: (a) bridge reboot left the UT6
-     on a phantom address-0 slot; (b) WLANmaus STOP never confirmed to the
-     sender, so it could not cancel the stop (Z21 now confirms stop/go to all
-     clients); (c) track power start-up state: the bridge now asks Ecos for its
-     real status on connect (`get(1, status)`; Ecos boots in STOP) and a stop
-     is sent to LocoNet as OPC_GPOFF (track power off - what the UT6 power
-     button sends) not OPC_IDLE; the LocoNet TRK byte starts "power off" until
-     known; (d) the "steal this loco?" prompt: LOCO_ADR replies never report
-     IN_USE (offered as COMMON - stealing is free here), and a select of a slot
-     the bridge no longer has (after a bridge restart under a live UT6) is
-     answered with the empty slot read, so the UT6 just returns to loco-select.
-     Reconnecting the UT6 after a bridge restart also avoids any stale slot.
-     F10-F12 confirmed working (UT6 -> Ecos).
-   - **LocoNet OLED page (2026-10-23, flashed, not yet eyeballed by the user)**:
-     connected icon = at least one slot IN_USE (no bus-activity timeout; caveat:
-     slots never expire, so an unplugged UT6 keeps it green until reselect/
-     reboot); lines: `Frames: N` (+ `Err: N` only when errors), `Last Msg`,
-     `Slots: n/20`, then the last two received frames in plain text
-     (`lnDescribeFrame()`, e.g. "S3 speed 64", "Find loco 5452").
-   - **Heap is tight (2026-10-23)**: OLED shows ~8 KB free (warning fires
-     below 10 KB); the 30 s `Heap:` line in the TCP log shows 5.7-7 KB in
-     steady state, 10.8 KB right after boot, largest block ~= free (not
-     fragmented). Suspected main cause: the `wemos_dev` build (dev web server)
-     plus the 4 KB log ring. Next: compare against a plain `wemos` build;
-     candidates to trim are the log ring, then the dev updater. **CPU now runs
-     at 160 MHz** (`board_build.f_cpu` in `env:wemos`, 2026-10-26): the board had
-     silently run at the 80 MHz default, and under multi-protocol load the
-     software-serial XpressNet receive lost frames (MultiMaus err13, slow or
-     missing speed/function updates). At 160 MHz the user confirmed much better
-     responsiveness.
-   - **First wired-XpressNet test alongside LocoNet+Z21+Ecos (2026-10-23,
-     capture p13)**: XNet stayed Connected with no bus errors, but the wired
-     throttle sent only 10 speed frames and ONE function frame (all-off) in 3
-     minutes; the bridge sent it 12 function updates and ~39 "stolen" pushes.
-     Functions to/from the wired throttle were reported as not working;
-     undiagnosed. Suspect: repeated pushes keep the MultiMaus in "stolen"
-     state so it stops sending function keys, plus the known display-sync gap
-     (item 7). Needs a repeat with the other throttles idle and the exact
-     throttle model/keys noted.
-   - **MultiMaus function display solved (2026-10-26)**: a changed function now
-     mirrors on a MultiMaus display. Sniffing a real Z21 (`env:wemos_sniff`) showed a
-     command station sends only the sending throttle's own message plus a directed
-     `E3 40` "busy" notice; the vendored library's TX queue (`XNetBufferSize` 5, no
-     overflow check) had been overwriting our refresh bytes, which is also why the old
-     push corrupted frames. Now `XNetBufferSize` 12, call byte + message in one entry,
-     refresh sent at a polling window (`XPRESSNET_REFRESH_IN_POLL_WINDOW 1`, mode 2).
-     Details: docs/CHANGELOG.md 2026-10-26 (night).
-   - **LocoNet turnouts (2026-10-26)**: UT6 turnout throws reach Ecos and every other
-     interface (and a change anywhere reaches the UT6 bus as an OPC_SW_REP state report,
-     with OPC_SW_STATE queries answered from the known-turnout cache, seeded from Ecos).
-     **Parked - flagged for later**: a UT6 does not redraw a turnout's position from
-     anything the bus carries (state report or a throttle-style command); it only shows
-     it after its F key toggles. It resends its command regardless, Ecos reapplies it,
-     nothing breaks. Revisit only if it starts to matter.
-   - **Previously open item, now obsolete**: "turnout (OPC_SW_REQ) control from the UT6" is done.
-   - **Still open (older text)**: turnout (OPC_SW_REQ) control from the UT6 (needs a
-     LocoNet <-> accessory router path like Z21/XpressNet; the page already
-     describes SW_REQ frames); F13+ from the UT6 not exercised; optional slot
-     expiry; the wired-throttle function problem above; a version bump and
-     merge of `loconet` into `main` once the user is satisfied.
-   - Tooling: debug text is a TCP log on port 23 (`tools/netlog.py`) because
-     UART0 belongs to LocoNet; any global-constructor logging must not touch
-     non-constant-initialized state (caused a boot loop, fixed). Spec:
-     `docs/loconet-personal-use-edition-1.0.pdf` (gitignored). Wire-verified
-     findings: `E:\Claude\shared\loconet.md`. **Dev network updater
-     (agreed and built 2026-10-22)**: `python tools/devflash.py` builds the
-     `wemos_dev` environment and flashes it over WiFi (port 8266, `/update`)
-     so the D1 can stay seated. The updater exists ONLY in `wemos_dev`
-     (`ENABLE_DEV_OTA`, off in config.h and in the plain `wemos` build - no
-     authentication, never publish a .bin from `wemos_dev`). The first
-     `wemos_dev` flash must still go over USB with the D1 pulled; always
-     develop with `wemos_dev` afterwards, since flashing plain `wemos` over
-     the network removes the updater. Not done yet: SW_REQ (turnout) handling
-     and an OLED slot page.
-   - **Bring-up plan for the v2.1 board (agreed 2026-10-11)**: flash
-     nothing new first - keep the proven v1.4.0 firmware on the D1 (current
-     `main`, `325b1d8`, is functionally identical) so any fault is
-     hardware. Order: (1) power only, D1 out of its socket - verify clean
-     rails where expected and nowhere else, no warm transistors (especially
-     the one that overheated on v2); (2) D1 seated, LocoNet idle - confirm
-     XpressNet and Ecos behave as on the old board; (3) only then bring up
-     LocoNet.
-     **Result (2026-10-22): steps 1 and 2 passed** - rails 12.08V/5.01V, no
-     heat or shorts; D1 + MAX485 + OLED up; MultiMaus and WLANmaus both
-     attach and interact exactly as before the rebuild (same v1.4.0
-     firmware, nothing reflashed). Step 3 started: UT6 powers from the
-     LocoNet socket.
-   - **Design decision agreed 2026-09-23, before any implementation**:
-     LocoNet's real select/steal/dispatch slot-ownership model (a
-     throttle must actively select or steal a loco's slot before
-     controlling it, and dispatch it for others afterward) will be
-     implemented for real - satisfying what a genuine LocoNet throttle's
-     UI expects (no select, no speed response) - but scoped **entirely
-     internal to the LocoNet interface layer**, never as a gate on
-     anything reaching `CommandRouter`. Every LocoNet-originated command
-     flows straight through to Ecos/XpressNet/Z21 exactly like today,
-     regardless of slot state, and - symmetrically - a change from
-     another protocol pushes a slot-refresh to whichever LocoNet throttle
-     currently has that loco selected, so its display doesn't go stale.
-     Direct precedent already in this codebase: XpressNet's own
-     `SlotLokUse[]`/`AddBusySlot()`/`SetBusy()` (Phase 5 step 9) already
-     works exactly this way - purely internal MultiMaus-to-MultiMaus
-     bookkeeping, CommandRouter has no idea it exists, "stolen" is a
-     display-refresh courtesy, not a real lock. The one place genuine
-     arbitration logic is actually needed is LocoNet-throttle-vs-LocoNet-
-     throttle (a second Digitrax unit selecting an already-selected loco)
-     - `SlotLokUse`'s handling is a working template for that piece too.
-     Explicit rationale (the user's own, strongly held - "one of my pet
-     hates about Digitrax/LocoNet"): on a home layout, seamless
-     cross-protocol/cross-throttle control matters far more than
-     LocoNet's stricter exclusive-ownership model, which only really
-     earns its keep in a large club setting where a stranger placing a
-     same-address loco on the track is a real risk - not a concern here.
+3. ✅ **LocoNet support - released (`v1.5.0`, 2026-10-26) and refined through `v1.5.4`**,
+   confirmed live with a Digitrax UT6 alongside XpressNet, Z21 and Ecos. Current state:
+   - **Modules** (`protocols/loconet/`): `loconet_protocol.*` (framing, checksum, opcode
+     names, plain-text frame descriptions, resync decision - pure, native-tested),
+     `loconet_slots.*` (slot server: 20 slots, select/steal/dispatch, replies, turnout
+     reports, expiry - pure, native-tested) and `loconet_interface.*` (UART0 receive at
+     16660 baud, SoftwareSerial transmit through the BC547, collision detection,
+     routing). Slot ownership stays INTERNAL to the interface and never gates
+     `CommandRouter` (stealing is free): design decision of 2026-09-23, the user's
+     strongly held preference over Digitrax's exclusive-ownership model - on a home
+     layout seamless cross-protocol control matters more. XpressNet's own
+     `SlotLokUse[]`/`AddBusySlot()` is the same kind of internal bookkeeping.
+   - **What works**: speed, direction, F0-F28, long addresses, track power/E-stop (a stop
+     is `OPC_GPOFF`, what the UT6 power button sends; the bridge learns Ecos's run
+     state on connect with `get(1,status)`), no "steal this loco?" prompt (`LOCO_ADR`
+     replies never report IN_USE), and a bridge restart under a live UT6 is handled (a
+     select of a vanished slot answers with the empty slot read).
+   - **UT6 display refresh**: a UT6 ignores unsolicited slot changes and gives no "stolen"
+     notice. What works is a forced bus disconnect: the TX line is held low ~250 ms (150
+     ms does nothing, >=200 ms works); the UT6 re-reads its slot, adopts the real
+     values, keeps the loco and flashes once. Automatic and rate-limited
+     (`LOCONET_RESYNC_INTERVAL_MS` 5 s, `LOCONET_RESYNC_QUIET_MS` 2 s,
+     `LOCONET_RESYNC_HOLD_MS` 250 ms; only when a held slot changed elsewhere). The UT6
+     shows speed as 0-99 (percent of 126 steps), not the Ecos step number.
+   - **Slot expiry**: an IN_USE slot a throttle has not spoken about for
+     `LOCONET_SLOT_IDLE_EXPIRY_MS` (10 min, 0 disables) drops to COMMON and returns to
+     IN_USE when the throttle speaks again; changes pushed from other protocols do not
+     keep it alive (`last_heard_ms` vs `last_use_ms`).
+   - **Turnouts**: a UT6 `OPC_SW_REQ` (the ON edge is the command; wire address = number-1;
+     DIR set = closed/straight) reaches Ecos and every other interface. A change made
+     anywhere else goes out as `OPC_SW_REP` (`B1`, SN2 `0x20` closed line / `0x10` thrown
+     line) and `OPC_SW_STATE` (`BC`) queries are answered from the router's known-turnout
+     cache, which the bridge seeds from Ecos (`get(id,state)` when it subscribes to an
+     accessory). **Parked/known**: a UT6 only redraws a turnout's position after its own
+     F key, whatever the bus carries (sending the `B0` pair as well, switch
+     `LOCONET_TURNOUT_SEND_SW_REQ`, is off). It resends its command regardless and Ecos
+     reapplies it; nothing breaks.
+   - **OLED LocoNet page**: connected icon = at least one slot IN_USE; `Frames` (plus `Err`
+     only when non-zero), `Last Msg`, `Slots: n/20`, and the last two frames in plain text.
+   - **Tooling**: debug text is a TCP log on port 23 (UART0 belongs to LocoNet) read with
+     `tools/netlog.py`; spec `docs/loconet-personal-use-edition-1.0.pdf` (gitignored);
+     wire-verified notes in `E:\Claude\shared\loconet.md`. Never log from a global
+     constructor with non-constant state (caused a boot loop once).
+   - **Open**: F13+ from the UT6 not exercised; no dedicated OLED turnout page.
+
 4. ✅ **Expand "stolen" icon refresh from F0-F4 to F0-F12** (2026-09-02) -
    `PushExternalLocoUpdate()` (Phase 5 step 9) now also injects F5-F8/F9-F12
    call-byte-then-reply messages alongside the original F0-F4 one, using
@@ -1779,9 +1738,11 @@ real needs come up rather than pre-committing to a fixed scope.
      actually sending "toggle F9" on the wire (`DB3=0x89`, confirmed via
      raw capture) - not a decode bug, likely a WLANmaus-side function
      remap/label mismatch or a mis-press, not investigated further.
-5. ⬜ **Open/TBD** - deliberately left open, carried over from Phase 6
-   step 6. Add real candidates here as they come up rather than
-   pre-committing to a fixed scope; nothing currently queued.
+5. ⬜ **Open/TBD** - candidates as of 2026-11-23: free-heap measurement on the plain
+   `wemos` build, a dedicated OLED turnout page, F13+ from the UT6, a long soak test
+   with all four interfaces (see "Open / candidates" at the end of this file). The
+   UT6 turnout display is parked on purpose.
+
 6. ⬜ **Investigate WLANmaus turnout broadcast reliability** - added
    2026-09-01, deferred/low-priority. A real WLANmaus's display almost
    never refreshes from a confirmed byte-perfect, confirmed-delivered
@@ -1792,136 +1753,40 @@ real needs come up rather than pre-committing to a fixed scope.
    anything, fold in opportunistically if it's ever worth another look
    (e.g. if a wired packet capture on the WiFi side becomes practical, to
    rule packet loss in or out directly instead of inferring from symptoms).
-7. ⬜ **Investigate loco function display sync between XpressNet and Z21**
-   - added 2026-09-02, deferred/low-priority/known-annoyance (the user's
-     own framing - not a functional flaw, since delivery to Ecos/DCC is
-     100% reliable both ways, only the throttle-side *display* is
-     sometimes stale). Found while confirming Phase 7 item 4's F5-F12
-     "stolen" extension: toggling a function on either XpressNet or Z21
-     doesn't reliably update the *other* protocol's displayed function
-     state, even though live captures confirm the bridge's own routing is
-     correct every single time (right bitmap, `sendFunctionCommand()` and
-     `pushLocoStateToOwningSlot()` both called correctly). Same general
-     shape as item 6 (Ecos/StateEngine and delivery are fine, only a
-     throttle's own display rendering is suspect) but not yet
-     investigated with the same rigor - no wire-level confirmation yet of
-     what MultiMaus/WLANmaus actually do with a correctly-sent update.
-     Speed/direction sync and the "stolen" flash itself both work
-     reliably - only the function *value* display is affected. Revisit
-     with a live capture correlating exact wire bytes against on-screen
-     behavior, same methodology as items 6 and the turnout v2 saga,
-     whenever there's appetite for it.
+7. ✅ **Loco function display sync - solved 2026-10-26** (was a deferred annoyance).
+   Root cause: the vendored XpressNetMaster library's transmit queue held only 5
+   messages with no overflow check, so any burst of more than five (the old "stolen"
+   push, every refresh variant) was overwritten on the wire. With a 12-entry queue, the
+   call byte and message sent as ONE entry, and a refresh that copies what a real Z21
+   puts on the bus (the changed group's `E4 2x` message, then a directed `E3 40`
+   notice), a MultiMaus display now follows function changes from Ecos and the other
+   throttles in any order. Details: "XpressNet reliability" under Protocol Details and
+   docs/CHANGELOG.md 2026-10-26.
 
 ---
 
-**Last Updated**: 2026-10-26 (**v1.5.4**: turnouts mirrored to every interface, LocoNet turnout state reports and query answers, Ecos accessory baseline; UT6 turnout display parked; **v1.5.3**: MultiMaus function mirroring reliable at any timing, F8-F11 inversion, subscribe on selection; **v1.5.2**: LocoNet merged into `main`, 160 MHz, Wi-Fi sleep off, free heap ~13 KB, LocoNet slot expiry and UT6 turnouts, MultiMaus function display fixed via the library TX-queue fix - see Phase 7 item 3). **Phase 4.6 is complete** - every checklist item
-confirmed on real hardware. **Phase 5 (Feature Completion) is complete -
-all 10 steps done**, a 10-step ordered roadmap from a full codebase audit of
-everything deferred or stubbed in the existing XpressNet+Ecos feature set,
-tagged `v0.5.0-phase5-complete`. **Phase 6 (Future Improvements) is
-complete** - steps 1-4 of the original 6-item roadmap (agreed 2026-08-14)
-done and confirmed live, tagged `v1.1.1`; steps 5-6 moved to Phase 7
-rather than holding this phase open (see below). **Phase 7 (TBD) is now
-in progress** - see the dedicated section above. Full narrative detail
-for every step lives in `docs/CHANGELOG.md` (dated entries); this section
-is intentionally just current status.
+**Last Updated**: 2026-11-23 (documentation refresh - the firmware itself is `v1.5.4`,
+last code change 2026-10-26). Full dated narrative for everything below is in
+[docs/CHANGELOG.md](docs/CHANGELOG.md).
 
-Most recent: **Phase 6 step 4 (Z21 LAN for WLANmaus) is COMPLETE, confirmed
-live 2026-08-28** - a marathon session with WLANmaus and a tethered
-MultiMaus connected simultaneously throughout, which found and fixed
-roughly seventeen real bugs across two halves of the day (full diagnosis
-in `docs/CHANGELOG.md`; summary in the dedicated bullet above). The
-second half of the session included a genuine architectural change: at
-the user's direct prompting, throttle-facing protocols now fan out
-directly and immediately to each other (and to Ecos) rather than relying
-on Ecos's own confirmation to close the loop between them - the previous
-design's dependency on Ecos's echo timing turned out to be the root
-cause behind most of the session's harder bugs (dropped commands, a
-too-short echo-attribution window, and a shared-state bug that caused
-XpressNet to spuriously flash "stolen" for its own commands). By the end:
-all six throttle-pairing directions (XpressNet↔Ecos, Z21↔Ecos,
-XpressNet↔Z21) confirmed working live, each verified with the other two
-protocols fully powered off to rule out cross-contamination; no XpressNet
-bus errors under real simultaneous load; a separate F8-F11-inversion
-symptom traced at length and found to be genuine Ecos/decoder-side data
-(confirmed by the user directly in Ecos, across multiple locomotives),
-not a bridge bug. Native suite 254/254 passing; `env:wemos` builds clean
-and is flashed to the real hardware at `1.1.0`. Tagged `v1.1.0`.
+**Current state**
+- Released through `v1.5.4` (tags `v1.5.0`-`v1.5.4`, 2026-10-26): XpressNet (MultiMaus),
+  Z21 LAN (WLANmaus), LocoNet (Digitrax UT6) and Ecos all bridged. Operating model: a
+  change on any interface is mirrored to Ecos AND every other interface; Ecos is the
+  DCC interface and the source of truth.
+- Verified live on real hardware: speed, direction, F0-F28, track power/E-stop, and
+  turnouts across all four interfaces; function and turnout displays mirror on a
+  MultiMaus in any timing; LocoNet slot expiry; 160 MHz with Wi-Fi sleep off; ~13 KB free
+  heap on the dev build.
+- Native suite: 408 tests passing. `env:wemos` and `env:wemos_dev` build clean.
+- The D1 on the bench runs the matching `wemos_dev` build (network flashing with
+  `python tools/devflash.py`; never publish a .bin from that environment).
 
-**Since then**: a small follow-up (`v1.1.1`) added the Z21 LAN OLED page
-that had been missing since step 4 shipped - see the dedicated bullet
-above for the full story, including a real bug found in live testing
-(WLANmaus's background status polls were making "Last Msg" stay stuck
-near zero; fixed by tracking genuine actions only, not every packet).
-Native suite 258/258 passing; flashed to the real hardware at `1.1.1`.
-Tagged `v1.1.1`.
-
-**Since then, again (2026-08-31)**: Phase 6 formally closed out at the
-user's request (steps 1-4 done, tagged `v1.1.1`; step 5/LocoNet moved to
-Phase 7 since it's blocked on hardware the user doesn't have yet, not on
-anything code-side). **Phase 7 (TBD) agreed the same day** - five items,
-ordered: (1) Z21 turnout/accessory support (small, mirrors existing
-XpressNet→Ecos v1 code), (2) Accessory/Turnout v2 (the real Ecos→
-throttle direction plus a dedicated OLED page, deliberately sequenced
-after step 1 rather than before, since step 1 doesn't depend on v2's new
-backend at all), (3) LocoNet (blocked on hardware), (4) extend "stolen"
-icon refresh from F0-F4 to F0-F11 (small, low-priority), (5) open/TBD.
-Also corrected during this planning discussion: CV/programming-track
-support is out of scope by explicit design (this bridge is meant as an
-*operational* interface, not a programming one), not merely deferred as
-earlier phases' notes implied; and the Ecos hardware direction-switch
-limitation flagged during Phase 5 is now confirmed resolved (an
-incidental side effect of Phase 6 step 4's echo-handling fixes - the
-user confirmed both direction-change mechanisms now work correctly on
-both XpressNet and Z21).
-
-**Since then, again (2026-09-01)**: **Phase 7 step 1 (Z21 turnout/accessory
-support) is now confirmed COMPLETE and working live**, after a genuine
-multi-bug debugging saga across two sessions - three real, independent
-bugs (DB field byte order, a Q-bit validation mask, and this specific real
-WLANmaus not setting the spec's documented flags-byte prefix bit at all,
-found via a raw wire capture) - see the dedicated bullet above and
-`docs/CHANGELOG.md` for the full diagnosis. Native suite 272/272 passing,
-`env:wemos` flashed and live-confirmed at `1.2.0`.
-
-**Since then, again (2026-09-01, same day)**: **Phase 7 step 2
-(Accessory/Turnout v2) is now confirmed COMPLETE and working live** - the
-real Ecos→throttle direction, after another real multi-bug saga (state
-polarity, a plain broadcast XpressNet didn't trust, and the actual root
-cause: a real MultiMaus polls a previously-unimplemented XpressNet
-message for turnout state and was never getting a reply). Root-caused
-with the user's own idea - testing MultiMaus/WLANmaus against a real Roco
-Z21 command station as ground truth - which is what pointed at poll/reply
-instead of push/broadcast. See the dedicated bullet above and
-`docs/CHANGELOG.md` for the full diagnosis. XpressNet now works reliably
-both directions, confirmed live. WLANmaus's own display almost never
-refreshes from a confirmed byte-perfect, confirmed-delivered broadcast -
-except once, not reproduced since - not fully understood, deferred as
-Phase 7's new item 6 rather than pursued further right now; not blocking.
-Native suite 287/287 passing, `env:wemos` flashed and live-confirmed at
-`1.3.0`.
-
-**Since then, again (2026-09-02)**: **Phase 7 item 4 ("stolen" icon
-refresh extended to F0-F12) is now confirmed COMPLETE and working live**,
-tagged `v1.4.0`. Investigating it thoroughly (confirming not just the
-"stolen" flash but the actual displayed function *value*) surfaced a
-separate, deeper issue - loco function display sync between XpressNet
-and Z21 is unreliable in both directions, even though live captures
-confirm the bridge's own routing is correct every time. Per the user's
-explicit call, logged as a new deferred, low-priority item (item 7) -
-"an annoyance, not a critical flaw" - rather than continue chasing it,
-since delivery to Ecos/DCC itself is unaffected and fully reliable both
-ways. Two red herrings investigated and closed out along the way: an
-apparent activity-LED regression (not a bug - explained by the new
-turnout-info-poll traffic only firing while MultiMaus is on the turnout
-screen, confirmed by switching screens) and an F1 toggle that appeared to
-do nothing (the wire byte showed WLANmaus was actually sending "toggle
-F9", not F1 - a real command, just not the one intended/expected).
-Native suite 287/287 passing, `env:wemos` flashed and live-confirmed at
-`1.4.0`.
-
-**Next**: nothing agreed yet - Phase 7 has four open items: step 3
-(LocoNet, blocked on hardware), step 5 (open/TBD), step 6 (WLANmaus
-turnout broadcast reliability, deferred), and step 7 (loco function
-display sync between XpressNet/Z21, deferred, added 2026-09-02) - none
-discussed or started.
+**Open / candidates** (nothing blocking)
+1. Measure free heap on the plain `wemos` build (needs a USB flash with the D1 out of
+   its socket) and confirm the production build behaves like the dev one.
+2. **Parked by the user**: a UT6 only redraws a turnout's position after its own F key.
+3. WLANmaus turnout display rarely refreshes from the (confirmed-delivered) Z21 turnout
+   broadcast (Phase 7 item 6) - low priority.
+4. Not yet exercised: F13+ from the UT6; no dedicated OLED turnout page.
+5. A long soak test with all four interfaces active.
