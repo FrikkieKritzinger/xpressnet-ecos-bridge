@@ -375,7 +375,7 @@
     #define ENABLE_XNET_SNIFFER 0
 #endif
 
-#define SETUP_MODE_AP_SSID          "XNetBridge-Setup"
+#define SETUP_MODE_AP_SSID          "OmniConnect-Setup"
 #define SETUP_MODE_AP_PASSWORD      ""      // Open network - matches this project's no-auth posture elsewhere; the button/timeout triggers already require physical presence or an already-broken connection
 #define SETUP_MODE_WEB_PORT         80
 

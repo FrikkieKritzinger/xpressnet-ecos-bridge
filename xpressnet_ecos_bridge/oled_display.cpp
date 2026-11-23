@@ -287,27 +287,15 @@ void OledDisplay::drawMainScreen() {
     // from x=0.
     display.setTextSize(1);
     display.setCursor(0, YELLOW_TITLE_Y);
-    display.println(F("XpressNet-Ecos"));
-    
-    // Status bar in yellow - XNet/Ecos connection state has its own
-    // page-local icon now (see drawXpressNetScreen()/drawEcosScreen()), not
-    // shown here on the main overview page
-    display.setCursor(0, YELLOW_STATUS_Y);
+    display.println(F("OmniConnect"));
+
+    // ========== BLUE SECTION (Content) ==========
+
+    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
+
+    display.setCursor(0, BLUE_CONTENT_Y);
     display.print(F("Locos: "));
     display.print(current_status.active_locos);
-    
-    // ========== BLUE SECTION (Content) ==========
-    
-    display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
-    
-    // Memory info
-    display.setCursor(0, BLUE_CONTENT_Y);
-    display.print(F("Heap:"));
-    display.print(current_status.current_heap_bytes / 1024);
-    display.print(F("KB Mem:"));
-    uint8_t mem_percent = (current_status.current_heap_bytes * 100) / 81920;
-    display.print(mem_percent);
-    display.print(F("%"));
     
     // Last command
     display.setCursor(0, BLUE_CONTENT_Y + LINE_HEIGHT_SMALL);
@@ -363,11 +351,8 @@ void OledDisplay::drawDeviceStatusScreen() {
     // header icon cluster at x=86+)
     display.setTextSize(1);
     display.setCursor(0, YELLOW_TITLE_Y);
-    display.println(F("DEVICE STATUS"));
-    
-    display.setCursor(18, YELLOW_STATUS_Y);
-    display.println(F("XNet-Ecos Bridge"));
-    
+    display.println(F("Device Status"));
+
     // ========== BLUE SECTION ==========
     display.drawLine(0, COLOR_SPLIT_Y, 128, COLOR_SPLIT_Y, SSD1306_WHITE);
     

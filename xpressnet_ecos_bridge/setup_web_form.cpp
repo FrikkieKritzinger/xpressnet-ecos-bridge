@@ -133,7 +133,7 @@ size_t buildConfigPageHtml(char* buffer, size_t buffer_size, const EepromConfig&
         (config.bridge_subnet[0] != '\0') ? config.bridge_subnet : kDefaultSubnetSuggestion;
 
     int len = snprintf(buffer, buffer_size,
-        "<!DOCTYPE html><html><head><title>XNet-Ecos Bridge Setup</title>"
+        "<!DOCTYPE html><html><head><title>OmniConnect Setup</title>"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<style>"
         "body{font-family:sans-serif;max-width:480px;margin:20px auto;padding:0 12px}"
@@ -142,7 +142,7 @@ size_t buildConfigPageHtml(char* buffer, size_t buffer_size, const EepromConfig&
         "input[type=text],input[type=password],input[type=number]{width:100%%;box-sizing:border-box;padding:6px}"
         "input[type=submit]{padding:10px 20px;font-size:1em}"
         "</style></head><body>"
-        "<h1>XpressNet-Ecos Bridge - Setup</h1>"
+        "<h1>OmniConnect - Setup</h1>"
         "<form method=\"POST\" action=\"/save\">"
         "<fieldset><legend>WiFi</legend>"
         "<label>SSID<input type=\"text\" name=\"wifi_ssid\" value=\"%s\" maxlength=\"32\" required></label>"
@@ -203,7 +203,7 @@ size_t buildUpdatePageHtml(char* buffer, size_t buffer_size, const char* current
         "h1{font-size:1.3em}"
         "input[type=submit]{padding:10px 20px;font-size:1em}"
         "</style></head><body>"
-        "<h1>XpressNet-Ecos Bridge - Firmware Update</h1>"
+        "<h1>OmniConnect - Firmware Update</h1>"
         "<p>Current version: %s<br>Build: %s</p>"
         "<form method=\"POST\" action=\"/doupdate\" enctype=\"multipart/form-data\">"
         "<input type=\"file\" name=\"firmware\" accept=\".bin\" required>"

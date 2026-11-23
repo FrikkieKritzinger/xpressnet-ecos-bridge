@@ -1765,12 +1765,12 @@ real needs come up rather than pre-committing to a fixed scope.
 
 ---
 
-**Last Updated**: 2026-11-23 (documentation refresh - the firmware itself is `v1.5.4`,
-last code change 2026-10-26). Full dated narrative for everything below is in
+**Last Updated**: 2026-11-23 (documentation refresh - the firmware itself is `v1.5.5`,
+last code change 2026-11-23). Full dated narrative for everything below is in
 [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 **Current state**
-- Released through `v1.5.4` (tags `v1.5.0`-`v1.5.4`, 2026-10-26): XpressNet (MultiMaus),
+- Released through `v1.5.5` (tags `v1.5.0`-`v1.5.5`; 1.5.5 = OmniConnect naming on OLED/web pages, setup network `OmniConnect-Setup`): XpressNet (MultiMaus),
   Z21 LAN (WLANmaus), LocoNet (Digitrax UT6) and Ecos all bridged. Operating model: a
   change on any interface is mirrored to Ecos AND every other interface; Ecos is the
   DCC interface and the source of truth.

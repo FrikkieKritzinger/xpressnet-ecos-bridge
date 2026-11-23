@@ -114,7 +114,7 @@ Rules that follow from this: no `delay()` in `update()` paths; no slow debug out
 
 Settings that vary per installation live in EEPROM (`eeprom_config`/`eeprom_store`, magic + version + checksum): Wi-Fi SSID/password, Ecos IP, the bridge's own **static** IP/gateway/subnet (mandatory, no DHCP - Z21 clients cannot discover the bridge, so it must be at a known address), the XpressNet bus timeout and the loco inactivity timeout. `config.h` supplies only the seed defaults.
 
-**Setup Mode** is a separate operating mode (open AP `XNetBridge-Setup`, web form on port 80). It is entered when the EEPROM is blank/invalid/incomplete, when the pushbutton on D7/GPIO13 is held 3 s, or after 5 minutes of continuous Wi-Fi loss. Reboot-to-apply is signalled through ESP8266 RTC user memory (one-shot, no flash write). The same server exposes `/update`, an OTA firmware upload using the standard `ESP8266HTTPUpdateServer`; a failed upload only affects the staging region and cannot damage the running image.
+**Setup Mode** is a separate operating mode (open AP `OmniConnect-Setup`, web form on port 80). It is entered when the EEPROM is blank/invalid/incomplete, when the pushbutton on D7/GPIO13 is held 3 s, or after 5 minutes of continuous Wi-Fi loss. Reboot-to-apply is signalled through ESP8266 RTC user memory (one-shot, no flash write). The same server exposes `/update`, an OTA firmware upload using the standard `ESP8266HTTPUpdateServer`; a failed upload only affects the staging region and cannot damage the running image.
 
 ---
 
