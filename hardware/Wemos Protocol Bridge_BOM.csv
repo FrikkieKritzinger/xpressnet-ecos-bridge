@@ -24,7 +24,7 @@
 "RS485B_TP7","1","TP RS458 B","","","","TestPoint:TestPoint_Pad_D2.0mm",""
 "SW1","1","SW_SPST","","","","Button_Switch_THT:SW_Tactile_Straight_KSA0Axx1LFTR",""
 "U1","1","WeMos_mini","","","","RF_Module:WEMOS_D1_mini_light","http://www.wemos.cc/Products/d1_mini.html"
-"U2","1","LM7812_TO220","","","","Package_TO_SOT_THT:TO-220-3_Vertical","https://www.onsemi.cn/PowerSolutions/document/MC7800-D.PDF"
+"U2","1","Mean Well N7812 (LM7812 pin-compatible)","","","","Package_TO_SOT_THT:TO-220-3_Vertical",""
 "U3","1","WeMos_DC_Power_Shield","","","","library:WEMOS_DC_POWER_SHIELD","http://www.wemos.cc/Products/d1_mini.html"
 "U4","1","LM311","","","","Package_DIP:DIP-8_W7.62mm","https://www.st.com/resource/en/datasheet/lm311.pdf"
 "U5","1","ER_OLEDM0.91_1x-I2C","","","","Display:ER_OLEDM0.91_1x-I2C","https://www.buydisplay.com/download/manual/ER-OLEDM0.91-1_Datasheet.pdf"

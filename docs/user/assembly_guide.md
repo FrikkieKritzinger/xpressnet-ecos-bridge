@@ -144,6 +144,10 @@ The display's I2C address is normally 0x3C. The firmware uses it automatically.
 
 ## 5.1 XpressNet (J1)
 
+The socket is labelled **Xnet** on the enclosure lid.
+
+> **Important** J1 and J2 are **throttle sockets only**. They do not support boosters: the bus signals are not suitable for driving a booster, and the track signal always comes from the ECoS. Do not connect a booster, a command station or any track-power equipment to either socket.
+
 The sockets are standard RJ12. With the clip facing down and the socket facing you, pin 1 is on the left.
 
 | Pin | Signal | Notes |
@@ -159,6 +163,8 @@ A MultiMaus plugs in directly with a standard XpressNet cable. OmniConnect is th
 
 ## 5.2 LocoNet (J2)
 
+The socket is labelled **LNet-T** on the enclosure lid (T for throttles).
+
 | Pin | Signal | Notes |
 |---|---|---|
 | 1 | +12 V | Power for the throttle |
@@ -168,7 +174,7 @@ A MultiMaus plugs in directly with a standard XpressNet cable. OmniConnect is th
 | 5 | GND | |
 | 6 | not connected | |
 
-A UT6 and other LocoNet throttles plug in with a standard LocoNet cable. The socket is on the board's right front, marked LocoNet-T for throttles.
+A UT6 and other LocoNet throttles plug in with a standard LocoNet cable. The socket is on the board's right front.
 
 ## 5.3 LocoNet power jumper (J4, "LNet Pwr Master")
 
@@ -178,7 +184,7 @@ If you ever need OmniConnect to join a LocoNet that already has its own master, 
 
 ## 5.4 Setup button (SW1)
 
-The button, marked **SETUP**, is on the top left corner of the board when you face the unit with the XpressNet socket at the front left and the LocoNet-T socket at the front right. Hold it for **3 seconds** while the unit is running to enter Setup Mode.
+The button, marked **SETUP**, is on the top left corner of the board when you face the unit with the **Xnet** socket at the front left and the **LNet-T** socket at the front right. Hold it for **3 seconds** while the unit is running to enter Setup Mode.
 
 > **Note** The board is marked "Hold 5 Seconds" beside the button, to make it clear that the button must be **held**, not tapped. The firmware reacts after **3 seconds**, so holding it a little longer does no harm.
 

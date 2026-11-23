@@ -18,10 +18,12 @@ OmniConnect joins your XpressNet throttles (such as the Roco MultiMaus), Z21 LAN
 
 ## 1. Connect
 
-1. Plug your **XpressNet** throttle into the XpressNet socket. OmniConnect is the XpressNet master - never connect another command station or Z21 to the same XpressNet cable.
-2. Plug your **LocoNet** throttle into the LocoNet socket.
+1. Plug your **XpressNet** throttle into the socket marked **Xnet**. OmniConnect is the XpressNet master - never connect another command station or Z21 to the same XpressNet cable.
+2. Plug your **LocoNet** throttle into the socket marked **LNet-T**.
 3. Z21 throttles and apps need no cable: they join your Wi-Fi network (see step 4).
 4. Connect the power supply last.
+
+> **Important** The Xnet and LNet-T sockets are for **throttles only**. They cannot power or drive a **booster** or a track; connect no booster to either socket. The track signal always comes from the ECoS.
 
 > **Note** Wiring details for builders are in the OmniConnect Assembly and Connection Guide.
 
