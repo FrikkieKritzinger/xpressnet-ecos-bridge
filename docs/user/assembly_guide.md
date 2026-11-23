@@ -266,7 +266,7 @@ After this first load, all later updates can be made over Wi-Fi from the **/upda
 
 Connect in this order:
 
-1. The **ECoS** is on the same network as OmniConnect (a cable or Wi-Fi, as you already use).
+1. The **ECoS** is connected by Ethernet cable to your router, the same router OmniConnect joins by Wi-Fi (the ECoS has no Wi-Fi of its own).
 2. Plug the **XpressNet throttles** into J1, using standard XpressNet cables.
 3. Plug a **LocoNet throttle** into J2.
 4. Switch on **last**: connect the power supply. Z21 throttles use Wi-Fi.

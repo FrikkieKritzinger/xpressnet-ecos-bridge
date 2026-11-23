@@ -86,7 +86,7 @@ Throw a turnout on any throttle or on the ECoS and every other throttle that can
 
 ![Connection diagram](images/connections.png){w=13}
 
-> **Important** Both sockets are for **throttles only**. They carry no DCC signal and do **not** support boosters, and nothing that drives the track may be connected to them. The track signal always comes from the ECoS.
+> **Important** OmniConnect is the **master** on both sockets, and they are for **throttles only**: never connect a command station, a Z21 or a booster to either. They carry no DCC signal and do **not** support boosters, and nothing that drives the track may be connected to them. The track signal always comes from the ECoS.
 
 Wiring details, pin-outs and building instructions are in the **Assembly and Connection Guide**.
 

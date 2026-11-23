@@ -11,21 +11,21 @@ OmniConnect joins your XpressNet throttles (such as the Roco MultiMaus), Z21 LAN
 ## What you need
 
 - the OmniConnect unit and its 15 V DC power supply (13.6 V minimum)
-- your ECoS, on the same home network as OmniConnect, and its IP address
+- your ECoS, connected by **Ethernet cable** to the same router as OmniConnect's Wi-Fi network (the ECoS has no Wi-Fi of its own), and its IP address
 - your Wi-Fi network name and password (2.4 GHz)
 - one **free fixed IP address** on your network for OmniConnect (outside your router's automatic range), plus your router's address (gateway) and the subnet mask
 - a phone or computer with Wi-Fi, to do the one-time setup
 
 ## 1. Connect
 
-1. Plug your **XpressNet** throttle into the socket marked **Xnet**. OmniConnect is the XpressNet master - never connect another command station or Z21 to the same XpressNet cable.
+1. Plug your **XpressNet** throttle into the socket marked **Xnet**.
 2. Plug your **LocoNet** throttle into the socket marked **LNet-T**.
-3. Z21 throttles and apps need no cable: they join your Wi-Fi network (see step 4).
+3. Z21 throttles and apps need no cable. Add them as you would add any Z21 throttle to a Z21 network, following the throttle's own Z21 instructions, but enter **OmniConnect's IP address** (the fixed address you set in step 2 below) instead of the Z21's address.
 4. Connect the power supply last.
 
 ![How everything connects](images/connections.png){w=9.5}
 
-> **Important** The Xnet and LNet-T sockets are for **throttles only**. They carry no DCC signal, so they cannot drive a **booster** or a track; connect no booster to either socket. The track signal always comes from the ECoS.
+> **Important** OmniConnect is the **master** on both the Xnet and LNet-T sockets. They are for **throttles only**: never connect a command station, a Z21 or a **booster** to either socket. They carry no DCC signal, so they cannot drive a booster or a track. The track signal always comes from the ECoS.
 
 > **Note** Wiring details for builders are in the OmniConnect Assembly and Connection Guide.
 
