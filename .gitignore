@@ -77,3 +77,15 @@ docs/z21-lan-protokoll-en.pdf
 
 # Digitrax LocoNet Personal Use Edition spec - private-use licence, no redistribution
 docs/loconet-personal-use-edition-1.0.pdf
+
+# Hardware: KiCad local state, auto-backups and slicer/router working files (keep local only)
+hardware/.history/
+hardware/*-backups/
+hardware/*.kicad_prl
+hardware/*.lnk
+hardware/*.dsn
+hardware/enclosure/*.chitubox
+hardware/enclosure/*.cxdlpv4
+hardware/fp-info-cache
+hardware/*-backup
+hardware/_autosave-*

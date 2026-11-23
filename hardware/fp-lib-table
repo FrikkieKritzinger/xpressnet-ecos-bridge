@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "customLibrary") (type "KiCad") (uri "E:/Francois/Documents/KiCad/10.0/footprints/customLibrary.pretty") (options "") (descr ""))
+)
